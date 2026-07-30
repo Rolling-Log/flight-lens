@@ -1,0 +1,229 @@
+import cors from "@fastify/cors";
+import rateLimit from "@fastify/rate-limit";
+import {
+  createConnectorRegistry,
+  executeConnector,
+  type FlightConnector,
+} from "@flight-lens/connectors";
+import {
+  searchIntentSchema,
+  searchResponseSchema,
+  type ConnectorReport,
+  type Offer,
+  type SearchIntent,
+  type SearchResponse,
+} from "@flight-lens/contracts";
+import { createSearchAuditStore } from "@flight-lens/database";
+import {
+  deduplicateOffers,
+  disclosureStatement,
+  rankByLowestComparablePrice,
+  rankRecommended,
+  reviewOffers,
+} from "@flight-lens/domain";
+import Fastify, { type FastifyInstance } from "fastify";
+import type { ApiConfig } from "./config.js";
+import { OpenAIIntentParser, type IntentParser } from "./intent-parser.js";
+
+type SearchAuditStore = {
+  persist(payload: Parameters<ReturnType<typeof createSearchAuditStore>["persist"]>[0]): Promise<void>;
+  close(): Promise<void>;
+};
+
+type BuildAppOptions = {
+  config: ApiConfig;
+  connectors?: FlightConnector[];
+  auditStore?: SearchAuditStore | null;
+  intentParser?: IntentParser | null;
+};
+
+function coverage(reports: ConnectorReport[]) {
+  const successfulSources = reports.filter((report) =>
+    ["success", "empty"].includes(report.state),
+  ).length;
+  const timedOutSources = reports.filter((report) => report.state === "timeout").length;
+  return {
+    plannedSources: reports.length,
+    successfulSources,
+    failedSources: reports.length - successfulSources - timedOutSources,
+    timedOutSources,
+    statement: disclosureStatement(reports),
+  };
+}
+
+function liveComparableOffers(offers: Offer[], reports: ConnectorReport[]): Offer[] {
+  const findings = reviewOffers(offers, reports);
+  const blocked = new Set(
+    findings
+      .filter((finding) => finding.severity === "blocking" && finding.offerId)
+      .map((finding) => finding.offerId),
+  );
+  return offers.filter((offer) => !blocked.has(offer.id));
+}
+
+async function runSearch(
+  intent: SearchIntent,
+  connectors: FlightConnector[],
+  timeoutMs: number,
+): Promise<Omit<SearchResponse, "audit">> {
+  const requestId = crypto.randomUUID();
+  const executions = await Promise.all(
+    connectors.map((connector) => executeConnector(connector, intent, requestId, timeoutMs)),
+  );
+  const reports = executions.map((execution) => execution.report);
+  const normalized = deduplicateOffers(executions.flatMap((execution) => execution.result.offers));
+  const allowed = liveComparableOffers(normalized, reports);
+  const cheapest = rankByLowestComparablePrice(allowed);
+  const recommended = rankRecommended(allowed);
+
+  return {
+    requestId,
+    intent,
+    offers: normalized,
+    connectorReports: reports,
+    lowestComparableOfferId: cheapest[0]?.id ?? null,
+    recommendedOfferId: recommended[0]?.id ?? null,
+    disclosure: coverage(reports),
+  };
+}
+
+export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
+  const { config } = options;
+  const connectors = options.connectors ?? createConnectorRegistry(config.connectors);
+  const auditStore =
+    options.auditStore === undefined && config.databaseUrl
+      ? createSearchAuditStore(config.databaseUrl)
+      : options.auditStore ?? null;
+  const intentParser =
+    options.intentParser === undefined && config.openaiApiKey
+      ? new OpenAIIntentParser(config.openaiApiKey, config.openaiModel)
+      : options.intentParser ?? null;
+
+  const app = Fastify({
+    logger: config.nodeEnv === "test" ? false : { level: config.logLevel },
+    trustProxy: true,
+    bodyLimit: 64 * 1024,
+    requestIdHeader: false,
+    genReqId: () => crypto.randomUUID(),
+  });
+
+  await app.register(cors, {
+    origin(origin, callback) {
+      if (!origin || config.webOrigins.includes(origin)) return callback(null, true);
+      callback(new Error("Origin is not allowed."), false);
+    },
+    methods: ["GET", "POST"],
+  });
+  await app.register(rateLimit, {
+    max: 30,
+    timeWindow: "1 minute",
+  });
+
+  app.get("/health", async () => ({
+    status: "ok",
+    service: "flight-lens-api",
+    version: "v1-development",
+    database: auditStore ? "configured" : "unconfigured",
+    connectors: {
+      configured: connectors.length,
+      releaseMinimum: 2,
+    },
+    timestamp: new Date().toISOString(),
+  }));
+
+  app.get("/v1/meta/connectors", async () => ({
+    connectors: connectors.map((connector) => connector.metadata),
+    disclosure:
+      connectors.length >= 2
+        ? "Two or more connectors are configured. Real coverage still depends on each search response."
+        : "V1 release requires at least two configured and independently verified real-time sources.",
+  }));
+
+  app.post("/v1/intents/parse", async (request, reply) => {
+    const body = request.body as { text?: unknown };
+    if (typeof body?.text !== "string" || body.text.trim().length < 3 || body.text.length > 2_000) {
+      return reply.status(400).send({
+        error: {
+          code: "INVALID_INTENT_TEXT",
+          message: "请输入 3–2000 个字符的航班需求。",
+        },
+      });
+    }
+    if (!intentParser) {
+      return reply.status(503).send({
+        error: {
+          code: "INTENT_PARSER_UNCONFIGURED",
+          message: "对话解析尚未配置；你仍可使用完整条件表单。",
+        },
+      });
+    }
+    try {
+      return reply.status(200).send(await intentParser.parse(body.text.trim()));
+    } catch (error) {
+      request.log.error({ error }, "Intent parser failed");
+      return reply.status(502).send({
+        error: {
+          code: "INTENT_PARSE_FAILED",
+          message: "暂时无法解析这段需求，请修改表达或使用条件表单。",
+        },
+      });
+    }
+  });
+
+  app.post("/v1/searches", async (request, reply) => {
+    const parsed = searchIntentSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({
+        error: {
+          code: "INVALID_SEARCH_INTENT",
+          message: "搜索条件不完整或不合法。",
+          issues: parsed.error.issues,
+        },
+      });
+    }
+
+    if (connectors.length === 0) {
+      return reply.status(503).send({
+        error: {
+          code: "NO_LIVE_CONNECTORS",
+          message: "尚未配置合法实时来源；系统不会用演示价格冒充实时结果。",
+        },
+      });
+    }
+
+    const result = await runSearch(parsed.data, connectors, config.connectorTimeoutMs);
+    let audit: SearchResponse["audit"] = {
+      configured: Boolean(auditStore),
+      persisted: false,
+    };
+
+    if (auditStore) {
+      try {
+        await auditStore.persist({
+          requestId: result.requestId,
+          intent: result.intent,
+          status: "completed",
+          reports: result.connectorReports,
+          offers: result.offers,
+        });
+        audit = { configured: true, persisted: true };
+      } catch (error) {
+        request.log.error({ error, requestId: result.requestId }, "Failed to persist search audit");
+        audit = {
+          configured: true,
+          persisted: false,
+          errorCode: "AUDIT_PERSIST_FAILED",
+        };
+      }
+    }
+
+    const response = searchResponseSchema.parse({ ...result, audit });
+    return reply.status(200).send(response);
+  });
+
+  app.addHook("onClose", async () => {
+    if (auditStore) await auditStore.close();
+  });
+
+  return app;
+}
