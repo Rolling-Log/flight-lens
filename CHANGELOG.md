@@ -15,6 +15,7 @@
 - 增加统一预算/时间/行李过滤、六类确定性排序、缓存/重试披露和 Connector 健康端点；
 - 增加 Playwright 桌面和移动端 E2E，并接入 GitHub Actions。
 - 按零付费数据源原则移除 Wego Affiliate Flights 付费候选及其 Connector；
+- SerpApi 增加 `$0` 计划与剩余额度的 fail-closed 运行时门禁，并关闭自动灵活日期扩搜；
 - 依据最新官方规则否决与多源比较冲突的 Travelpayouts Search API。
 - 修正 Railway shared monorepo 构建、配置发现与平台 `PORT` 监听；
 - 增加 V1 硬门禁与 Netlify、Railway、Neon Staging Runbook。

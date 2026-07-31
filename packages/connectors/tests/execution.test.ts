@@ -234,6 +234,14 @@ test("forwards the original search parameters when resolving SerpApi booking opt
           : input.url,
     );
     requestedUrls.push(url);
+    if (url.pathname === "/account.json") {
+      return new Response(JSON.stringify({
+        account_status: "Active",
+        plan_monthly_price: 0,
+        plan_searches_left: 250,
+        total_searches_left: 250,
+      }), { status: 200 });
+    }
     if (url.searchParams.has("booking_token")) {
       return new Response(JSON.stringify({
         selected_flights: [{
@@ -290,6 +298,71 @@ test("forwards the original search parameters when resolving SerpApi booking opt
   assert.equal(bookingRequest?.searchParams.get("arrival_id"), "NRT");
   assert.equal(bookingRequest?.searchParams.get("outbound_date"), "2026-08-24");
   assert.equal(result.offers.length, 1);
+});
+
+test("refuses SerpApi paid plans before consuming a search credit", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const requestedUrls: URL[] = [];
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (input) => {
+    const url = new URL(
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url,
+    );
+    requestedUrls.push(url);
+    return new Response(JSON.stringify({
+      account_status: "Active",
+      plan_monthly_price: 25,
+      plan_searches_left: 1_000,
+    }), { status: 200 });
+  };
+
+  const connector = new SerpApiGoogleFlightsConnector({
+    apiKey: "test",
+    baseUrl: "https://serpapi.test",
+  });
+
+  await assert.rejects(
+    connector.search(intent, {
+      requestId: "request-paid-plan",
+      signal: new AbortController().signal,
+    }),
+    (error: unknown) =>
+      error instanceof ConnectorError && error.code === "SERPAPI_NON_FREE_PLAN",
+  );
+  assert.deepEqual(requestedUrls.map((url) => url.pathname), ["/account.json"]);
+});
+
+test("refuses a SerpApi search that could exceed the remaining free quota", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({
+      account_status: "Active",
+      plan_monthly_price: 0,
+      total_searches_left: 4,
+    }), { status: 200 });
+
+  const connector = new SerpApiGoogleFlightsConnector({
+    apiKey: "test",
+    baseUrl: "https://serpapi.test",
+  });
+
+  await assert.rejects(
+    connector.search(intent, {
+      requestId: "request-low-quota",
+      signal: new AbortController().signal,
+    }),
+    (error: unknown) =>
+      error instanceof ConnectorError && error.code === "SERPAPI_FREE_QUOTA_LOW",
+  );
 });
 
 test("retries one transient provider error and discloses the retry", async () => {
