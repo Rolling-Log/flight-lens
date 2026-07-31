@@ -2,6 +2,7 @@
 
 - 密钥只在服务端和托管平台 Secret 中；
 - 输入使用 Schema 校验；
+- 外部 AI 只生成候选意图，必须再次通过同一 `SearchIntent` Schema；它不能调用 Connector、生成价格或绕过确定性规则；
 - API 配置 CORS、限流、请求大小和超时；
 - 日志默认脱敏；
 - 不保存供应商 Token、支付或证件信息；

@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { createServer } from "node:http";
 
 const port = Number(globalThis.process.env.PORT ?? 4000);
@@ -129,7 +130,13 @@ function json(response, statusCode, body) {
   response.end(JSON.stringify(body));
 }
 
-const server = createServer((request, response) => {
+async function readJson(request) {
+  const chunks = [];
+  for await (const chunk of request) chunks.push(chunk);
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+const server = createServer(async (request, response) => {
   if (request.method === "OPTIONS") return json(response, 204, {});
 
   if (request.method === "GET" && request.url === "/health") {
@@ -137,6 +144,33 @@ const server = createServer((request, response) => {
   }
 
   if (request.method === "POST" && request.url === "/v1/intents/parse") {
+    const body = await readJson(request);
+    if (typeof body.text === "string" && body.text.includes("下个月广州")) {
+      return json(response, 200, {
+        ready: false,
+        draft: {
+          tripType: "one_way",
+          originCode: "CAN",
+          destinationCode: "SIN",
+          departureDate: null,
+          returnDate: null,
+          flexibleDays: 0,
+          adults: 1,
+          budgetAmountCny: null,
+          departureTimeEarliest: null,
+          departureTimeLatest: null,
+          directOnly: false,
+          maxStops: 1,
+          avoidRedEye: false,
+          minimumCheckedBaggageKg: 0,
+          includeNearbyAirports: false,
+          assumptions: [],
+          pendingQuestions: ["请确认下个月的具体出发日期。"],
+        },
+        intent: null,
+        parser: { kind: "local_deterministic_zh", model: "local-zh-v1" },
+      });
+    }
     return json(response, 200, {
       ready: true,
       draft: {
