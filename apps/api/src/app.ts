@@ -29,7 +29,12 @@ import {
 } from "@flight-lens/domain";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { ApiConfig } from "./config.js";
-import { OpenAIIntentParser, type IntentParser } from "./intent-parser.js";
+import {
+  FallbackIntentParser,
+  LocalChineseIntentParser,
+  OpenAIIntentParser,
+  type IntentParser,
+} from "./intent-parser.js";
 
 type SearchAuditStore = {
   persist(payload: Parameters<ReturnType<typeof createSearchAuditStore>["persist"]>[0]): Promise<void>;
@@ -110,16 +115,22 @@ async function runSearch(
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
   const { config } = options;
+  const now = options.now ?? (() => new Date());
   const connectors = options.connectors ?? createConnectorRegistry(config.connectors);
   const auditStore =
     options.auditStore === undefined && config.databaseUrl
       ? createSearchAuditStore(config.databaseUrl)
       : options.auditStore ?? null;
+  const localIntentParser = new LocalChineseIntentParser(now);
   const intentParser =
-    options.intentParser === undefined && config.openaiApiKey
-      ? new OpenAIIntentParser(config.openaiApiKey, config.openaiModel)
-      : options.intentParser ?? null;
-  const now = options.now ?? (() => new Date());
+    options.intentParser === undefined
+      ? config.openaiApiKey
+        ? new FallbackIntentParser(
+            new OpenAIIntentParser(config.openaiApiKey, config.openaiModel, now),
+            localIntentParser,
+          )
+        : localIntentParser
+      : options.intentParser;
 
   const app = Fastify({
     logger: config.nodeEnv === "test" ? false : { level: config.logLevel },

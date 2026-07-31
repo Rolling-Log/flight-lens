@@ -56,6 +56,70 @@ function initialIntent(): SearchIntent {
   };
 }
 
+function intentFromDraft(
+  draft: IntentParseResponse["draft"],
+  current: SearchIntent,
+): SearchIntent {
+  return {
+    schemaVersion: "1",
+    tripType: draft.tripType,
+    origin: {
+      kind: "airport",
+      code: draft.originCode ?? "",
+      ...(draft.originCode === current.origin.code && current.origin.name
+        ? { name: current.origin.name }
+        : {}),
+    },
+    destination: {
+      kind: "airport",
+      code: draft.destinationCode ?? "",
+      ...(draft.destinationCode === current.destination.code && current.destination.name
+        ? { name: current.destination.name }
+        : {}),
+    },
+    departureDate: draft.departureDate ?? "",
+    ...(draft.tripType === "round_trip"
+      ? { returnDate: draft.returnDate ?? "" }
+      : {}),
+    flexibleDays: draft.flexibleDays,
+    adults: draft.adults,
+    cabin: "economy",
+    ...(draft.budgetAmountCny
+      ? {
+          budget: {
+            amountMinor: draft.budgetAmountCny * 100,
+            currency: "CNY" as const,
+          },
+        }
+      : {}),
+    ...(draft.departureTimeEarliest || draft.departureTimeLatest
+      ? {
+          departureTime: {
+            ...(draft.departureTimeEarliest
+              ? { earliest: draft.departureTimeEarliest }
+              : {}),
+            ...(draft.departureTimeLatest
+              ? { latest: draft.departureTimeLatest }
+              : {}),
+          },
+        }
+      : {}),
+    directOnly: draft.directOnly,
+    maxStops: draft.maxStops,
+    avoidRedEye: draft.avoidRedEye,
+    minimumCheckedBaggageKg: draft.minimumCheckedBaggageKg,
+    includeNearbyAirports: draft.includeNearbyAirports,
+    explicitFields: [],
+    inferredFields: draft.assumptions.map((reason, index) => ({
+      path: `assumption.${index}`,
+      value: true,
+      confidence: 0.7,
+      reason,
+    })),
+    pendingQuestions: draft.pendingQuestions,
+  };
+}
+
 async function apiRequest<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
     method: "POST",
@@ -241,7 +305,7 @@ export default function Home() {
         text: query.trim(),
       });
       setParseResult(parsed);
-      if (parsed.intent) setIntent(parsed.intent);
+      setIntent((current) => parsed.intent ?? intentFromDraft(parsed.draft, current));
       if (!parsed.ready || !parsed.intent) {
         setMode("form");
         setError(
@@ -359,6 +423,11 @@ export default function Home() {
                     {" · "}
                     {parseResult.intent.adults} 位成人
                   </span>
+                  <small>
+                    {parseResult.parser.kind === "local_deterministic_zh"
+                      ? "本地规则解析 · 未调用外部 AI"
+                      : `AI 结构化解析 · ${parseResult.parser.model}`}
+                  </small>
                   <button type="button" onClick={() => setMode("form")}>打开完整表单修改</button>
                 </div>
               )}
@@ -455,7 +524,11 @@ export default function Home() {
               {parseResult && (
                 <div className="intent-review">
                   <b>对话条件已回填</b>
-                  <span>{parseResult.draft.assumptions.length} 项推断 · {parseResult.draft.pendingQuestions.length} 项待确认</span>
+                  <span>
+                    {parseResult.draft.assumptions.length} 项推断 · {parseResult.draft.pendingQuestions.length} 项待确认
+                    {" · "}
+                    {parseResult.parser.kind === "local_deterministic_zh" ? "本地解析" : "AI 解析"}
+                  </span>
                 </div>
               )}
             </div>

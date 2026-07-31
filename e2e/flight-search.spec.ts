@@ -62,3 +62,20 @@ test("agent input becomes an editable search and exposes source limits", async (
     ),
   ).toBeVisible();
 });
+
+test("an incomplete dialogue pre-fills known fields and leaves the missing date visible", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const query = page.getByLabel("直接说出完整需求，解析后可在表单中检查");
+  await query.fill("下个月广州飞新加坡，单程，1 位成人。");
+  await page.getByRole("button", { name: "开始检索" }).click();
+
+  await expect(
+    page.getByRole("alert").getByText("请确认下个月的具体出发日期。"),
+  ).toBeVisible();
+  await expect(page.getByLabel("出发地 IATA")).toHaveValue("CAN");
+  await expect(page.getByLabel("目的地 IATA")).toHaveValue("SIN");
+  await expect(page.getByLabel("出发日期")).toHaveValue("");
+  await expect(page.getByText(/0 项推断 · 1 项待确认 · 本地解析/)).toBeVisible();
+});

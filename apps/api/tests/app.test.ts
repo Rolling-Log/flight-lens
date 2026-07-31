@@ -72,6 +72,29 @@ test("keeps form search available when the AI parser is unconfigured", async () 
   await app.close();
 });
 
+test("uses deterministic local parsing when no OpenAI key is configured", async () => {
+  const app = await buildApp({
+    config,
+    connectors: [],
+    auditStore: null,
+    now: fixedNow,
+  });
+  const response = await app.inject({
+    method: "POST",
+    url: "/v1/intents/parse",
+    payload: {
+      text: "2026年8月24日上海飞东京，单程，1位成人，直飞。",
+    },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().ready, true);
+  assert.equal(response.json().parser.kind, "local_deterministic_zh");
+  assert.equal(response.json().intent.origin.code, "PVG");
+  assert.equal(response.json().intent.destination.code, "NRT");
+  await app.close();
+});
+
 test("returns transparent coverage for a configured empty source", async () => {
   const connector: FlightConnector = {
     metadata: {

@@ -128,7 +128,7 @@ export const intentParseResponseSchema = z.object({
   draft: searchIntentDraftSchema,
   intent: searchIntentSchema.nullable(),
   parser: z.object({
-    kind: z.literal("openai_structured_output"),
+    kind: z.enum(["openai_structured_output", "local_deterministic_zh"]),
     model: z.string(),
   }),
 });
