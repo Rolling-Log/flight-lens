@@ -14,6 +14,8 @@ Railway API
 Neon Postgres
 ```
 
+V2 的价格提醒与后台复查在同一个 Railway 项目内增加 Worker 和 Cron Service。V1 不部署独立 Worker；Redis 只有在 V3 前的吞吐与重试压测证明 Postgres 任务表不足时才引入。
+
 ## 原则
 
 - V1 使用模块化单体，不拆微服务；
@@ -23,6 +25,7 @@ Neon Postgres
 - 搜索请求有全局时限，每个来源有独立时限；
 - 搜索返回覆盖报告，失败不被伪装成“无票”；
 - V1 不引入 Redis，短期缓存和任务状态使用内存与 Postgres；
+- 外部航班 API 是数据源，不是本项目的额外部署平台；
 - 所有持久化变更通过 Migration。
 
 ## 环境

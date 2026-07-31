@@ -72,6 +72,31 @@ export const searchIntentSchema = z
         message: "Origin and destination must differ.",
       });
     }
+    if (value.returnDate && value.returnDate <= value.departureDate) {
+      context.addIssue({
+        code: "custom",
+        path: ["returnDate"],
+        message: "Return date must be after departure date.",
+      });
+    }
+    if (
+      value.departureTime?.earliest &&
+      value.departureTime.latest &&
+      value.departureTime.earliest > value.departureTime.latest
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["departureTime"],
+        message: "Departure time window must be chronological.",
+      });
+    }
+    if (value.directOnly && value.maxStops !== 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["maxStops"],
+        message: "Direct-only searches must set maximum stops to zero.",
+      });
+    }
   });
 
 export type SearchIntent = z.infer<typeof searchIntentSchema>;
@@ -85,6 +110,8 @@ export const searchIntentDraftSchema = z.object({
   flexibleDays: z.number().int().min(0).max(3),
   adults: z.number().int().min(1).max(9),
   budgetAmountCny: z.number().int().positive().nullable(),
+  departureTimeEarliest: z.string().regex(/^\d{2}:\d{2}$/).nullable(),
+  departureTimeLatest: z.string().regex(/^\d{2}:\d{2}$/).nullable(),
   directOnly: z.boolean(),
   maxStops: z.number().int().min(0).max(2),
   avoidRedEye: z.boolean(),
@@ -128,6 +155,7 @@ export const baggageAllowanceSchema = z.object({
 
 export const flightSegmentSchema = z.object({
   id: z.string().min(1),
+  legIndex: z.number().int().nonnegative(),
   marketingCarrier: z.string().min(2).max(3),
   operatingCarrier: z.string().min(2).max(3).optional(),
   flightNumber: z.string().min(1),
@@ -141,11 +169,23 @@ export const flightSegmentSchema = z.object({
   aircraftCode: z.string().optional(),
 });
 
+export const flightLegSchema = z.object({
+  id: z.string().min(1),
+  segmentIds: z.array(z.string().min(1)).min(1),
+  origin: airportRefSchema,
+  destination: airportRefSchema,
+  departureAt: z.union([isoDateTimeSchema, localDateTimeSchema]),
+  arrivalAt: z.union([isoDateTimeSchema, localDateTimeSchema]),
+  durationMinutes: z.number().int().positive(),
+  stopCount: z.number().int().nonnegative(),
+});
+
 export const sellerSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   kind: z.enum(["airline", "ota", "metasearch", "aggregator"]),
   deepLink: z.string().url().optional(),
+  handoffPrecision: z.enum(["exact_offer", "search_results"]).optional(),
 });
 
 export const offerSchema = z.object({
@@ -155,6 +195,7 @@ export const offerSchema = z.object({
   connectorId: z.string().min(1),
   environment: z.enum(["demo", "sandbox", "production"]),
   seller: sellerSchema,
+  legs: z.array(flightLegSchema).min(1),
   segments: z.array(flightSegmentSchema).min(1),
   priceComponents: z.array(priceComponentSchema).min(1),
   totalPrice: moneySchema,
@@ -195,6 +236,7 @@ export const connectorReportSchema = z.object({
   offerCount: z.number().int().nonnegative(),
   errorCode: z.string().optional(),
   retryable: z.boolean(),
+  notes: z.array(z.string()).default([]),
 });
 
 export type ConnectorReport = z.infer<typeof connectorReportSchema>;
@@ -206,6 +248,10 @@ export const searchResponseSchema = z.object({
   connectorReports: z.array(connectorReportSchema),
   lowestComparableOfferId: z.string().nullable(),
   recommendedOfferId: z.string().nullable(),
+  shortestOfferId: z.string().nullable(),
+  fewestStopsOfferId: z.string().nullable(),
+  bestBaggageOfferId: z.string().nullable(),
+  mostFlexibleOfferId: z.string().nullable(),
   disclosure: z.object({
     plannedSources: z.number().int().nonnegative(),
     successfulSources: z.number().int().nonnegative(),

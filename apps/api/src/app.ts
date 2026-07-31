@@ -3,6 +3,7 @@ import rateLimit from "@fastify/rate-limit";
 import {
   createConnectorRegistry,
   executeConnector,
+  type ConnectorExecutionPolicy,
   type FlightConnector,
 } from "@flight-lens/connectors";
 import {
@@ -15,10 +16,15 @@ import {
 } from "@flight-lens/contracts";
 import { createSearchAuditStore } from "@flight-lens/database";
 import {
+  applyIntentConstraints,
   deduplicateOffers,
   disclosureStatement,
+  rankByBestBaggage,
+  rankByFewestStops,
   rankByLowestComparablePrice,
   rankRecommended,
+  rankByRefundFlexibility,
+  rankByShortestDuration,
   reviewOffers,
 } from "@flight-lens/domain";
 import Fastify, { type FastifyInstance } from "fastify";
@@ -35,6 +41,7 @@ type BuildAppOptions = {
   connectors?: FlightConnector[];
   auditStore?: SearchAuditStore | null;
   intentParser?: IntentParser | null;
+  now?: () => Date;
 };
 
 function coverage(reports: ConnectorReport[]) {
@@ -65,16 +72,26 @@ async function runSearch(
   intent: SearchIntent,
   connectors: FlightConnector[],
   timeoutMs: number,
+  executionPolicy: ConnectorExecutionPolicy,
 ): Promise<Omit<SearchResponse, "audit">> {
   const requestId = crypto.randomUUID();
   const executions = await Promise.all(
-    connectors.map((connector) => executeConnector(connector, intent, requestId, timeoutMs)),
+    connectors.map((connector) =>
+      executeConnector(connector, intent, requestId, timeoutMs, executionPolicy),
+    ),
   );
   const reports = executions.map((execution) => execution.report);
-  const normalized = deduplicateOffers(executions.flatMap((execution) => execution.result.offers));
+  const normalized = applyIntentConstraints(
+    deduplicateOffers(executions.flatMap((execution) => execution.result.offers)),
+    intent,
+  );
   const allowed = liveComparableOffers(normalized, reports);
   const cheapest = rankByLowestComparablePrice(allowed);
   const recommended = rankRecommended(allowed);
+  const shortest = rankByShortestDuration(allowed);
+  const fewestStops = rankByFewestStops(allowed);
+  const bestBaggage = rankByBestBaggage(allowed);
+  const mostFlexible = rankByRefundFlexibility(allowed);
 
   return {
     requestId,
@@ -83,6 +100,10 @@ async function runSearch(
     connectorReports: reports,
     lowestComparableOfferId: cheapest[0]?.id ?? null,
     recommendedOfferId: recommended[0]?.id ?? null,
+    shortestOfferId: shortest[0]?.id ?? null,
+    fewestStopsOfferId: fewestStops[0]?.id ?? null,
+    bestBaggageOfferId: bestBaggage[0]?.id ?? null,
+    mostFlexibleOfferId: mostFlexible[0]?.id ?? null,
     disclosure: coverage(reports),
   };
 }
@@ -98,6 +119,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     options.intentParser === undefined && config.openaiApiKey
       ? new OpenAIIntentParser(config.openaiApiKey, config.openaiModel)
       : options.intentParser ?? null;
+  const now = options.now ?? (() => new Date());
 
   const app = Fastify({
     logger: config.nodeEnv === "test" ? false : { level: config.logLevel },
@@ -126,7 +148,13 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     database: auditStore ? "configured" : "unconfigured",
     connectors: {
       configured: connectors.length,
-      releaseMinimum: 2,
+      purchaseHandoffConfigured: connectors.filter(
+        (connector) => connector.metadata.resultRole === "purchase_handoff",
+      ).length,
+      verificationConfigured: connectors.filter(
+        (connector) => connector.metadata.resultRole === "verification",
+      ).length,
+      releaseMinimumPurchaseHandoff: 2,
     },
     timestamp: new Date().toISOString(),
   }));
@@ -134,10 +162,38 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.get("/v1/meta/connectors", async () => ({
     connectors: connectors.map((connector) => connector.metadata),
     disclosure:
-      connectors.length >= 2
-        ? "Two or more connectors are configured. Real coverage still depends on each search response."
-        : "V1 release requires at least two configured and independently verified real-time sources.",
+      connectors.filter((connector) => connector.metadata.resultRole === "purchase_handoff")
+        .length >= 2
+        ? "Two or more purchase-handoff connectors are configured. Real coverage still depends on each search response."
+        : "V1 release requires at least two independently verified real-time sources with a legal consumer purchase handoff.",
   }));
+
+  app.get("/v1/meta/connectors/health", async () => {
+    const checks = await Promise.all(
+      connectors.map(async (connector) => {
+        try {
+          const health = await connector.health(
+            AbortSignal.timeout(Math.min(config.connectorTimeoutMs, 5_000)),
+          );
+          return { ...connector.metadata, health };
+        } catch (error) {
+          return {
+            ...connector.metadata,
+            health: {
+              state: "unavailable" as const,
+              checkedAt: now().toISOString(),
+              detail: error instanceof Error ? error.message : "Unknown health-check failure",
+            },
+          };
+        }
+      }),
+    );
+    return {
+      connectors: checks,
+      healthy: checks.filter((connector) => connector.health.state === "healthy").length,
+      checkedAt: now().toISOString(),
+    };
+  });
 
   app.post("/v1/intents/parse", async (request, reply) => {
     const body = request.body as { text?: unknown };
@@ -182,6 +238,16 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       });
     }
 
+    const today = now().toISOString().slice(0, 10);
+    if (parsed.data.departureDate < today) {
+      return reply.status(400).send({
+        error: {
+          code: "SEARCH_DATE_IN_PAST",
+          message: "出发日期不能早于今天。",
+        },
+      });
+    }
+
     if (connectors.length === 0) {
       return reply.status(503).send({
         error: {
@@ -191,7 +257,17 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       });
     }
 
-    const result = await runSearch(parsed.data, connectors, config.connectorTimeoutMs);
+    const result = await runSearch(parsed.data, connectors, config.connectorTimeoutMs, {
+      ...(config.connectorMaxRetries === undefined
+        ? {}
+        : { maxRetries: config.connectorMaxRetries }),
+      ...(config.connectorCacheTtlMs === undefined
+        ? {}
+        : { cacheTtlMs: config.connectorCacheTtlMs }),
+      ...(config.connectorStaleIfErrorMs === undefined
+        ? {}
+        : { staleIfErrorMs: config.connectorStaleIfErrorMs }),
+    });
     let audit: SearchResponse["audit"] = {
       configured: Boolean(auditStore),
       persisted: false,

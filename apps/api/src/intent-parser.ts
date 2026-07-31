@@ -17,6 +17,8 @@ const modelDraftSchema = z.object({
   flexibleDays: z.number().int().min(0).max(3),
   adults: z.number().int().min(1).max(9),
   budgetAmountCny: z.number().int().positive().nullable(),
+  departureTimeEarliest: z.string().regex(/^\d{2}:\d{2}$/).nullable(),
+  departureTimeLatest: z.string().regex(/^\d{2}:\d{2}$/).nullable(),
   directOnly: z.boolean(),
   maxStops: z.number().int().min(0).max(2),
   avoidRedEye: z.boolean(),
@@ -51,7 +53,9 @@ export class OpenAIIntentParser implements IntentParser {
             "你是航班检索条件解析器，只提取用户明确表达或可保守推断的条件。",
             "机场和城市必须输出 IATA 三字码；不确定时输出 null 并提出问题。",
             "相对日期必须以当前中国时区日期为基准转成 YYYY-MM-DD。",
+            "用户表达早班、晚班或明确时间范围时，用 24 小时 HH:MM 填入出发时间上下界；没有说明时为 null。",
             "用户没有说明时：1 名成人、经济舱、最多 1 次中转、日期不浮动、无行李要求。",
+            "directOnly 为 true 时 maxStops 必须为 0。",
             "不得生成票价、航班、平台或搜索结果。所有推断写入 assumptions。",
           ].join("\n"),
         },
@@ -89,6 +93,17 @@ export class OpenAIIntentParser implements IntentParser {
             budget: draft.budgetAmountCny
               ? { amountMinor: draft.budgetAmountCny * 100, currency: "CNY" }
               : undefined,
+            departureTime:
+              draft.departureTimeEarliest || draft.departureTimeLatest
+                ? {
+                    ...(draft.departureTimeEarliest
+                      ? { earliest: draft.departureTimeEarliest }
+                      : {}),
+                    ...(draft.departureTimeLatest
+                      ? { latest: draft.departureTimeLatest }
+                      : {}),
+                  }
+                : undefined,
             directOnly: draft.directOnly,
             maxStops: draft.maxStops,
             avoidRedEye: draft.avoidRedEye,
