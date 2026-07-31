@@ -19,7 +19,18 @@ type SortKey =
   | "flexibility";
 type BusyState = "idle" | "parsing" | "searching";
 
-const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
+function apiBase(): string {
+  if (process.env.NEXT_PUBLIC_API_BASE_URL) {
+    return process.env.NEXT_PUBLIC_API_BASE_URL;
+  }
+  if (
+    typeof window !== "undefined" &&
+    ["127.0.0.1", "localhost"].includes(window.location.hostname)
+  ) {
+    return "http://127.0.0.1:4000";
+  }
+  return "";
+}
 
 function dateFromToday(days: number): string {
   const date = new Date();
@@ -121,7 +132,7 @@ function intentFromDraft(
 }
 
 async function apiRequest<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`${apiBase}${path}`, {
+  const response = await fetch(`${apiBase()}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),

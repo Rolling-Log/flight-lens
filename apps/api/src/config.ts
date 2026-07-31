@@ -15,6 +15,10 @@ const envSchema = z.object({
   WEB_ORIGINS: z.string().default("http://localhost:3000"),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
   DATABASE_URL: optionalNonEmpty,
+  OPENAI_INTENT_PARSER_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
   OPENAI_API_KEY: optionalNonEmpty,
   OPENAI_MODEL: z.string().trim().min(1).default("gpt-5.6-luna"),
   SKYSCANNER_API_KEY: optionalNonEmpty,
@@ -47,6 +51,7 @@ export type ApiConfig = {
   webOrigins: string[];
   logLevel: string;
   databaseUrl?: string;
+  openaiIntentParserEnabled: boolean;
   openaiApiKey?: string;
   openaiModel: string;
   connectorTimeoutMs: number;
@@ -75,6 +80,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     webOrigins: parsed.WEB_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean),
     logLevel: parsed.LOG_LEVEL,
     ...(parsed.DATABASE_URL ? { databaseUrl: parsed.DATABASE_URL } : {}),
+    openaiIntentParserEnabled: parsed.OPENAI_INTENT_PARSER_ENABLED,
     ...(parsed.OPENAI_API_KEY ? { openaiApiKey: parsed.OPENAI_API_KEY } : {}),
     openaiModel: parsed.OPENAI_MODEL,
     connectorTimeoutMs: parsed.CONNECTOR_TIMEOUT_MS,
