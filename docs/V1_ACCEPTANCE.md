@@ -9,12 +9,12 @@ V1 的目标不是证明“能显示航班”，而是证明系统能稳定、�
 | 双输入 | 对话输入与结构化表单生成同一 `SearchIntent`，用户搜索前可确认和修改 | 已通过自动化测试 |
 | 两个实时来源 | 至少两个独立 Connector 完成受控生产查询 | 1/2；SerpApi 已通过，Skyscanner 等待审批 |
 | 购买交接 | 每个计入最低价的来源都有合法消费者落点，并披露精确 Offer 或结果页重选 | SerpApi 已通过一次；第二来源待验证 |
-| 全价口径 | 币种、税费、必需费用、行李、资格条件和未知项可见 | 已通过契约与领域测试；待 Staging 人工抽查 |
+| 全价口径 | 币种、税费、必需费用、行李、资格条件和未知项可见 | 契约、领域测试与 SerpApi Staging 响应已通过；行李与退改未知项未伪造 |
 | 失败透明 | 成功、超时、失败、缓存和部分覆盖都显示，不以空结果冒充无航班 | 已通过自动化测试 |
 | 确定性排序 | 最低价、推荐、最短时间、最少中转等排序不由模型直接决定 | 已通过自动化测试 |
-| 安全与合规 | 密钥仅服务端、输入校验、限流、CORS、跳转白名单和供应商条款记录 | 自动化部分通过；待 Staging 配置审查 |
-| 零付费来源 | 数据源为长期 `$0` 或不收费的 revenue-share 合作；无试用转收费、自动升级或超额扣费 | SerpApi Free 与 Skyscanner 符合；需做配额硬停止 |
-| 前后端数据库 Staging | 独立 Netlify Staging 项目承载 Web + Functions，连接 Neon Staging 分支，完成端到端查询和审计落库 | Netlify Draft 与 Neon 三分支已创建；凭据注入、迁移和真实搜索待完成 |
+| 安全与合规 | 密钥仅服务端、输入校验、限流、CORS、跳转白名单和供应商条款记录 | Staging 已验证 secret 注入、同域 API、限流及安全响应头；第二来源条款待审批后复核 |
+| 零付费来源 | 数据源为长期 `$0` 或不收费的 revenue-share 合作；无试用转收费、自动升级或超额扣费 | SerpApi Free 的账户状态与配额硬停止已验证；Skyscanner 等待审批 |
+| 前后端数据库 Staging | 独立 Netlify Staging 项目承载 Web + Functions，连接 Neon Staging 分支，完成端到端查询和审计落库 | 已通过：Netlify Draft + Functions、Neon Staging 迁移、真实检索与审计落库 |
 | 回滚 | 候选提交可重建，部署平台可回到上一个已验证版本 | 待 Staging 演练 |
 | 用户确认 | 用户确认 V1 候选后才允许合并 `main`、打 Tag、正式推送和生产部署 | 未开始 |
 
@@ -34,6 +34,25 @@ V1 的目标不是证明“能显示航班”，而是证明系统能稳定、�
 8. 缓存命中和 stale-if-error 降级。
 
 真实供应商测试应控制调用量；不得把本地密钥、响应中的供应商 Token 或个人信息写入仓库和验收报告。
+
+## 已完成的 Staging 证据
+
+记录时间：2026-07-31 15:52 CST。
+
+- Git 候选提交：`54b95a1`；
+- Netlify 项目：`flight-lens-staging`，候选 Deploy：`6a6c54128e4b3bdad34248a0`；
+- Neon 项目：`flight-lens`，独立 `staging` 分支；迁移成功；
+- `/api/health`：HTTP 200，数据库为 `configured`，本地确定性中文解析器启用，1 个实时 Connector 已配置；
+- SerpApi 账户健康：`healthy`，仅允许活动中的 `$0` 套餐并在免费配额不足时硬停止；
+- 受控样本：北京首都 `PEK` → 上海浦东 `PVG`，2026-08-20，单程直飞；
+- 检索结果：HTTP 200，4 个可比报价，观察到的最低展示价为 CNY 500，售卖方标示为 Trip.com，消费者落点为 Google Flights 结果页重选；
+- 数据质量：`Y8 7596`、`CA 1883`、`CA 8357`、`CA 8331` 的承运人和班次拆分正确；
+- 覆盖披露：计划 1 个来源、成功 1 个、失败 0 个、超时 0 个；没有宣称“全网最低”；
+- 审计：`configured=true`、`persisted=true`；
+- 安全：页面与 API 均返回 `nosniff`、`DENY`、Referrer Policy、Permissions Policy、COOP 与 HSTS；API 返回限流头；
+- 凭据：数据库密码在配置过程中完成轮换，旧连接串失效；Netlify 中的 `DATABASE_URL` 与 `SERPAPI_API_KEY` 均为 secret；迁移后系统剪贴板已清空。
+
+价格是当时的上游观察值，不构成持续报价。V1 正式发布门禁仍为 1/2 来源，Skyscanner 未审批前不得称为正式 V1。
 
 ## 版本确认顺序
 
