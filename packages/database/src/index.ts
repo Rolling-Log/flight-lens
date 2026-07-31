@@ -1,3 +1,4 @@
+import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema.js";
@@ -126,6 +127,141 @@ export function createSearchAuditStore(url: string) {
     },
     close: database.close,
   };
+}
+
+export type PriceVerificationOutcome = "observed" | "sold_out" | "landing_unavailable";
+
+export type PriceVerificationInput = {
+  normalizedOfferId: string;
+  outcome: PriceVerificationOutcome;
+  observedAmountMinor?: number;
+  currency: string;
+  evidenceRef: string;
+};
+
+export type PriceDeviation = {
+  deltaMinor: number;
+  absoluteBasisPoints: number;
+};
+
+export function calculatePriceDeviation(
+  expectedAmountMinor: number,
+  observedAmountMinor: number,
+): PriceDeviation {
+  if (!Number.isSafeInteger(expectedAmountMinor) || expectedAmountMinor <= 0) {
+    throw new Error("Expected amount must be a positive integer in minor units.");
+  }
+  if (!Number.isSafeInteger(observedAmountMinor) || observedAmountMinor < 0) {
+    throw new Error("Observed amount must be a non-negative integer in minor units.");
+  }
+  const deltaMinor = observedAmountMinor - expectedAmountMinor;
+  return {
+    deltaMinor,
+    absoluteBasisPoints: Math.round(
+      Math.abs(deltaMinor) / expectedAmountMinor * 10_000,
+    ),
+  };
+}
+
+export async function recordPriceVerification(
+  url: string,
+  input: PriceVerificationInput,
+) {
+  if (
+    !input.normalizedOfferId.trim() ||
+    input.normalizedOfferId.length > 500 ||
+    /[\r\n]/.test(input.normalizedOfferId)
+  ) {
+    throw new Error("Normalized offer ID must be a single non-empty line up to 500 characters.");
+  }
+  if (!/^[A-Z]{3}$/.test(input.currency)) {
+    throw new Error("Currency must be an uppercase ISO 4217 code.");
+  }
+  if (
+    !input.evidenceRef.trim() ||
+    input.evidenceRef.length > 500 ||
+    /[\r\n]/.test(input.evidenceRef)
+  ) {
+    throw new Error("Evidence reference must be a single non-empty line up to 500 characters.");
+  }
+  if (
+    input.outcome === "observed" &&
+    (!Number.isSafeInteger(input.observedAmountMinor) ||
+      (input.observedAmountMinor ?? -1) < 0)
+  ) {
+    throw new Error("Observed outcome requires a non-negative amount in minor units.");
+  }
+  if (input.outcome !== "observed" && input.observedAmountMinor !== undefined) {
+    throw new Error("Only an observed outcome can include an amount.");
+  }
+
+  const database = createDatabase(url);
+  try {
+    const [offer] = await database.db
+      .select({
+        id: schema.offers.id,
+        currency: schema.offers.currency,
+      })
+      .from(schema.offers)
+      .where(eq(schema.offers.normalizedOfferId, input.normalizedOfferId))
+      .orderBy(desc(schema.offers.fetchedAt))
+      .limit(1);
+    if (!offer) throw new Error("No stored offer matches the normalized offer ID.");
+    if (offer.currency !== input.currency) {
+      throw new Error(
+        `Currency mismatch: stored offer is ${offer.currency}, observation is ${input.currency}.`,
+      );
+    }
+
+    const [verification] = await database.db
+      .select()
+      .from(schema.priceVerifications)
+      .where(eq(schema.priceVerifications.offerId, offer.id))
+      .orderBy(desc(schema.priceVerifications.verifiedAt))
+      .limit(1);
+    if (!verification) throw new Error("The stored offer has no verification record.");
+
+    const deviation =
+      input.outcome === "observed"
+        ? calculatePriceDeviation(
+            verification.expectedAmountMinor,
+            input.observedAmountMinor!,
+          )
+        : null;
+    const state =
+      input.outcome === "observed"
+        ? deviation?.deltaMinor === 0
+          ? "verified_match"
+          : "verified_price_changed"
+        : input.outcome;
+    const verifiedAt = new Date();
+
+    await database.db
+      .update(schema.priceVerifications)
+      .set({
+        observedAmountMinor:
+          input.outcome === "observed" ? input.observedAmountMinor : null,
+        state,
+        evidenceRef: input.evidenceRef,
+        verifiedAt,
+      })
+      .where(eq(schema.priceVerifications.id, verification.id));
+
+    return {
+      verificationId: verification.id,
+      normalizedOfferId: input.normalizedOfferId,
+      expectedAmountMinor: verification.expectedAmountMinor,
+      observedAmountMinor:
+        input.outcome === "observed" ? input.observedAmountMinor! : null,
+      currency: input.currency,
+      state,
+      deviation,
+      evidenceRef: input.evidenceRef,
+      verifiedAt: verifiedAt.toISOString(),
+    };
+  } finally {
+    await database.close();
+  }
 }
 
 export { schema };

@@ -22,3 +22,12 @@
 V1 对 leg 与 segment 的引用关系、机场、时间、经停数和总耗时执行确定性一致性校验；不一致的 Offer 不参与最低价或推荐。
 
 Neon 审计写入每个可比 Offer 时同步建立一条 `pending_landing_page_verification` 价格核验记录，保存当时预期金额、币种和最小证据引用。后续观察到来源最终页价格后更新 `observedAmountMinor` 和状态；未复核时不得计算为已验证偏差。
+
+受控运维核价使用数据库包的 `price:verify` CLI，不开放匿名公网写接口。状态包括：
+
+- `verified_match`：观察价与预期价一致；
+- `verified_price_changed`：观察价与预期价不同；
+- `sold_out`：来源落地页已无票；
+- `landing_unavailable`：落地页无法完成核验。
+
+偏差以 `observed - expected` 的最小货币单位和绝对基点计算；100 基点等于 1%。证据只保存脱敏引用，不保存带 Token 的完整跳转 URL、Cookie 或个人信息。
