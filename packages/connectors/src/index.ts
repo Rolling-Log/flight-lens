@@ -1,7 +1,6 @@
 import type { ConnectorReport, Offer, SearchIntent } from "@flight-lens/contracts";
 import { ConnectorError, providerHttpError } from "./errors.js";
 import { SkyscannerConnector } from "./skyscanner.js";
-import { WegoConnector } from "./wego.js";
 
 export { ConnectorError } from "./errors.js";
 export {
@@ -9,12 +8,6 @@ export {
   mapSkyscannerSearchResults,
   type SkyscannerSearchPayload,
 } from "./skyscanner.js";
-export {
-  WegoConnector,
-  mapWegoSearchResults,
-  type WegoSearchPayload,
-} from "./wego.js";
-
 export type ConnectorEnvironment = "sandbox" | "production";
 
 export type ConnectorMetadata = {
@@ -314,8 +307,6 @@ export type ConnectorRegistryConfig = {
   amadeusBaseUrl?: string;
   duffelAccessToken?: string;
   duffelBaseUrl?: string;
-  wegoClientId?: string;
-  wegoBaseUrl?: string;
 };
 
 export function createConnectorRegistry(config: ConnectorRegistryConfig): FlightConnector[] {
@@ -333,14 +324,6 @@ export function createConnectorRegistry(config: ConnectorRegistryConfig): Flight
       new SerpApiGoogleFlightsConnector({
         apiKey: config.serpApiKey,
         baseUrl: config.serpApiBaseUrl ?? "https://serpapi.com",
-      }),
-    );
-  }
-  if (config.wegoClientId) {
-    connectors.push(
-      new WegoConnector({
-        clientId: config.wegoClientId,
-        baseUrl: config.wegoBaseUrl ?? "https://affiliate-api.wego.com",
       }),
     );
   }
@@ -622,6 +605,13 @@ type CompleteSerpApiChoice = {
   bookingToken: string;
 };
 
+type SerpApiAccountPayload = {
+  account_status?: string;
+  plan_monthly_price?: number;
+  plan_searches_left?: number;
+  total_searches_left?: number;
+};
+
 export class SerpApiGoogleFlightsConnector implements FlightConnector {
   readonly metadata: ConnectorMetadata;
 
@@ -635,18 +625,25 @@ export class SerpApiGoogleFlightsConnector implements FlightConnector {
       resultRole: "purchase_handoff",
       handoff: "deep_link",
       configured: true,
+      supportsFlexibleDateProbe: false,
     };
   }
 
   async health(signal: AbortSignal): Promise<ConnectorHealth> {
     try {
-      const url = new URL("/account.json", this.config.baseUrl);
-      url.searchParams.set("api_key", this.config.apiKey);
-      const response = await fetch(url, { signal });
+      const account = await this.account(signal);
+      const remaining = account.total_searches_left ?? account.plan_searches_left;
+      const freeAndUsable =
+        account.account_status === "Active" &&
+        account.plan_monthly_price === 0 &&
+        typeof remaining === "number" &&
+        remaining >= 5;
       return {
-        state: response.ok ? "healthy" : "degraded",
+        state: freeAndUsable ? "healthy" : "degraded",
         checkedAt: new Date().toISOString(),
-        ...(response.ok ? {} : { detail: `HTTP ${response.status}` }),
+        ...(freeAndUsable
+          ? {}
+          : { detail: "SerpApi must be an active $0 plan with enough free credits." }),
       };
     } catch (error) {
       return {
@@ -658,6 +655,7 @@ export class SerpApiGoogleFlightsConnector implements FlightConnector {
   }
 
   async search(intent: SearchIntent, context: ConnectorSearchContext): Promise<ConnectorSearchResult> {
+    await this.ensureFreeQuota(intent, context.signal);
     const searchParameters: Record<string, string> = {
       departure_id: intent.origin.code,
       arrival_id: intent.destination.code,
@@ -725,6 +723,39 @@ export class SerpApiGoogleFlightsConnector implements FlightConnector {
         ? { providerRequestId: initial.search_metadata.id }
         : {}),
     };
+  }
+
+  private async ensureFreeQuota(intent: SearchIntent, signal: AbortSignal): Promise<void> {
+    const account = await this.account(signal);
+    if (account.account_status !== "Active" || account.plan_monthly_price !== 0) {
+      throw new ConnectorError(
+        "SerpApi is disabled because only an active $0 plan is permitted.",
+        "SERPAPI_NON_FREE_PLAN",
+        "unavailable",
+        false,
+      );
+    }
+    const remaining = account.total_searches_left ?? account.plan_searches_left;
+    const requiredCredits = intent.tripType === "round_trip" ? 9 : 5;
+    if (typeof remaining !== "number" || remaining < requiredCredits) {
+      throw new ConnectorError(
+        "SerpApi free quota is too low for a bounded flight search.",
+        "SERPAPI_FREE_QUOTA_LOW",
+        "unavailable",
+        false,
+      );
+    }
+  }
+
+  private async account(signal: AbortSignal): Promise<SerpApiAccountPayload> {
+    const url = new URL("/account.json", this.config.baseUrl);
+    url.searchParams.set("api_key", this.config.apiKey);
+    const response = await fetch(url, {
+      headers: { accept: "application/json" },
+      signal,
+    });
+    if (!response.ok) throw await providerHttpError("SERPAPI_ACCOUNT", response);
+    return await response.json() as SerpApiAccountPayload;
   }
 
   private async completeRoundTrips(

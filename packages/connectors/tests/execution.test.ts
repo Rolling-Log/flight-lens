@@ -7,9 +7,7 @@ import {
   executeConnector,
   mapSerpApiBookingPayload,
   mapSkyscannerSearchResults,
-  mapWegoSearchResults,
   SerpApiGoogleFlightsConnector,
-  WegoConnector,
   type FlightConnector,
 } from "../src/index.js";
 
@@ -236,6 +234,14 @@ test("forwards the original search parameters when resolving SerpApi booking opt
           : input.url,
     );
     requestedUrls.push(url);
+    if (url.pathname === "/account.json") {
+      return new Response(JSON.stringify({
+        account_status: "Active",
+        plan_monthly_price: 0,
+        plan_searches_left: 250,
+        total_searches_left: 250,
+      }), { status: 200 });
+    }
     if (url.searchParams.has("booking_token")) {
       return new Response(JSON.stringify({
         selected_flights: [{
@@ -292,6 +298,71 @@ test("forwards the original search parameters when resolving SerpApi booking opt
   assert.equal(bookingRequest?.searchParams.get("arrival_id"), "NRT");
   assert.equal(bookingRequest?.searchParams.get("outbound_date"), "2026-08-24");
   assert.equal(result.offers.length, 1);
+});
+
+test("refuses SerpApi paid plans before consuming a search credit", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const requestedUrls: URL[] = [];
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (input) => {
+    const url = new URL(
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url,
+    );
+    requestedUrls.push(url);
+    return new Response(JSON.stringify({
+      account_status: "Active",
+      plan_monthly_price: 25,
+      plan_searches_left: 1_000,
+    }), { status: 200 });
+  };
+
+  const connector = new SerpApiGoogleFlightsConnector({
+    apiKey: "test",
+    baseUrl: "https://serpapi.test",
+  });
+
+  await assert.rejects(
+    connector.search(intent, {
+      requestId: "request-paid-plan",
+      signal: new AbortController().signal,
+    }),
+    (error: unknown) =>
+      error instanceof ConnectorError && error.code === "SERPAPI_NON_FREE_PLAN",
+  );
+  assert.deepEqual(requestedUrls.map((url) => url.pathname), ["/account.json"]);
+});
+
+test("refuses a SerpApi search that could exceed the remaining free quota", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({
+      account_status: "Active",
+      plan_monthly_price: 0,
+      total_searches_left: 4,
+    }), { status: 200 });
+
+  const connector = new SerpApiGoogleFlightsConnector({
+    apiKey: "test",
+    baseUrl: "https://serpapi.test",
+  });
+
+  await assert.rejects(
+    connector.search(intent, {
+      requestId: "request-low-quota",
+      signal: new AbortController().signal,
+    }),
+    (error: unknown) =>
+      error instanceof ConnectorError && error.code === "SERPAPI_FREE_QUOTA_LOW",
+  );
 });
 
 test("retries one transient provider error and discloses the retry", async () => {
@@ -549,186 +620,4 @@ test("keeps Skyscanner multi-ticket handoffs out of comparable results", () => {
     offers[0]?.incomparabilityReasons.includes("MULTIPLE_PURCHASE_HANDOFFS"),
     true,
   );
-});
-
-test("maps a Wego fare only with its official handoff and actual seller", () => {
-  const offers = mapWegoSearchResults(
-    {
-      search: { id: "wego-search-1" },
-      airports: [
-        { code: "PVG", name: "上海浦东国际机场" },
-        { code: "NRT", name: "东京成田国际机场" },
-      ],
-      providers: [{ code: "example-airline", name: "示例航空", type: "airline" }],
-      legs: [{
-        id: "leg-1",
-        departureDateTime: "2026-08-24T09:00:00.000+08:00",
-        arrivalDateTime: "2026-08-24T13:00:00.000+09:00",
-        durationMinutes: 180,
-        segments: [{
-          departureAirportCode: "PVG",
-          arrivalAirportCode: "NRT",
-          durationMinutes: 180,
-          airlineCode: "MU",
-          operatingAirlineCode: "MU",
-          designatorCode: "MU523",
-          departureDateTime: "2026-08-24T09:00:00.000+08:00",
-          arrivalDateTime: "2026-08-24T13:00:00.000+09:00",
-        }],
-      }],
-      trips: [{ id: "trip-1", legIds: ["leg-1"] }],
-      fares: [{
-        id: "fare-1",
-        tripId: "trip-1",
-        providerCode: "example-airline",
-        handoffUrl:
-          "https://handoff.wego.com/flights/continue?fare_id=fare-1&search_id=wego-search-1",
-        price: { totalAmount: 1402, currencyCode: "CNY" },
-        refundable: false,
-        exchangeable: true,
-      }],
-    },
-    "request-wego-1",
-  );
-
-  assert.equal(offers.length, 1);
-  assert.equal(offers[0]?.seller.name, "示例航空");
-  assert.equal(offers[0]?.seller.kind, "airline");
-  assert.equal(offers[0]?.totalPrice.amountMinor, 140200);
-  assert.equal(offers[0]?.seller.handoffPrecision, "exact_offer");
-  assert.equal(offers[0]?.comparable, true);
-});
-
-test("rejects a non-Wego redirect from Wego comparable results", () => {
-  const offers = mapWegoSearchResults(
-    {
-      providers: [{ code: "example-ota", name: "示例票代", type: "ota" }],
-      legs: [{
-        id: "leg-1",
-        durationMinutes: 180,
-        segments: [{
-          departureAirportCode: "PVG",
-          arrivalAirportCode: "NRT",
-          durationMinutes: 180,
-          airlineCode: "MU",
-          designatorCode: "MU523",
-          departureDateTime: "2026-08-24T09:00:00+08:00",
-          arrivalDateTime: "2026-08-24T13:00:00+09:00",
-        }],
-      }],
-      trips: [{ id: "trip-1", legIds: ["leg-1"] }],
-      fares: [{
-        id: "fare-evil",
-        tripId: "trip-1",
-        providerCode: "example-ota",
-        handoffUrl: "https://evil.example/continue",
-        price: { totalAmount: 999, currencyCode: "CNY" },
-      }],
-    },
-    "request-wego-evil",
-  );
-
-  assert.equal(offers[0]?.comparable, false);
-  assert.equal(
-    offers[0]?.incomparabilityReasons.includes("NO_PURCHASE_HANDOFF"),
-    true,
-  );
-});
-
-test("runs Wego token, start, and stable-count polling as one user search", async (t) => {
-  const originalFetch = globalThis.fetch;
-  const requested: Array<{ url: URL; method: string; body?: unknown }> = [];
-  let resultPolls = 0;
-  t.after(() => {
-    globalThis.fetch = originalFetch;
-  });
-  globalThis.fetch = async (input, init) => {
-    const url = new URL(
-      typeof input === "string"
-        ? input
-        : input instanceof URL
-          ? input.href
-          : input.url,
-    );
-    const method = init?.method ?? "GET";
-    const body =
-      typeof init?.body === "string"
-        ? JSON.parse(init.body) as unknown
-        : undefined;
-    requested.push({ url, method, ...(body ? { body } : {}) });
-    if (url.pathname === "/apps/oauth/token") {
-      return new Response(JSON.stringify({
-        access_token: "wego-token",
-        expires_in: 43_200,
-      }), { status: 200 });
-    }
-    if (url.pathname === "/metasearch/flights/searches" && method === "POST") {
-      return new Response(JSON.stringify({
-        search: { id: "wego-search-2" },
-      }), { status: 200 });
-    }
-    resultPolls += 1;
-    if (resultPolls === 1) {
-      return new Response(JSON.stringify({
-        count: 0,
-        providers: [{ code: "example-ota", name: "示例票代", type: "ota" }],
-        legs: [{
-          id: "leg-1",
-          durationMinutes: 180,
-          segments: [{
-            departureAirportCode: "PVG",
-            arrivalAirportCode: "NRT",
-            durationMinutes: 180,
-            airlineCode: "MU",
-            designatorCode: "MU523",
-            departureDateTime: "2026-08-24T09:00:00+08:00",
-            arrivalDateTime: "2026-08-24T13:00:00+09:00",
-          }],
-        }],
-        trips: [{ id: "trip-1", legIds: ["leg-1"] }],
-      }), { status: 200 });
-    }
-    if (resultPolls === 2) {
-      return new Response(JSON.stringify({
-        count: 1,
-        fares: [{
-          id: "fare-1",
-          tripId: "trip-1",
-          providerCode: "example-ota",
-          handoffUrl:
-            "https://handoff.wego.com/flights/continue?fare_id=fare-1&search_id=wego-search-2",
-          price: { totalAmount: 1402, currencyCode: "CNY" },
-        }],
-      }), { status: 200 });
-    }
-    return new Response(JSON.stringify({ count: 1 }), { status: 200 });
-  };
-
-  const connector = new WegoConnector({
-    clientId: "wego-client",
-    baseUrl: "https://wego.test",
-    pollDelaysMs: [0, 0, 0, 0],
-  });
-  const result = await connector.search(intent, {
-    requestId: "request-wego-flow",
-    signal: new AbortController().signal,
-  });
-  const start = requested.find(
-    (request) =>
-      request.url.pathname === "/metasearch/flights/searches" &&
-      request.method === "POST",
-  );
-  const search = (start?.body as {
-    search?: { currencyCode?: string; siteCode?: string; legs?: unknown[] };
-  })?.search;
-
-  assert.equal(search?.currencyCode, "CNY");
-  assert.equal(search?.siteCode, "CN");
-  assert.equal(search?.legs?.length, 1);
-  assert.equal(
-    requested.filter((request) => request.url.pathname.endsWith("/results")).length,
-    4,
-  );
-  assert.equal(result.providerRequestId, "wego-search-2");
-  assert.equal(result.offers[0]?.comparable, true);
 });

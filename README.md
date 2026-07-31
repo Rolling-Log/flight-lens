@@ -50,3 +50,5 @@ docs                产品、架构与运行文档
 
 详细范围见 [PRD](./PRD.md)，工程决策见 [ARCHITECTURE](./ARCHITECTURE.md)，
 第三方品牌资产与使用条件见 [THIRD_PARTY_NOTICES](./THIRD_PARTY_NOTICES.md)。
+V1 发布门禁见 [V1_ACCEPTANCE](./docs/V1_ACCEPTANCE.md)，预发布操作见
+[STAGING_RUNBOOK](./docs/STAGING_RUNBOOK.md)。

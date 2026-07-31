@@ -15,7 +15,6 @@ const config: ApiConfig = {
   connectors: {
     skyscannerBaseUrl: "https://partners.api.skyscanner.net",
     serpApiBaseUrl: "https://serpapi.com",
-    wegoBaseUrl: "https://affiliate-api.wego.com",
     amadeusBaseUrl: "https://test.api.amadeus.com",
     duffelBaseUrl: "https://api.duffel.com",
   },
