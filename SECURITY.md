@@ -9,4 +9,5 @@
 - Runtime 使用池化数据库连接，Migration 使用直连；
 - 依赖锁定并进入 CI；
 - 生产只允许 HTTPS；
+- Web 与 API 都由 Next.js 显式设置防嗅探、禁止嵌入、Referrer、权限和跨源窗口隔离响应头；Netlify 配置保留同类兜底；
 - 管理端启用前必须有强认证与最小权限。
