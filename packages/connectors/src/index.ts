@@ -878,7 +878,11 @@ export function mapSerpApiBookingPayload(
       const departureAt = localSerpApiDateTime(flight.departure_airport?.time);
       const arrivalAt = localSerpApiDateTime(flight.arrival_airport?.time);
       const flightNumber = flight.flight_number?.replace(/\s+/g, "");
-      const numberMatch = /^([A-Z0-9]{2,3})([A-Z0-9]+)$/.exec(flightNumber ?? "");
+      // SerpApi returns the IATA carrier designator followed by the flight
+      // number (for example, "CA 8357" or "9C 8855"). IATA designators are
+      // exactly two characters; allowing a greedy third character incorrectly
+      // turned CA8357 into carrier CA8 and flight 357.
+      const numberMatch = /^([A-Z0-9]{2})([A-Z0-9]+)$/.exec(flightNumber ?? "");
       const marketingCarrier = numberMatch?.[1];
       const marketingFlightNumber = numberMatch?.[2];
       if (
