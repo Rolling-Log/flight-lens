@@ -26,6 +26,14 @@ pnpm dev
 - API：<http://localhost:4000>
 - 健康检查：<http://localhost:4000/health>
 
+完整校验：
+
+```bash
+pnpm check
+pnpm exec playwright install chromium
+pnpm test:e2e
+```
+
 ## 仓库结构
 
 ```text
@@ -40,4 +48,5 @@ docs                产品、架构与运行文档
 
 航探不会在证据不足时宣称“全网最低”。结论必须包含成功、失败和超时来源、统一价格口径以及报价核验时间。
 
-详细范围见 [PRD](./PRD.md)，工程决策见 [ARCHITECTURE](./ARCHITECTURE.md)。
+详细范围见 [PRD](./PRD.md)，工程决策见 [ARCHITECTURE](./ARCHITECTURE.md)，
+第三方品牌资产与使用条件见 [THIRD_PARTY_NOTICES](./THIRD_PARTY_NOTICES.md)。

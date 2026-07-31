@@ -22,6 +22,7 @@ export type SearchAuditPayload = {
     offerCount: number;
     errorCode?: string | undefined;
     retryable: boolean;
+    notes: string[];
     startedAt: string;
     finishedAt: string;
   }>;
@@ -35,6 +36,7 @@ export type SearchAuditPayload = {
     totalPrice: { amountMinor: number; currency: string };
     fetchedAt: string;
     expiresAt?: string | undefined;
+    evidenceRef?: string | undefined;
   }>;
 };
 
@@ -76,6 +78,7 @@ export function createSearchAuditStore(url: string) {
               offerCount: report.offerCount,
               errorCode: report.errorCode,
               retryable: report.retryable,
+              notes: report.notes,
               startedAt: new Date(report.startedAt),
               finishedAt: new Date(report.finishedAt),
             })),
@@ -83,9 +86,13 @@ export function createSearchAuditStore(url: string) {
         }
 
         if (payload.offers.length > 0) {
+          const offerRows = payload.offers.map((offer) => ({
+              databaseId: crypto.randomUUID(),
+              offer,
+            }));
           await transaction.insert(schema.offers).values(
-            payload.offers.map((offer) => ({
-              id: crypto.randomUUID(),
+            offerRows.map(({ databaseId, offer }) => ({
+              id: databaseId,
               searchId: payload.requestId,
               connectorId: offer.connectorId,
               normalizedOfferId: offer.id,
@@ -100,6 +107,20 @@ export function createSearchAuditStore(url: string) {
               expiresAt: offer.expiresAt ? new Date(offer.expiresAt) : null,
             })),
           );
+          const verificationRows = offerRows
+            .filter(({ offer }) => offer.comparable)
+            .map(({ databaseId, offer }) => ({
+              id: crypto.randomUUID(),
+              offerId: databaseId,
+              expectedAmountMinor: offer.totalPrice.amountMinor,
+              observedAmountMinor: null,
+              currency: offer.totalPrice.currency,
+              state: "pending_landing_page_verification",
+              evidenceRef: offer.evidenceRef,
+            }));
+          if (verificationRows.length > 0) {
+            await transaction.insert(schema.priceVerifications).values(verificationRows);
+          }
         }
       });
     },

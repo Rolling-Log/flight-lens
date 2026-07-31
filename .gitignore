@@ -9,6 +9,8 @@ node_modules/
 **/dist/
 out/
 coverage/
+playwright-report/
+test-results/
 *.tsbuildinfo
 
 # local environment and credentials
@@ -19,6 +21,7 @@ coverage/
 
 # local tooling
 .DS_Store
+.tools/
 .netlify/
 .railway/
 .openai/

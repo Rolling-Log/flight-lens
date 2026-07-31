@@ -49,6 +49,7 @@ export const connectorRuns = pgTable(
     offerCount: integer("offer_count").notNull(),
     errorCode: text("error_code"),
     retryable: boolean("retryable").notNull(),
+    notes: jsonb("notes").$type<string[]>().notNull().default([]),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
     finishedAt: timestamp("finished_at", { withTimezone: true }).notNull(),
   },

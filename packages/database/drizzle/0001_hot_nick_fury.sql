@@ -1,0 +1,1 @@
+ALTER TABLE "connector_runs" ADD COLUMN "notes" jsonb DEFAULT '[]'::jsonb NOT NULL;

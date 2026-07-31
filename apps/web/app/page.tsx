@@ -6,33 +6,55 @@ import type {
   SearchIntent,
   SearchResponse,
 } from "@flight-lens/contracts";
+import Image from "next/image";
 import { useMemo, useState } from "react";
 
 type Mode = "agent" | "form";
-type SortKey = "recommended" | "price" | "duration";
+type SortKey =
+  | "recommended"
+  | "price"
+  | "duration"
+  | "stops"
+  | "baggage"
+  | "flexibility";
 type BusyState = "idle" | "parsing" | "searching";
 
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
-const initialIntent: SearchIntent = {
-  schemaVersion: "1",
-  tripType: "round_trip",
-  origin: { kind: "airport", code: "PVG" },
-  destination: { kind: "airport", code: "NRT" },
-  departureDate: "2026-08-24",
-  returnDate: "2026-08-29",
-  flexibleDays: 3,
-  adults: 1,
-  cabin: "economy",
-  directOnly: true,
-  maxStops: 0,
-  avoidRedEye: true,
-  minimumCheckedBaggageKg: 23,
-  includeNearbyAirports: false,
-  explicitFields: [],
-  inferredFields: [],
-  pendingQuestions: [],
-};
+function dateFromToday(days: number): string {
+  const date = new Date();
+  date.setHours(12, 0, 0, 0);
+  date.setDate(date.getDate() + days);
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function initialIntent(): SearchIntent {
+  return {
+    schemaVersion: "1",
+    tripType: "round_trip",
+    origin: { kind: "airport", code: "PVG" },
+    destination: { kind: "airport", code: "NRT" },
+    departureDate: dateFromToday(30),
+    returnDate: dateFromToday(35),
+    flexibleDays: 3,
+    adults: 1,
+    cabin: "economy",
+    budget: { amountMinor: 300_000, currency: "CNY" },
+    departureTime: { earliest: "06:00", latest: "22:00" },
+    directOnly: true,
+    maxStops: 0,
+    avoidRedEye: true,
+    minimumCheckedBaggageKg: 23,
+    includeNearbyAirports: false,
+    explicitFields: [],
+    inferredFields: [],
+    pendingQuestions: [],
+  };
+}
 
 async function apiRequest<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
@@ -50,7 +72,24 @@ async function apiRequest<T>(path: string, body: unknown): Promise<T> {
 }
 
 function offerJourneyMinutes(offer: Offer): number {
-  return offer.segments.reduce((total, segment) => total + segment.durationMinutes, 0);
+  return offer.legs.reduce((total, leg) => total + leg.durationMinutes, 0);
+}
+
+function offerStops(offer: Offer): number {
+  return offer.legs.reduce((total, leg) => total + leg.stopCount, 0);
+}
+
+function offerCheckedBaggageKg(offer: Offer): number {
+  return Math.max(
+    0,
+    ...offer.baggage
+      .filter((allowance) => allowance.type === "checked" && allowance.included)
+      .map((allowance) => allowance.weightKg ?? 0),
+  );
+}
+
+function offerFlexibility(offer: Offer): number {
+  return Number(offer.refundable === true) * 2 + Number(offer.changeable === true);
 }
 
 function money(offer: Offer): string {
@@ -72,12 +111,43 @@ function duration(minutes: number): string {
   return `${hours}小时${rest ? `${rest}分` : ""}`;
 }
 
+function dayOffset(departureAt: string, arrivalAt: string): string {
+  const ordinal = (value: string) => {
+    const [year, month, day] = value.slice(0, 10).split("-").map(Number);
+    return Date.UTC(year!, month! - 1, day!) / 86_400_000;
+  };
+  const difference = ordinal(arrivalAt) - ordinal(departureAt);
+  return difference === 0 ? "" : difference > 0 ? `+${difference}` : String(difference);
+}
+
+function reportNote(note: string): string {
+  if (note.startsWith("FLEXIBLE_DATE_THREE_POINT_PROBE:")) {
+    return `三点日期探测：${note.split(":").slice(1).join(":")}`;
+  }
+  if (note.startsWith("FLEXIBLE_DATE_PROBE_UNSUPPORTED:")) {
+    return "该来源仅查询基准日，未参与 ±3 天探测";
+  }
+  if (note.startsWith("PARTIAL_DATE_PROBE_FAILURE:")) {
+    return `部分日期探测失败：${note.split(":").at(-1)}`;
+  }
+  if (note.startsWith("CACHE_HIT:")) {
+    return `使用已标记的新鲜缓存：${note.split(":").at(-1)}`;
+  }
+  if (note.startsWith("CACHE_STALE_FALLBACK:")) {
+    return `实时来源失败，降级使用旧缓存：${note.split(":").at(-1)}`;
+  }
+  if (note.startsWith("RETRY_ATTEMPTS:")) {
+    return `瞬时错误重试：${note.split(":").at(-1)} 次`;
+  }
+  return note;
+}
+
 export default function Home() {
   const [mode, setMode] = useState<Mode>("agent");
   const [query, setQuery] = useState(
-    "8月下旬上海去东京，往返 5 天，1 个人，预算 3000 元。不要红眼航班，直飞，必须含 23kg 托运行李。",
+    "下个月上海去东京，往返 5 天，1 个人，预算 3000 元。不要红眼航班，直飞，必须含 23kg 托运行李。",
   );
-  const [intent, setIntent] = useState<SearchIntent>(initialIntent);
+  const [intent, setIntent] = useState<SearchIntent>(() => initialIntent());
   const [parseResult, setParseResult] = useState<IntentParseResponse | null>(null);
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [sort, setSort] = useState<SortKey>("recommended");
@@ -89,17 +159,47 @@ export default function Home() {
   const orderedOffers = useMemo(() => {
     if (!result) return [];
     const offers = [...result.offers];
+    const comparableFirst = (left: Offer, right: Offer) =>
+      Number(right.comparable) - Number(left.comparable);
     if (sort === "price") {
       return offers.sort((left, right) => {
         const a = left.totalPriceCny?.amountMinor ?? left.totalPrice.amountMinor;
         const b = right.totalPriceCny?.amountMinor ?? right.totalPrice.amountMinor;
-        return a - b;
+        return comparableFirst(left, right) || a - b;
       });
     }
     if (sort === "duration") {
-      return offers.sort((left, right) => offerJourneyMinutes(left) - offerJourneyMinutes(right));
+      return offers.sort(
+        (left, right) =>
+          comparableFirst(left, right) ||
+          offerJourneyMinutes(left) - offerJourneyMinutes(right),
+      );
+    }
+    if (sort === "stops") {
+      return offers.sort(
+        (left, right) =>
+          comparableFirst(left, right) ||
+          offerStops(left) - offerStops(right) ||
+          offerJourneyMinutes(left) - offerJourneyMinutes(right),
+      );
+    }
+    if (sort === "baggage") {
+      return offers.sort(
+        (left, right) =>
+          comparableFirst(left, right) ||
+          offerCheckedBaggageKg(right) - offerCheckedBaggageKg(left),
+      );
+    }
+    if (sort === "flexibility") {
+      return offers.sort(
+        (left, right) =>
+          comparableFirst(left, right) ||
+          offerFlexibility(right) - offerFlexibility(left),
+      );
     }
     return offers.sort((left, right) => {
+      const comparableOrder = comparableFirst(left, right);
+      if (comparableOrder) return comparableOrder;
       if (left.id === result.recommendedOfferId) return -1;
       if (right.id === result.recommendedOfferId) return 1;
       return right.qualityScore - left.qualityScore;
@@ -108,6 +208,25 @@ export default function Home() {
 
   function updateIntent(patch: Partial<SearchIntent>) {
     setIntent((current) => ({ ...current, ...patch }));
+  }
+
+  function updateDepartureTime(
+    field: "earliest" | "latest",
+    value: string,
+  ) {
+    const next = { ...intent.departureTime };
+    if (value) next[field] = value;
+    else delete next[field];
+    updateIntent({
+      departureTime: Object.keys(next).length ? next : undefined,
+    });
+  }
+
+  function changeQuery(value: string) {
+    setQuery(value);
+    setParseResult(null);
+    setResult(null);
+    setError("");
   }
 
   async function parseQuery(): Promise<SearchIntent | null> {
@@ -141,7 +260,17 @@ export default function Home() {
   }
 
   async function runSearch() {
-    const searchIntent = mode === "agent" ? await parseQuery() : intent;
+    let searchIntent: SearchIntent | null;
+    if (mode === "agent") {
+      if (parseResult?.ready && parseResult.intent) {
+        searchIntent = parseResult.intent;
+      } else {
+        await parseQuery();
+        return;
+      }
+    } else {
+      searchIntent = intent;
+    }
     if (!searchIntent) return;
     setBusy("searching");
     setError("");
@@ -160,6 +289,15 @@ export default function Home() {
   }
 
   const lowest = result?.offers.find((offer) => offer.id === result.lowestComparableOfferId) ?? null;
+  const usesSkyscanner = result?.offers.some(
+    (offer) => offer.connectorId === "skyscanner-live-prices",
+  ) ?? false;
+  const usesCache = result?.connectorReports.some((report) =>
+    report.notes.some((note) => note.startsWith("CACHE_")),
+  ) ?? false;
+  const usesStaleCache = result?.connectorReports.some((report) =>
+    report.notes.some((note) => note.startsWith("CACHE_STALE_FALLBACK:")),
+  ) ?? false;
 
   return (
     <main>
@@ -201,15 +339,29 @@ export default function Home() {
               <textarea
                 id="flight-query"
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => changeQuery(event.target.value)}
                 aria-describedby={error ? "query-error" : undefined}
                 disabled={busy !== "idle"}
               />
               <div className="prompt-row">
-                <button onClick={() => setQuery("下周五北京到成都，周日回来，2 个成人，早班机优先，含托运行李，预算 2500 元。")}>周末往返</button>
-                <button onClick={() => setQuery("9 月上海飞东京，日期可前后浮动 3 天，直飞，不坐红眼航班，含 23kg 行李。")}>灵活日期</button>
-                <button onClick={() => setQuery("8 月 24 日广州飞新加坡，单程，1 位成人，允许中转 1 次。")}>国际单程</button>
+                <button onClick={() => changeQuery("下周五北京到成都，周日回来，2 个成人，早班机优先，含托运行李，预算 2500 元。")}>周末往返</button>
+                <button onClick={() => changeQuery("下个月上海飞东京，日期可前后浮动 3 天，直飞，不坐红眼航班，含 23kg 行李。")}>灵活日期</button>
+                <button onClick={() => changeQuery("下个月广州飞新加坡，单程，1 位成人，允许中转 1 次。")}>国际单程</button>
               </div>
+              {parseResult?.ready && parseResult.intent && (
+                <div className="intent-review agent-review" role="status">
+                  <b>请确认已解析条件</b>
+                  <span>
+                    {parseResult.intent.origin.code} → {parseResult.intent.destination.code}
+                    {" · "}
+                    {parseResult.intent.departureDate}
+                    {parseResult.intent.returnDate ? ` 至 ${parseResult.intent.returnDate}` : ""}
+                    {" · "}
+                    {parseResult.intent.adults} 位成人
+                  </span>
+                  <button type="button" onClick={() => setMode("form")}>打开完整表单修改</button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="form-panel">
@@ -224,7 +376,10 @@ export default function Home() {
                     onClick={() =>
                       updateIntent({
                         tripType: value,
-                        returnDate: value === "round_trip" ? intent.returnDate ?? "2026-08-29" : undefined,
+                        returnDate:
+                          value === "round_trip"
+                            ? intent.returnDate ?? dateFromToday(35)
+                            : undefined,
                       })
                     }
                   >
@@ -245,13 +400,57 @@ export default function Home() {
                 <label>出发日期<input type="date" value={intent.departureDate} onChange={(event) => updateIntent({ departureDate: event.target.value })} /></label>
                 <label>返程日期<input type="date" value={intent.returnDate ?? ""} onChange={(event) => updateIntent({ returnDate: event.target.value })} disabled={intent.tripType === "one_way"} /></label>
                 <label>成人 / 舱位<select value={intent.adults} onChange={(event) => updateIntent({ adults: Number(event.target.value) })}><option value={1}>1 成人 · 经济舱</option><option value={2}>2 成人 · 经济舱</option><option value={3}>3 成人 · 经济舱</option></select></label>
+                <label>总预算（人民币）
+                  <input
+                    type="number"
+                    min={1}
+                    step={100}
+                    value={intent.budget ? intent.budget.amountMinor / 100 : ""}
+                    placeholder="不限"
+                    onChange={(event) =>
+                      updateIntent({
+                        budget: event.target.value
+                          ? {
+                              amountMinor: Math.round(Number(event.target.value) * 100),
+                              currency: "CNY",
+                            }
+                          : undefined,
+                      })
+                    }
+                  />
+                </label>
+                <label>最早起飞
+                  <input
+                    type="time"
+                    value={intent.departureTime?.earliest ?? ""}
+                    onChange={(event) => updateDepartureTime("earliest", event.target.value)}
+                  />
+                </label>
+                <label>最晚起飞
+                  <input
+                    type="time"
+                    value={intent.departureTime?.latest ?? ""}
+                    onChange={(event) => updateDepartureTime("latest", event.target.value)}
+                  />
+                </label>
+                <label>最多中转
+                  <select
+                    value={intent.directOnly ? 0 : intent.maxStops}
+                    disabled={intent.directOnly}
+                    onChange={(event) => updateIntent({ maxStops: Number(event.target.value) })}
+                  >
+                    <option value={0}>直飞</option>
+                    <option value={1}>最多 1 次</option>
+                    <option value={2}>最多 2 次</option>
+                  </select>
+                </label>
               </div>
               <div className="filter-chips">
                 <label><input type="checkbox" checked={intent.directOnly} onChange={(event) => updateIntent({ directOnly: event.target.checked, maxStops: event.target.checked ? 0 : 1 })} />仅直飞</label>
                 <label><input type="checkbox" checked={intent.minimumCheckedBaggageKg >= 23} onChange={(event) => updateIntent({ minimumCheckedBaggageKg: event.target.checked ? 23 : 0 })} />含 23kg 托运行李</label>
                 <label><input type="checkbox" checked={intent.avoidRedEye} onChange={(event) => updateIntent({ avoidRedEye: event.target.checked })} />拒绝红眼</label>
-                <label><input type="checkbox" checked={intent.flexibleDays === 3} onChange={(event) => updateIntent({ flexibleDays: event.target.checked ? 3 : 0 })} />日期 ±3 天</label>
-                <label><input type="checkbox" checked={intent.includeNearbyAirports} onChange={(event) => updateIntent({ includeNearbyAirports: event.target.checked })} />附近机场</label>
+                <label><input type="checkbox" checked={intent.flexibleDays === 3} onChange={(event) => updateIntent({ flexibleDays: event.target.checked ? 3 : 0 })} />基准与 ±3 天边界（3 组）</label>
+                <label><input type="checkbox" checked={intent.includeNearbyAirports} onChange={(event) => updateIntent({ includeNearbyAirports: event.target.checked })} />出发地附近机场</label>
               </div>
               {parseResult && (
                 <div className="intent-review">
@@ -272,9 +471,17 @@ export default function Home() {
             <button className="primary-button" onClick={runSearch} disabled={busy !== "idle"}>
               {busy === "parsing" && <><span className="spinner" /> 正在解析条件</>}
               {busy === "searching" && <><span className="spinner" /> 正在核验来源</>}
-              {busy === "idle" && <>开始检索 <span>→</span></>}
+              {busy === "idle" && mode === "agent" && parseResult?.ready
+                ? <>确认条件并检索 <span>→</span></>
+                : busy === "idle" && <>开始检索 <span>→</span></>}
             </button>
           </div>
+          {busy === "searching" && (
+            <div className="search-progress" role="status" aria-live="polite">
+              <span className="spinner dark-spinner" />
+              已并行提交所有已配置来源；完成后将逐项披露成功、失败、超时、缓存与重试状态。
+            </div>
+          )}
         </div>
 
         <div className="trust-row">
@@ -288,14 +495,18 @@ export default function Home() {
         <section className="results-section revealed" id="results" aria-live="polite">
           <div className="section-heading">
             <div>
-              <div className="eyebrow"><span /> 实时检索结果</div>
-              <h2>{intent.origin.code} → {intent.destination.code}</h2>
-              <p>{intent.departureDate} · {intent.adults} 位成人 · 经济舱 · 统一 Offer 口径</p>
+              <div className="eyebrow"><span /> 航班检索结果</div>
+              <h2>{result?.intent.origin.code ?? intent.origin.code} → {result?.intent.destination.code ?? intent.destination.code}</h2>
+              <p>{result?.intent.departureDate ?? intent.departureDate} · {result?.intent.adults ?? intent.adults} 位成人 · 经济舱 · 统一 Offer 口径</p>
             </div>
             {result && (
-              <div className={`demo-badge ${result.offers.some((offer) => offer.environment === "production") ? "production-badge" : ""}`}>
-                {result.offers.some((offer) => offer.environment === "production")
-                  ? "实时生产来源"
+              <div className={`demo-badge ${result.offers.some((offer) => offer.environment === "production") && !usesStaleCache ? "production-badge" : ""}`}>
+                {usesStaleCache
+                  ? "实时来源失败 · 已披露旧缓存降级"
+                  : usesCache
+                    ? "生产来源 · 已披露新鲜缓存"
+                    : result.offers.some((offer) => offer.environment === "production")
+                      ? "实时生产来源"
                   : "Sandbox 来源 · 不代表可购买库存"}
               </div>
             )}
@@ -329,12 +540,36 @@ export default function Home() {
 
                 <div className="result-toolbar">
                   <div className="sort-tabs">
-                    {([["recommended", "综合推荐"], ["price", "最低全价"], ["duration", "总耗时"]] as const).map(([key, label]) => (
+                    {([
+                      ["recommended", "综合推荐"],
+                      ["price", "最低全价"],
+                      ["duration", "最短耗时"],
+                      ["stops", "最少中转"],
+                      ["baggage", "最佳行李"],
+                      ["flexibility", "最宽松退改"],
+                    ] as const).map(([key, label]) => (
                       <button key={key} className={sort === key ? "selected" : ""} onClick={() => setSort(key)}>{label}</button>
                     ))}
                   </div>
                   <span>共 {result.offers.length} 个标准化 Offer</span>
                 </div>
+
+                {usesSkyscanner && (
+                  <a
+                    className="powered-by"
+                    href="https://www.skyscanner.net"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Powered by Skyscanner"
+                  >
+                    <Image
+                      src="/skyscanner-powered-by.png"
+                      width={150}
+                      height={18}
+                      alt="Powered by Skyscanner"
+                    />
+                  </a>
+                )}
 
                 {orderedOffers.length === 0 ? (
                   <div className="empty-state">
@@ -344,36 +579,132 @@ export default function Home() {
                 ) : (
                   <div className="flight-list">
                     {orderedOffers.map((offer) => {
-                      const first = offer.segments[0]!;
-                      const last = offer.segments.at(-1)!;
                       const isLowest = offer.id === result.lowestComparableOfferId;
                       const isRecommended = offer.id === result.recommendedOfferId;
+                      const distinctions = [
+                        ...(isLowest ? ["最低全价"] : []),
+                        ...(isRecommended ? ["综合推荐"] : []),
+                        ...(offer.id === result.shortestOfferId ? ["最短耗时"] : []),
+                        ...(offer.id === result.fewestStopsOfferId ? ["最少中转"] : []),
+                        ...(offer.id === result.bestBaggageOfferId ? ["最佳行李"] : []),
+                        ...(offer.id === result.mostFlexibleOfferId ? ["最宽松退改"] : []),
+                      ];
                       return (
                         <article className="flight-card" key={offer.id}>
-                          <div className="flight-tag">{isLowest ? "最低全价" : isRecommended ? "综合推荐" : offer.comparable ? "可比报价" : "条件不完整"}</div>
+                          <div className="flight-tag">
+                            {distinctions.length
+                              ? distinctions.join(" · ")
+                              : offer.comparable
+                                ? "可比报价"
+                                : "条件不完整"}
+                          </div>
                           <div className="flight-primary">
-                            <div className="airline">
-                              <span className="airline-logo">{first.marketingCarrier}</span>
-                              <div><b>{first.marketingCarrier} {first.flightNumber}</b><small>{offer.segments.length > 1 ? `${offer.segments.length - 1} 次中转` : "直飞"} · 经济舱</small></div>
+                            <div className="journey-stack">
+                              {offer.legs.map((leg, legIndex) => {
+                                const legSegments = offer.segments.filter(
+                                  (segment) => segment.legIndex === legIndex,
+                                );
+                                const first = legSegments[0]!;
+                                return (
+                                  <div className="leg-row" key={leg.id}>
+                                    <span className="leg-label">
+                                      {offer.legs.length === 1 ? "单程" : legIndex === 0 ? "去程" : "返程"}
+                                    </span>
+                                    <div className="airline">
+                                      <span className="airline-logo">{first.marketingCarrier}</span>
+                                      <div>
+                                        <b>{first.marketingCarrier} {first.flightNumber}</b>
+                                        <small>{leg.stopCount ? `${leg.stopCount} 次中转` : "直飞"} · 经济舱</small>
+                                      </div>
+                                    </div>
+                                    <div className="time">
+                                      <strong>{time(leg.departureAt)}</strong>
+                                      <small title={leg.origin.name}>{leg.origin.code}</small>
+                                    </div>
+                                    <div className="route-line">
+                                      <span>{duration(leg.durationMinutes)}</span>
+                                      <i />
+                                      <small>{leg.stopCount ? `${leg.stopCount} 次中转` : "直飞"}</small>
+                                    </div>
+                                    <div className="time">
+                                      <strong>
+                                        {time(leg.arrivalAt)}
+                                        {dayOffset(leg.departureAt, leg.arrivalAt) && (
+                                          <sup>{dayOffset(leg.departureAt, leg.arrivalAt)}</sup>
+                                        )}
+                                      </strong>
+                                      <small title={leg.destination.name}>{leg.destination.code}</small>
+                                    </div>
+                                  </div>
+                                );
+                              })}
                             </div>
-                            <div className="time"><strong>{time(first.departureAt)}</strong><small>{first.origin.code}</small></div>
-                            <div className="route-line"><span>{duration(offerJourneyMinutes(offer))}</span><i /><small>{offer.segments.length > 1 ? "中转" : "直飞"}</small></div>
-                            <div className="time"><strong>{time(last.arrivalAt)}</strong><small>{last.destination.code}</small></div>
                             <div className="price"><small>可支付总价</small><strong>{money(offer)}</strong><span className="plain-price">{offer.comparable ? "统一口径" : "不可直接比较"}</span></div>
                           </div>
                           <div className="flight-meta">
-                            <div><span className="bag">▣</span>{offer.baggage.length ? `${offer.baggage.length} 项行李规则` : "行李规则待来源补全"}</div>
+                            <div>
+                              <span className="bag">▣</span>
+                              {offerCheckedBaggageKg(offer)
+                                ? `含 ${offerCheckedBaggageKg(offer)}kg 托运行李`
+                                : offer.baggage.length
+                                  ? `${offer.baggage.length} 项行李规则`
+                                  : "行李规则待来源补全"}
+                            </div>
+                            <div>
+                              退改：
+                              {offer.refundable === true
+                                ? "可退"
+                                : offer.refundable === false
+                                  ? "不可退"
+                                  : "待核验"}
+                              {" · "}
+                              {offer.changeable === true
+                                ? "可改"
+                                : offer.changeable === false
+                                  ? "不可改"
+                                  : "待核验"}
+                            </div>
                             <div className="source"><span>{offer.environment}</span><b>{offer.seller.name}</b><small>{new Date(offer.fetchedAt).toLocaleString("zh-CN")}</small></div>
+                            {offer.seller.deepLink && (
+                              <a
+                                className="handoff-link"
+                                href={offer.seller.deepLink}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                {offer.seller.handoffPrecision === "search_results"
+                                  ? "去 Google Flights 重新选择 ↗"
+                                  : `去 ${offer.seller.name} 核验 ↗`}
+                              </a>
+                            )}
                             <button onClick={() => setExpanded(expanded === offer.id ? null : offer.id)} aria-expanded={expanded === offer.id}>
                               {expanded === offer.id ? "收起价格构成" : "查看价格构成"} <span>⌄</span>
                             </button>
                           </div>
                           {expanded === offer.id && (
                             <div className="price-breakdown">
+                              <div className="segment-details">
+                                <b>完整航段</b>
+                                {offer.segments.map((segment) => (
+                                  <span key={segment.id}>
+                                    {segment.marketingCarrier} {segment.flightNumber} ·{" "}
+                                    {segment.origin.name ?? segment.origin.code}{" "}
+                                    {time(segment.departureAt)} →{" "}
+                                    {segment.destination.name ?? segment.destination.code}{" "}
+                                    {time(segment.arrivalAt)}
+                                    {dayOffset(segment.departureAt, segment.arrivalAt)}
+                                  </span>
+                                ))}
+                              </div>
                               {offer.priceComponents.map((component) => (
                                 <span key={`${offer.id}-${component.kind}-${component.label}`}>{component.label}<b>{new Intl.NumberFormat("zh-CN", { style: "currency", currency: component.currency }).format(component.amountMinor / 100)}</b></span>
                               ))}
                               <span>最终应付<b>{money(offer)}</b></span>
+                              {offer.seller.handoffPrecision === "search_results" && (
+                                <p className="handoff-warning">
+                                  此链接返回带本次条件的 Google Flights 结果页，不是该售卖方的精确报价落点；请重新选择相同行程并核验最终价格。
+                                </p>
+                              )}
                               <p>请在来源平台再次核验库存和最终支付页。航探不售票、不代收款。</p>
                             </div>
                           )}
@@ -391,7 +722,13 @@ export default function Home() {
                 <ul>
                   {result.connectorReports.map((report) => (
                     <li key={report.connectorId}>
-                      <span><b>{report.connectorName}</b><small>{report.durationMs}ms · {report.offerCount} 个 Offer</small></span>
+                      <span>
+                        <b>{report.connectorName}</b>
+                        <small>{report.durationMs}ms · {report.offerCount} 个 Offer</small>
+                        {report.notes.map((note) => (
+                          <small key={note}>{reportNote(note)}</small>
+                        ))}
+                      </span>
                       <strong className={`source-state state-${report.state}`}>{report.state}</strong>
                     </li>
                   ))}
@@ -399,7 +736,7 @@ export default function Home() {
                 <button onClick={() => setShowCoverage(true)}>查看来源规则</button>
                 <div className="adversarial-note">
                   <b>对抗式检查</b>
-                  <p>演示报价、总价构成错误和缺失汇率的报价不会进入最低全价结论。</p>
+                  <p>演示报价、总价构成错误、缺失汇率或没有购买落点的报价不会进入最低全价结论。</p>
                 </div>
               </aside>
             </div>
@@ -432,8 +769,9 @@ export default function Home() {
             <h2 id="coverage-title">来源数量不等于可信度</h2>
             <p>来源只有在合法配置、实际响应、字段完整并通过价格校验后，才计入本次检索覆盖。超时和失败会单独披露。</p>
             <div className="source-table">
-              <div><b>Amadeus</b><span>V1 实时聚合 Connector</span><em>需要合法 API 密钥</em></div>
-              <div><b>Duffel</b><span>V1 实时航班 Offer Connector</span><em>需要合法 API Token</em></div>
+              <div><b>SerpApi</b><span>Google Flights 与实际售卖方报价；跳转精度单独披露</span><em>首个生产查询已验证</em></div>
+              <div><b>Skyscanner</b><span>航司 / OTA Live Prices 与 deeplink</span><em>合作申请已提交</em></div>
+              <div><b>Amadeus / Duffel</b><span>发现与交叉核验，不直接形成购买推荐</span><em>无购买落点</em></div>
               <div><b>航司 / OTA</b><span>按开放平台与商务授权逐步接入</span><em>禁止未授权绕过</em></div>
               <div><b>Mock 数据</b><span>只用于自动测试</span><em>生产强制禁用</em></div>
             </div>
