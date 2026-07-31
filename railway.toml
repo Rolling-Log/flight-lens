@@ -1,6 +1,15 @@
 [build]
 builder = "RAILPACK"
 buildCommand = "corepack enable && pnpm install --frozen-lockfile && pnpm build:api"
+watchPatterns = [
+  "apps/api/**",
+  "packages/**",
+  "package.json",
+  "pnpm-lock.yaml",
+  "pnpm-workspace.yaml",
+  "tsconfig.base.json",
+  "railway.toml",
+]
 
 [deploy]
 startCommand = "pnpm --filter @flight-lens/api start"

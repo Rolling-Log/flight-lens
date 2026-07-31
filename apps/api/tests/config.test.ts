@@ -9,12 +9,18 @@ test("treats blank optional credentials as unconfigured", () => {
     OPENAI_API_KEY: "   ",
     SKYSCANNER_API_KEY: "",
     SERPAPI_API_KEY: "configured",
-    WEGO_CLIENT_ID: "",
   });
 
   assert.equal(config.databaseUrl, undefined);
   assert.equal(config.openaiApiKey, undefined);
   assert.equal(config.connectors.skyscannerApiKey, undefined);
   assert.equal(config.connectors.serpApiKey, "configured");
-  assert.equal(config.connectors.wegoClientId, undefined);
+});
+
+test("prefers the platform PORT while retaining API_PORT for local development", () => {
+  assert.equal(loadConfig({ NODE_ENV: "test", API_PORT: "4100" }).port, 4100);
+  assert.equal(
+    loadConfig({ NODE_ENV: "production", PORT: "8080", API_PORT: "4100" }).port,
+    8080,
+  );
 });

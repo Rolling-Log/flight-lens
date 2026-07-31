@@ -1,7 +1,6 @@
 import type { ConnectorReport, Offer, SearchIntent } from "@flight-lens/contracts";
 import { ConnectorError, providerHttpError } from "./errors.js";
 import { SkyscannerConnector } from "./skyscanner.js";
-import { WegoConnector } from "./wego.js";
 
 export { ConnectorError } from "./errors.js";
 export {
@@ -9,12 +8,6 @@ export {
   mapSkyscannerSearchResults,
   type SkyscannerSearchPayload,
 } from "./skyscanner.js";
-export {
-  WegoConnector,
-  mapWegoSearchResults,
-  type WegoSearchPayload,
-} from "./wego.js";
-
 export type ConnectorEnvironment = "sandbox" | "production";
 
 export type ConnectorMetadata = {
@@ -314,8 +307,6 @@ export type ConnectorRegistryConfig = {
   amadeusBaseUrl?: string;
   duffelAccessToken?: string;
   duffelBaseUrl?: string;
-  wegoClientId?: string;
-  wegoBaseUrl?: string;
 };
 
 export function createConnectorRegistry(config: ConnectorRegistryConfig): FlightConnector[] {
@@ -333,14 +324,6 @@ export function createConnectorRegistry(config: ConnectorRegistryConfig): Flight
       new SerpApiGoogleFlightsConnector({
         apiKey: config.serpApiKey,
         baseUrl: config.serpApiBaseUrl ?? "https://serpapi.com",
-      }),
-    );
-  }
-  if (config.wegoClientId) {
-    connectors.push(
-      new WegoConnector({
-        clientId: config.wegoClientId,
-        baseUrl: config.wegoBaseUrl ?? "https://affiliate-api.wego.com",
       }),
     );
   }

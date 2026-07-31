@@ -5,10 +5,13 @@ const optionalNonEmpty = z.preprocess(
   z.string().trim().min(1).optional(),
 );
 
+const portNumber = z.coerce.number().int().min(1).max(65535);
+
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   API_HOST: z.string().default("0.0.0.0"),
-  API_PORT: z.coerce.number().int().min(1).max(65535).default(4000),
+  PORT: portNumber.optional(),
+  API_PORT: portNumber.default(4000),
   WEB_ORIGINS: z.string().default("http://localhost:3000"),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
   DATABASE_URL: optionalNonEmpty,
@@ -21,8 +24,6 @@ const envSchema = z.object({
     .default("https://partners.api.skyscanner.net"),
   SERPAPI_API_KEY: optionalNonEmpty,
   SERPAPI_BASE_URL: z.string().url().default("https://serpapi.com"),
-  WEGO_CLIENT_ID: optionalNonEmpty,
-  WEGO_BASE_URL: z.string().url().default("https://affiliate-api.wego.com"),
   AMADEUS_CLIENT_ID: optionalNonEmpty,
   AMADEUS_CLIENT_SECRET: optionalNonEmpty,
   AMADEUS_BASE_URL: z.string().url().default("https://test.api.amadeus.com"),
@@ -57,8 +58,6 @@ export type ApiConfig = {
     skyscannerBaseUrl: string;
     serpApiKey?: string;
     serpApiBaseUrl: string;
-    wegoClientId?: string;
-    wegoBaseUrl: string;
     amadeusClientId?: string;
     amadeusClientSecret?: string;
     amadeusBaseUrl: string;
@@ -72,7 +71,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
   return {
     nodeEnv: parsed.NODE_ENV,
     host: parsed.API_HOST,
-    port: parsed.API_PORT,
+    port: parsed.PORT ?? parsed.API_PORT,
     webOrigins: parsed.WEB_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean),
     logLevel: parsed.LOG_LEVEL,
     ...(parsed.DATABASE_URL ? { databaseUrl: parsed.DATABASE_URL } : {}),
@@ -89,8 +88,6 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
       skyscannerBaseUrl: parsed.SKYSCANNER_BASE_URL,
       ...(parsed.SERPAPI_API_KEY ? { serpApiKey: parsed.SERPAPI_API_KEY } : {}),
       serpApiBaseUrl: parsed.SERPAPI_BASE_URL,
-      ...(parsed.WEGO_CLIENT_ID ? { wegoClientId: parsed.WEGO_CLIENT_ID } : {}),
-      wegoBaseUrl: parsed.WEGO_BASE_URL,
       ...(parsed.AMADEUS_CLIENT_ID ? { amadeusClientId: parsed.AMADEUS_CLIENT_ID } : {}),
       ...(parsed.AMADEUS_CLIENT_SECRET
         ? { amadeusClientSecret: parsed.AMADEUS_CLIENT_SECRET }
