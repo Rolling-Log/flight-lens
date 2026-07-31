@@ -8,7 +8,7 @@
 
 - 当前版本：V1 开发中
 - 前端：Next.js，部署到 Netlify
-- 后端：Fastify，部署到 Railway
+- 后端：Fastify，通过 Next.js Route Handler 部署为 Netlify Function
 - 数据库：Neon Postgres
 - 包管理：pnpm workspace
 
@@ -37,8 +37,8 @@ pnpm test:e2e
 ## 仓库结构
 
 ```text
-apps/web            Netlify 前端
-apps/api            Railway API
+apps/web            Netlify 前端与同域 API Route Handler
+apps/api            可独立测试的 Fastify API 核心
 packages/contracts  API 与领域契约
 packages/domain     确定性搜索、全价、去重与排序
 packages/connectors 数据源适配器

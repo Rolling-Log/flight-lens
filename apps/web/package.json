@@ -10,6 +10,7 @@
     "lint": "eslint . --max-warnings=0"
   },
   "dependencies": {
+    "@flight-lens/api": "workspace:*",
     "@flight-lens/contracts": "workspace:*",
     "next": "16.2.6",
     "react": "19.2.6",

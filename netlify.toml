@@ -1,10 +1,10 @@
 [build]
-  command = "corepack enable && pnpm install --frozen-lockfile && pnpm build:web"
-  publish = "apps/web/.next"
+  command = "pnpm build:web"
 
 [build.environment]
   NODE_VERSION = "22.22.0"
   PNPM_VERSION = "11.9.0"
+  NETLIFY_NEXT_SKEW_PROTECTION = "true"
 
 [[headers]]
   for = "/*"

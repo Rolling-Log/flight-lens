@@ -124,7 +124,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const localIntentParser = new LocalChineseIntentParser(now);
   const intentParser =
     options.intentParser === undefined
-      ? config.openaiApiKey
+      ? config.openaiIntentParserEnabled && config.openaiApiKey
         ? new FallbackIntentParser(
             new OpenAIIntentParser(config.openaiApiKey, config.openaiModel, now),
             localIntentParser,
@@ -157,6 +157,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     service: "flight-lens-api",
     version: "v1-development",
     database: auditStore ? "configured" : "unconfigured",
+    intentParser:
+      config.openaiIntentParserEnabled && config.openaiApiKey
+        ? "openai_with_local_fallback"
+        : "local_deterministic_zh",
     connectors: {
       configured: connectors.length,
       purchaseHandoffConfigured: connectors.filter(

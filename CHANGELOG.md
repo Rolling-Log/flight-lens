@@ -3,7 +3,7 @@
 ## Unreleased — V1.0.0
 
 - 建立正式单仓多应用基线；
-- 确定 Netlify、Railway、Neon 三层架构；
+- 确定 Netlify Web + Functions、Neon 架构；
 - 建立 SearchIntent、Offer、Connector 和数据库契约；
 - 建立全价校验、去重、排序与对抗式审查核心；
 - 接入 SerpApi Google Flights 与 Skyscanner Live Prices Connector；
@@ -19,5 +19,6 @@
 - 增加无需外部模型密钥的 V1 中文意图解析兜底、保守追问和解析方式披露；
 - 增加受控落地页核价 CLI，记录观察价、无票/故障状态、证据引用和价格偏差基点；
 - 依据最新官方规则否决与多源比较冲突的 Travelpayouts Search API。
-- 修正 Railway shared monorepo 构建、配置发现与平台 `PORT` 监听；
-- 增加 V1 硬门禁与 Netlify、Railway、Neon Staging Runbook。
+- 将 Railway 否决为试用转收费方案，把 Fastify API 适配为 Netlify 上的同域 Next.js Route Handler；
+- 默认拒绝使用 Netlify 自动注入的 AI Gateway 密钥，防止未授权 credits 消耗；
+- 增加 V1 硬门禁与 Netlify、Neon Staging Runbook。

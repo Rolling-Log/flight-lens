@@ -3,6 +3,18 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/app.ts",
+      "development": "./src/app.ts",
+      "default": "./dist/app.js"
+    },
+    "./fetch-handler": {
+      "types": "./src/fetch-handler.ts",
+      "development": "./src/fetch-handler.ts",
+      "default": "./dist/fetch-handler.js"
+    }
+  },
   "scripts": {
     "dev": "tsx watch --conditions=development src/index.ts",
     "build": "tsc -p tsconfig.build.json",

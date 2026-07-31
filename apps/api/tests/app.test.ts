@@ -10,6 +10,7 @@ const config: ApiConfig = {
   port: 4000,
   webOrigins: ["http://localhost:3000"],
   logLevel: "silent",
+  openaiIntentParserEnabled: false,
   openaiModel: "gpt-5.6-luna",
   connectorTimeoutMs: 500,
   connectors: {
