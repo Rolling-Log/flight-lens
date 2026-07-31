@@ -138,8 +138,8 @@ test("maps a SerpApi booking option only when it has a consumer handoff", () => 
         departure_airport: { id: "PVG", name: "Shanghai Pudong", time: "2026-08-24 09:00" },
         arrival_airport: { id: "NRT", name: "Narita", time: "2026-08-24 13:00" },
         duration: 180,
-        flight_number: "MU 523",
-        airline: "China Eastern",
+        flight_number: "CA 8357",
+        airline: "Air China",
       }],
     }],
     intent,
@@ -150,6 +150,8 @@ test("maps a SerpApi booking option only when it has a consumer handoff", () => 
   assert.equal(offers[0]?.seller.name, "Example Airline");
   assert.equal(offers[0]?.totalPrice.amountMinor, 120000);
   assert.equal(offers[0]?.comparable, true);
+  assert.equal(offers[0]?.segments[0]?.marketingCarrier, "CA");
+  assert.equal(offers[0]?.segments[0]?.flightNumber, "8357");
 });
 
 test("keeps POST-only SerpApi handoffs out of comparable results", () => {
