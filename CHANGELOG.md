@@ -14,3 +14,5 @@
 - 区分精确 Offer 落点与 Google Flights 条件结果页重新选择，不改写 opaque POST；
 - 增加统一预算/时间/行李过滤、六类确定性排序、缓存/重试披露和 Connector 健康端点；
 - 增加 Playwright 桌面和移动端 E2E，并接入 GitHub Actions。
+- 增加 Wego Affiliate Flights 候选 Connector、官方 handoff 白名单和 Search-to-Click 合规保护；
+- 依据最新官方规则否决与多源比较冲突的 Travelpayouts Search API。

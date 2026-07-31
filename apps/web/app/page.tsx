@@ -124,6 +124,9 @@ function reportNote(note: string): string {
   if (note.startsWith("FLEXIBLE_DATE_THREE_POINT_PROBE:")) {
     return `三点日期探测：${note.split(":").slice(1).join(":")}`;
   }
+  if (note.startsWith("FLEXIBLE_DATE_PROBE_UNSUPPORTED:")) {
+    return "该来源仅查询基准日，未参与 ±3 天探测";
+  }
   if (note.startsWith("PARTIAL_DATE_PROBE_FAILURE:")) {
     return `部分日期探测失败：${note.split(":").at(-1)}`;
   }
