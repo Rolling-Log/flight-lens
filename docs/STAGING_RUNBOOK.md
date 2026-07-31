@@ -24,6 +24,20 @@
 5. 验证 `searches`、`connector_runs`、`offers` 与 landing-page verification 表存在；
 6. 执行一条 Staging 搜索，确认审计数据写入且不包含供应商密钥或 Token。
 
+对 API 响应中的一个 `Offer.id` 完成人工落地页核价后，在已注入 Staging 数据库变量的受控终端运行：
+
+```bash
+pnpm --filter @flight-lens/database build
+pnpm --filter @flight-lens/database price:verify -- \
+  --offer-id '<Offer.id>' \
+  --outcome observed \
+  --amount '2460.00' \
+  --currency CNY \
+  --evidence 'staging-check:<ticket-or-screenshot-reference>'
+```
+
+无票时使用 `--outcome sold_out` 并省略 `--amount`；落地页故障时使用 `landing_unavailable`。不得把含 Token 的完整跳转 URL 当作证据引用。
+
 Migration 不放入 API 的自动启动流程，避免扩容或并行部署时重复执行。
 
 ## 2. Railway API
@@ -61,10 +75,11 @@ Migration 不放入 API 的自动启动流程，避免扩容或并行部署时�
 1. 先验证表单输入，再验证对话输入；
 2. 执行 `V1_ACCEPTANCE.md` 的受控样本；
 3. 对最低价至少完成一次来源落地页人工复核；
-4. 确认来源覆盖、失败、缓存、价格口径、核验时间和跳转精度都可见；
-5. 验证 Web 只请求 Railway API，不直接持有供应商密钥；
-6. 暂停一个 Connector，确认部分失败不会被描述为“全网最低”；
-7. 回滚到上一个已验证部署，再恢复候选部署。
+4. 确认核价 CLI 写回观察价或无票状态，并核对返回的偏差基点；
+5. 确认来源覆盖、失败、缓存、价格口径、核验时间和跳转精度都可见；
+6. 验证 Web 只请求 Railway API，不直接持有供应商密钥；
+7. 暂停一个 Connector，确认部分失败不会被描述为“全网最低”；
+8. 回滚到上一个已验证部署，再恢复候选部署。
 
 ## 5. 留痕与清理
 
