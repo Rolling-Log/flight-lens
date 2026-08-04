@@ -28,6 +28,7 @@ const envSchema = z.object({
     .default("https://partners.api.skyscanner.net"),
   SERPAPI_API_KEY: optionalNonEmpty,
   SERPAPI_BASE_URL: z.string().url().default("https://serpapi.com"),
+  SERPAPI_MONTHLY_CREDIT_CAP: z.coerce.number().int().min(5).max(250).default(200),
   AMADEUS_CLIENT_ID: optionalNonEmpty,
   AMADEUS_CLIENT_SECRET: optionalNonEmpty,
   AMADEUS_BASE_URL: z.string().url().default("https://test.api.amadeus.com"),
@@ -67,6 +68,7 @@ export type ApiConfig = {
     skyscannerBaseUrl: string;
     serpApiKey?: string;
     serpApiBaseUrl: string;
+    serpApiMonthlyCreditCap: number;
     amadeusClientId?: string;
     amadeusClientSecret?: string;
     amadeusBaseUrl: string;
@@ -99,6 +101,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
       skyscannerBaseUrl: parsed.SKYSCANNER_BASE_URL,
       ...(parsed.SERPAPI_API_KEY ? { serpApiKey: parsed.SERPAPI_API_KEY } : {}),
       serpApiBaseUrl: parsed.SERPAPI_BASE_URL,
+      serpApiMonthlyCreditCap: parsed.SERPAPI_MONTHLY_CREDIT_CAP,
       ...(parsed.AMADEUS_CLIENT_ID ? { amadeusClientId: parsed.AMADEUS_CLIENT_ID } : {}),
       ...(parsed.AMADEUS_CLIENT_SECRET
         ? { amadeusClientSecret: parsed.AMADEUS_CLIENT_SECRET }

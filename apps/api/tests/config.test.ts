@@ -16,6 +16,7 @@ test("treats blank optional credentials as unconfigured", () => {
   assert.equal(config.openaiApiKey, undefined);
   assert.equal(config.connectors.skyscannerApiKey, undefined);
   assert.equal(config.connectors.serpApiKey, "configured");
+  assert.equal(config.connectors.serpApiMonthlyCreditCap, 200);
 });
 
 test("requires an explicit opt-in before an injected OpenAI key can be used", () => {
@@ -52,5 +53,15 @@ test("leaves response time for the serverless wrapper after connector timeout", 
   assert.equal(
     loadConfig({ NODE_ENV: "production", AUDIT_TIMEOUT_MS: "1500" }).auditTimeoutMs,
     1_500,
+  );
+});
+
+test("supports a bounded SerpApi monthly free-credit budget", () => {
+  assert.equal(
+    loadConfig({
+      NODE_ENV: "production",
+      SERPAPI_MONTHLY_CREDIT_CAP: "100",
+    }).connectors.serpApiMonthlyCreditCap,
+    100,
   );
 });
