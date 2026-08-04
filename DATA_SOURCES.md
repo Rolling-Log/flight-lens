@@ -38,7 +38,7 @@
 | 来源 | 当前角色 | 结论 | V1 发布条件 |
 |---|---|---|---|
 | Skyscanner Flights Live Prices | 购买交接 Connector 已实现，合作申请已提交 | 已实现 create/poll、PriceUnit、leg/segment、实际 agent、deeplink、多票与自助中转拦截、官方品牌展示；2026-07-31 已提交 Partnerships 申请，等待审批 | 获批 API Key、生产查询、deeplink 与支付页价格复核 |
-| SerpApi Google Flights | 已完成首个生产受控验证；仅允许 `$0` Free 计划 | 已实现单程/往返选择、booking options、实际售卖方、GET 精确落点与官方 Google Flights 条件结果页降级；POST 请求不会被违规改写。官方 Free 计划当前为每月 250 次、无需信用卡，不是限时试用；运行时会在搜索前拒绝付费账号或不足额度，并禁止自动灵活日期扩搜。为满足 Netlify 时限，实时查询使用 SerpApi 默认快速模式而非更慢的 `deep_search`，并保留支付落地页复核要求 | 绝不自动升级；再验证国内和入境路线、往返链路、价格新鲜度和落点重选提示 |
+| SerpApi Google Flights | 已完成首个生产受控验证；仅允许 `$0` Free 计划 | 已实现单程/往返选择、booking options、实际售卖方、GET 精确落点与官方 Google Flights 条件结果页降级；POST 请求不会被违规改写。官方 Free 计划当前为每月 250 次、无需信用卡，不是限时试用；运行时会在搜索前拒绝付费账号或不足额度，并禁止自动灵活日期扩搜。为满足 Netlify 时限，实时查询使用 SerpApi 默认快速模式而非更慢的 `deep_search`。附近机场使用官方支持的逗号分隔多出发机场参数，只展开 V1 已登记机场组并在来源报告披露 | 绝不自动升级；再验证国内和入境路线、往返链路、价格新鲜度和落点重选提示 |
 | Wego Affiliate Flights | 拒绝接入 | 生产 API 当前要求年费，测试 Key 最长两周，违反零付费硬约束；已移除 Connector 和申请材料 | 除非官方未来提供长期 `$0` 生产计划，否则不再评估 |
 | Travelpayouts / Aviasales Search API | 拒绝接入 | 2025-11-01 起的新 Search API 要求已有 50,000 MAU，且官方使用规则禁止与其他航班元搜索 API 合并；与本产品核心冲突 | 不接入；Data API 也不能伪装成实时可购买价格 |
 | Kiwi.com Tequila | 暂不接入 | 2024 年起新合作改为邀请制，只面向与其战略匹配的选定合作方 | 仅在取得明确邀请与允许多源比较的合同后重审 |

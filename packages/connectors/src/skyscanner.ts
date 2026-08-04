@@ -595,6 +595,9 @@ export class SkyscannerConnector implements FlightConnector {
     return {
       offers: mapSkyscannerSearchResults(results, intent, context.requestId),
       providerRequestId: context.requestId,
+      ...(intent.includeNearbyAirports
+        ? { notes: [`NEARBY_ORIGIN_PROVIDER_EXPANSION:${intent.origin.code}`] }
+        : {}),
     };
   }
 

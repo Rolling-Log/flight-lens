@@ -36,6 +36,7 @@ export type ConnectorSearchContext = {
 export type ConnectorSearchResult = {
   offers: Offer[];
   providerRequestId?: string;
+  notes?: string[];
 };
 
 export interface FlightConnector {
@@ -226,6 +227,9 @@ export async function executeConnector(
       ...(successful[0]?.providerRequestId
         ? { providerRequestId: successful[0].providerRequestId }
         : {}),
+      ...(successful.some((item) => item.notes?.length)
+        ? { notes: [...new Set(successful.flatMap((item) => item.notes ?? []))] }
+        : {}),
     };
     const finished = Date.now();
     const probedDates = variants.map((variant) =>
@@ -246,6 +250,7 @@ export async function executeConnector(
         ...(failed.length > 0 ? { errorCode: "PARTIAL_DATE_PROBE_FAILURE" } : {}),
         retryable: failed.length > 0,
         notes: [
+          ...(result.notes ?? []),
           ...(intent.flexibleDays > 0
             ? connector.metadata.supportsFlexibleDateProbe === false
               ? [`FLEXIBLE_DATE_PROBE_UNSUPPORTED:${connector.metadata.id}`]
@@ -540,6 +545,42 @@ type SerpApiConfig = {
   baseUrl: string;
 };
 
+const V1_NEARBY_ORIGIN_GROUPS = [
+  ["PEK", "PKX"],
+  ["PVG", "SHA"],
+  ["CTU", "TFU"],
+  ["HND", "NRT"],
+  ["KIX", "ITM", "UKB"],
+  ["ICN", "GMP"],
+  ["TPE", "TSA"],
+  ["BKK", "DMK"],
+] as const;
+
+export function serpApiOriginSelection(intent: SearchIntent): {
+  departureId: string;
+  notes: string[];
+} {
+  if (!intent.includeNearbyAirports) {
+    return { departureId: intent.origin.code, notes: [] };
+  }
+  const group = V1_NEARBY_ORIGIN_GROUPS.find((codes) =>
+    codes.some((code) => code === intent.origin.code),
+  );
+  if (!group) {
+    return {
+      departureId: intent.origin.code,
+      notes: [
+        `NEARBY_ORIGIN_NO_CONFIGURED_ALTERNATIVES:${intent.origin.code}`,
+      ],
+    };
+  }
+  const ordered = [intent.origin.code, ...group.filter((code) => code !== intent.origin.code)];
+  return {
+    departureId: ordered.join(","),
+    notes: [`NEARBY_ORIGIN_EXPANDED:${ordered.join(",")}`],
+  };
+}
+
 type SerpApiAirport = {
   id?: string;
   name?: string;
@@ -656,8 +697,9 @@ export class SerpApiGoogleFlightsConnector implements FlightConnector {
 
   async search(intent: SearchIntent, context: ConnectorSearchContext): Promise<ConnectorSearchResult> {
     await this.ensureFreeQuota(intent, context.signal);
+    const originSelection = serpApiOriginSelection(intent);
     const searchParameters: Record<string, string> = {
-      departure_id: intent.origin.code,
+      departure_id: originSelection.departureId,
       arrival_id: intent.destination.code,
       outbound_date: intent.departureDate,
       ...(intent.returnDate ? { return_date: intent.returnDate } : {}),
@@ -721,6 +763,7 @@ export class SerpApiGoogleFlightsConnector implements FlightConnector {
 
     return {
       offers,
+      ...(originSelection.notes.length ? { notes: originSelection.notes } : {}),
       ...(initial.search_metadata?.id
         ? { providerRequestId: initial.search_metadata.id }
         : {}),

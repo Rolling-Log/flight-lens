@@ -7,6 +7,7 @@ import {
   executeConnector,
   mapSerpApiBookingPayload,
   mapSkyscannerSearchResults,
+  serpApiOriginSelection,
   SerpApiGoogleFlightsConnector,
   type FlightConnector,
 } from "../src/index.js";
@@ -30,6 +31,35 @@ const intent: SearchIntent = {
   pendingQuestions: [],
 };
 
+test("expands only configured nearby origin airports for SerpApi", () => {
+  assert.deepEqual(
+    serpApiOriginSelection({
+      ...intent,
+      origin: { kind: "airport", code: "PVG" },
+      includeNearbyAirports: true,
+    }),
+    {
+      departureId: "PVG,SHA",
+      notes: ["NEARBY_ORIGIN_EXPANDED:PVG,SHA"],
+    },
+  );
+  assert.deepEqual(
+    serpApiOriginSelection({
+      ...intent,
+      origin: { kind: "airport", code: "CAN" },
+      includeNearbyAirports: true,
+    }),
+    {
+      departureId: "CAN",
+      notes: ["NEARBY_ORIGIN_NO_CONFIGURED_ALTERNATIVES:CAN"],
+    },
+  );
+  assert.deepEqual(serpApiOriginSelection(intent), {
+    departureId: "PVG",
+    notes: [],
+  });
+});
+
 test("classifies an empty successful source distinctly from failure", async () => {
   const connector: FlightConnector = {
     metadata: {
@@ -43,10 +73,17 @@ test("classifies an empty successful source distinctly from failure", async () =
       configured: true,
     },
     health: async () => ({ state: "healthy", checkedAt: new Date().toISOString() }),
-    search: async () => ({ offers: [] }),
+    search: async () => ({
+      offers: [],
+      notes: ["NEARBY_ORIGIN_PROVIDER_EXPANSION:PVG"],
+    }),
   };
   const execution = await executeConnector(connector, intent, crypto.randomUUID(), 100);
   assert.equal(execution.report.state, "empty");
+  assert.equal(
+    execution.report.notes.includes("NEARBY_ORIGIN_PROVIDER_EXPANSION:PVG"),
+    true,
+  );
 });
 
 test("runs a disclosed three-point probe for a limited flexible-date search", async () => {
