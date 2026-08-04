@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { searchIntentSchema } from "../src/index.js";
+import { exchangeRateSchema, searchIntentSchema } from "../src/index.js";
 
 test("round trip requires a return date", () => {
   const result = searchIntentSchema.safeParse({
@@ -50,4 +50,17 @@ test("rejects an inverted time window and inconsistent direct-only stops", () =>
     maxStops: 1,
   });
   assert.equal(result.success, false);
+});
+
+test("normalizes and timestamps exchange-rate evidence", () => {
+  const rate = exchangeRateSchema.parse({
+    baseCurrency: "usd",
+    quoteCurrency: "cny",
+    rate: 7.18,
+    source: "Reference FX",
+    quotedAt: "2026-08-04T12:00:00+08:00",
+  });
+  assert.equal(rate.baseCurrency, "USD");
+  assert.equal(rate.quoteCurrency, "CNY");
+  assert.equal(rate.quotedAt, "2026-08-04T12:00:00+08:00");
 });

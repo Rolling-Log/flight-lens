@@ -15,8 +15,39 @@ export function validatePriceArithmetic(offer: Offer): string[] {
   if (calculated !== offer.totalPrice.amountMinor) {
     issues.push("TOTAL_PRICE_MISMATCH");
   }
-  if (offer.totalPrice.currency !== offer.priceComponents[0]?.currency) {
+  if (
+    offer.priceComponents.some(
+      (component) => component.currency !== offer.totalPrice.currency,
+    )
+  ) {
     issues.push("MIXED_COMPONENT_CURRENCY");
+  }
+  return issues;
+}
+
+export function validateCurrencyConversion(offer: Offer): string[] {
+  const issues: string[] = [];
+  if (offer.totalPrice.currency === "CNY") {
+    if (
+      offer.totalPriceCny &&
+      (offer.totalPriceCny.currency !== "CNY" ||
+        offer.totalPriceCny.amountMinor !== offer.totalPrice.amountMinor)
+    ) {
+      issues.push("CNY_TOTAL_MISMATCH");
+    }
+    return issues;
+  }
+
+  if (!offer.totalPriceCny || offer.totalPriceCny.currency !== "CNY") {
+    issues.push("CNY_CONVERSION_MISSING");
+  }
+  if (!offer.exchangeRate) {
+    issues.push("EXCHANGE_RATE_EVIDENCE_MISSING");
+  } else if (
+    offer.exchangeRate.baseCurrency !== offer.totalPrice.currency ||
+    offer.exchangeRate.quoteCurrency !== "CNY"
+  ) {
+    issues.push("EXCHANGE_RATE_CURRENCY_MISMATCH");
   }
   return issues;
 }
@@ -260,6 +291,7 @@ export function reviewOffers(
   for (const offer of offers) {
     for (const issue of [
       ...validatePriceArithmetic(offer),
+      ...validateCurrencyConversion(offer),
       ...validateItineraryStructure(offer),
     ]) {
       findings.push({
@@ -268,6 +300,8 @@ export function reviewOffers(
         message:
           issue === "TOTAL_PRICE_MISMATCH" || issue === "MIXED_COMPONENT_CURRENCY"
             ? "报价构成与最终总价不一致，不能参与最低全价比较。"
+            : issue.includes("CNY") || issue.includes("EXCHANGE_RATE")
+              ? "外币报价缺少可验证的人民币换算来源或时间，不能参与最低全价比较。"
             : "行程的去返程、航段或总耗时结构不一致，不能参与推荐。",
         offerId: offer.id,
       });
@@ -299,8 +333,8 @@ export function reviewOffers(
     if (offer.eligibility.length > 0) {
       findings.push({
         code: "CONDITIONAL_PRICE",
-        severity: "warning",
-        message: "该报价带有购买资格条件，不能与无门槛公开价静默混排。",
+        severity: "blocking",
+        message: "该报价带有购买资格条件，不能进入无门槛公开最低价或自然推荐。",
         offerId: offer.id,
       });
     }
@@ -315,6 +349,31 @@ export function reviewOffers(
     });
   }
   return findings;
+}
+
+export function applyAdversarialComparability(
+  offers: readonly Offer[],
+  reports: readonly ConnectorReport[],
+): Offer[] {
+  const blockingCodesByOffer = new Map<string, string[]>();
+  for (const finding of reviewOffers(offers, reports)) {
+    if (finding.severity !== "blocking" || !finding.offerId) continue;
+    const codes = blockingCodesByOffer.get(finding.offerId) ?? [];
+    codes.push(finding.code);
+    blockingCodesByOffer.set(finding.offerId, codes);
+  }
+  return offers.map((offer) => {
+    const blockingCodes = blockingCodesByOffer.get(offer.id) ?? [];
+    return blockingCodes.length === 0
+      ? offer
+      : {
+          ...offer,
+          comparable: false,
+          incomparabilityReasons: [
+            ...new Set([...offer.incomparabilityReasons, ...blockingCodes]),
+          ],
+        };
+  });
 }
 
 export function disclosureStatement(reports: readonly ConnectorReport[]): string {

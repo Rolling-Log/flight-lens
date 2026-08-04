@@ -799,6 +799,16 @@ export default function Home() {
                               {offer.priceComponents.map((component) => (
                                 <span key={`${offer.id}-${component.kind}-${component.label}`}>{component.label}<b>{new Intl.NumberFormat("zh-CN", { style: "currency", currency: component.currency }).format(component.amountMinor / 100)}</b></span>
                               ))}
+                              {offer.exchangeRate && (
+                                <span>
+                                  人民币换算汇率
+                                  <b>
+                                    1 {offer.exchangeRate.baseCurrency} = {offer.exchangeRate.rate} {offer.exchangeRate.quoteCurrency}
+                                    {" · "}{offer.exchangeRate.source}
+                                    {" · "}{new Date(offer.exchangeRate.quotedAt).toLocaleString("zh-CN")}
+                                  </b>
+                                </span>
+                              )}
                               <span>最终应付<b>{money(offer)}</b></span>
                               {offer.seller.handoffPrecision === "search_results" && (
                                 <p className="handoff-warning">

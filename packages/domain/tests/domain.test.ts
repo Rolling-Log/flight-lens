@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Offer } from "@flight-lens/contracts";
 import {
+  applyAdversarialComparability,
   applyIntentConstraints,
   deduplicateOffers,
   rankByBestBaggage,
@@ -10,6 +11,7 @@ import {
   rankByShortestDuration,
   reviewOffers,
   sumRequiredPriceComponents,
+  validateCurrencyConversion,
   validateItineraryStructure,
   validatePriceArithmetic,
 } from "../src/index.js";
@@ -71,6 +73,63 @@ test("blocks a mismatched total", () => {
   const invalid = offer({ totalPrice: { amountMinor: 11000, currency: "CNY" } });
   assert.deepEqual(validatePriceArithmetic(invalid), ["TOTAL_PRICE_MISMATCH"]);
   assert.equal(reviewOffers([invalid], []).some((finding) => finding.severity === "blocking"), true);
+});
+
+test("blocks a mixed currency in any required price component", () => {
+  const invalid = offer({
+    priceComponents: [
+      { kind: "base", label: "Base", amountMinor: 10000, currency: "CNY", required: true },
+      { kind: "tax", label: "Tax", amountMinor: 2500, currency: "USD", required: true },
+    ],
+  });
+  assert.deepEqual(validatePriceArithmetic(invalid), ["MIXED_COMPONENT_CURRENCY"]);
+});
+
+test("requires source and timestamp evidence for foreign-currency conversion", () => {
+  const foreign = offer({
+    priceComponents: [
+      { kind: "base", label: "Total", amountMinor: 10000, currency: "USD", required: true },
+    ],
+    totalPrice: { amountMinor: 10000, currency: "USD" },
+    totalPriceCny: { amountMinor: 71800, currency: "CNY" },
+  });
+  assert.deepEqual(validateCurrencyConversion(foreign), ["EXCHANGE_RATE_EVIDENCE_MISSING"]);
+  assert.equal(
+    reviewOffers([foreign], []).some(
+      (finding) =>
+        finding.code === "EXCHANGE_RATE_EVIDENCE_MISSING" &&
+        finding.severity === "blocking",
+    ),
+    true,
+  );
+
+  const evidenced = offer({
+    ...foreign,
+    exchangeRate: {
+      baseCurrency: "USD",
+      quoteCurrency: "CNY",
+      rate: 7.18,
+      source: "Reference FX",
+      quotedAt: "2026-08-04T12:00:00+08:00",
+    },
+  });
+  assert.deepEqual(validateCurrencyConversion(evidenced), []);
+});
+
+test("turns conditional prices into disclosed non-comparable offers", () => {
+  const conditional = offer({
+    seller: {
+      id: "seller",
+      name: "Seller",
+      kind: "ota",
+      deepLink: "https://example.com/checkout",
+      handoffPrecision: "exact_offer",
+    },
+    eligibility: ["NEW_CUSTOMER_ONLY"],
+  });
+  const [reviewed] = applyAdversarialComparability([conditional], []);
+  assert.equal(reviewed?.comparable, false);
+  assert.equal(reviewed?.incomparabilityReasons.includes("CONDITIONAL_PRICE"), true);
 });
 
 test("keeps the cheaper duplicate for one seller", () => {
