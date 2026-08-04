@@ -17,5 +17,6 @@ SerpApi 真实查询前必须验证账号仍为 `$0` 计划且剩余额度足够
 缓存测试必须验证 `CACHE_HIT`/`CACHE_STALE_FALLBACK` 被披露，不能只验证第二次请求更快。
 Web 单元测试必须锁定本地分离 API 与 Netlify 同域 `/api` Route Handler 的地址选择，Staging 验证不能只检查 `/api/health`，还必须从页面执行一次不消耗供应商额度的意图解析。
 附近机场测试必须覆盖已配置出发机场组的展开、未配置机场的显式披露以及 Connector 执行说明向来源报告的传递；V1 不得扩展目的地机场。
+API 测试必须使用永不完成的审计存储替身，证明审计超过预算时搜索仍在边界内返回，并披露 `AUDIT_PERSIST_TIMEOUT`；真实 Staging 请求不得无限等待数据库。
 
 2026-07-31 已完成一次 SerpApi 生产受控查询；真实凭据只存在于 Git 忽略的本地环境文件中。Skyscanner 生产验证等待 Partnerships 审批，不在 CI 中伪造。

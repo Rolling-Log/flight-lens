@@ -34,8 +34,9 @@ const envSchema = z.object({
   DUFFEL_ACCESS_TOKEN: optionalNonEmpty,
   DUFFEL_BASE_URL: z.string().url().default("https://api.duffel.com"),
   // Netlify Free functions stop at 30 seconds. Leave enough time to normalize,
-  // persist audit data, and return a transparent timeout response.
-  CONNECTOR_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(25_000),
+  // attempt a bounded audit write, and return a transparent timeout response.
+  CONNECTOR_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(20_000),
+  AUDIT_TIMEOUT_MS: z.coerce.number().int().min(250).max(10_000).default(3_000),
   CONNECTOR_MAX_RETRIES: z.coerce.number().int().min(0).max(3).default(1),
   CONNECTOR_CACHE_TTL_MS: z.coerce.number().int().min(0).max(300_000).default(60_000),
   CONNECTOR_STALE_IF_ERROR_MS: z.coerce
@@ -57,6 +58,7 @@ export type ApiConfig = {
   openaiApiKey?: string;
   openaiModel: string;
   connectorTimeoutMs: number;
+  auditTimeoutMs: number;
   connectorMaxRetries?: number;
   connectorCacheTtlMs?: number;
   connectorStaleIfErrorMs?: number;
@@ -86,6 +88,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     ...(parsed.OPENAI_API_KEY ? { openaiApiKey: parsed.OPENAI_API_KEY } : {}),
     openaiModel: parsed.OPENAI_MODEL,
     connectorTimeoutMs: parsed.CONNECTOR_TIMEOUT_MS,
+    auditTimeoutMs: parsed.AUDIT_TIMEOUT_MS,
     connectorMaxRetries: parsed.CONNECTOR_MAX_RETRIES,
     connectorCacheTtlMs: parsed.CONNECTOR_CACHE_TTL_MS,
     connectorStaleIfErrorMs: parsed.CONNECTOR_STALE_IF_ERROR_MS,

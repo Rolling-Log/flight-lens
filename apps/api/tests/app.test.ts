@@ -13,6 +13,7 @@ const config: ApiConfig = {
   openaiIntentParserEnabled: false,
   openaiModel: "gpt-5.6-luna",
   connectorTimeoutMs: 500,
+  auditTimeoutMs: 50,
   connectors: {
     skyscannerBaseUrl: "https://partners.api.skyscanner.net",
     serpApiBaseUrl: "https://serpapi.com",
@@ -126,6 +127,46 @@ test("returns transparent coverage for a configured empty source", async () => {
   assert.equal(response.json().disclosure.successfulSources, 1);
   assert.equal(response.json().offers.length, 0);
   assert.equal(response.json().audit.persisted, false);
+  await app.close();
+});
+
+test("returns search results when audit persistence exceeds its runtime budget", async () => {
+  const connector: FlightConnector = {
+    metadata: {
+      id: "bounded-audit",
+      name: "Bounded audit",
+      kind: "aggregator",
+      environment: "sandbox",
+      authorization: "self_service_api",
+      resultRole: "verification",
+      handoff: "none",
+      configured: true,
+    },
+    health: async () => ({ state: "healthy", checkedAt: new Date().toISOString() }),
+    search: async () => ({ offers: [] }),
+  };
+  const app = await buildApp({
+    config: { ...config, auditTimeoutMs: 10 },
+    connectors: [connector],
+    auditStore: {
+      persist: async () => await new Promise<void>(() => undefined),
+      close: async () => undefined,
+    },
+    now: fixedNow,
+  });
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/v1/searches",
+    payload: validIntent,
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json().audit, {
+    configured: true,
+    persisted: false,
+    errorCode: "AUDIT_PERSIST_TIMEOUT",
+  });
   await app.close();
 });
 
