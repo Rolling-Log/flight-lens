@@ -15,5 +15,6 @@ Playwright E2E 在桌面 Chromium 和移动端 Chromium 中验证：完整对话
 SerpApi 契约测试必须覆盖 booking token 请求携带原始搜索参数、opaque POST 不被改写、官方结果页降级和交接精度提示。
 SerpApi 真实查询前必须验证账号仍为 `$0` 计划且剩余额度足够；付费计划或低额度都应在消耗搜索积分前失败。
 缓存测试必须验证 `CACHE_HIT`/`CACHE_STALE_FALLBACK` 被披露，不能只验证第二次请求更快。
+Web 单元测试必须锁定本地分离 API 与 Netlify 同域 `/api` Route Handler 的地址选择，Staging 验证不能只检查 `/api/health`，还必须从页面执行一次不消耗供应商额度的意图解析。
 
 2026-07-31 已完成一次 SerpApi 生产受控查询；真实凭据只存在于 Git 忽略的本地环境文件中。Skyscanner 生产验证等待 Partnerships 审批，不在 CI 中伪造。
