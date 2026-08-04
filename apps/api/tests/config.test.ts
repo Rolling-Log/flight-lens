@@ -40,3 +40,11 @@ test("prefers the platform PORT while retaining API_PORT for local development",
     8080,
   );
 });
+
+test("leaves response time for the serverless wrapper after connector timeout", () => {
+  assert.equal(loadConfig({ NODE_ENV: "production" }).connectorTimeoutMs, 25_000);
+  assert.equal(
+    loadConfig({ NODE_ENV: "production", CONNECTOR_TIMEOUT_MS: "12000" }).connectorTimeoutMs,
+    12_000,
+  );
+});

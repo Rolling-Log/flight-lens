@@ -669,7 +669,9 @@ export class SerpApiGoogleFlightsConnector implements FlightConnector {
       hl: "en",
       sort_by: "2",
       stops: intent.directOnly ? "1" : String(Math.min(3, intent.maxStops + 1)),
-      deep_search: "true",
+      // SerpApi documents deep_search as materially slower. Booking Options
+      // still provide seller-level prices without it, so keep the default
+      // fast mode and disclose that the landing page requires revalidation.
       no_cache: "true",
       ...(intent.departureTime?.earliest && intent.departureTime.latest
         ? {

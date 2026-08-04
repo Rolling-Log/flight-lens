@@ -33,7 +33,9 @@ const envSchema = z.object({
   AMADEUS_BASE_URL: z.string().url().default("https://test.api.amadeus.com"),
   DUFFEL_ACCESS_TOKEN: optionalNonEmpty,
   DUFFEL_BASE_URL: z.string().url().default("https://api.duffel.com"),
-  CONNECTOR_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(30_000),
+  // Netlify Free functions stop at 30 seconds. Leave enough time to normalize,
+  // persist audit data, and return a transparent timeout response.
+  CONNECTOR_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(25_000),
   CONNECTOR_MAX_RETRIES: z.coerce.number().int().min(0).max(3).default(1),
   CONNECTOR_CACHE_TTL_MS: z.coerce.number().int().min(0).max(300_000).default(60_000),
   CONNECTOR_STALE_IF_ERROR_MS: z.coerce
