@@ -9,6 +9,7 @@ import type {
 import Image from "next/image";
 import { useMemo, useState } from "react";
 import { resolveApiBase } from "../src/api-base";
+import { resultSourceStatus } from "../src/result-source-status";
 
 type Mode = "agent" | "form";
 type SortKey =
@@ -377,12 +378,9 @@ export default function Home() {
   const usesSkyscanner = result?.offers.some(
     (offer) => offer.connectorId === "skyscanner-live-prices",
   ) ?? false;
-  const usesCache = result?.connectorReports.some((report) =>
-    report.notes.some((note) => note.startsWith("CACHE_")),
-  ) ?? false;
-  const usesStaleCache = result?.connectorReports.some((report) =>
-    report.notes.some((note) => note.startsWith("CACHE_STALE_FALLBACK:")),
-  ) ?? false;
+  const sourceStatus = result
+    ? resultSourceStatus(result.offers, result.connectorReports)
+    : null;
 
   return (
     <main>
@@ -603,14 +601,8 @@ export default function Home() {
               <p>{result?.intent.departureDate ?? intent.departureDate} · {result?.intent.adults ?? intent.adults} 位成人 · 经济舱 · 统一 Offer 口径</p>
             </div>
             {result && (
-              <div className={`demo-badge ${result.offers.some((offer) => offer.environment === "production") && !usesStaleCache ? "production-badge" : ""}`}>
-                {usesStaleCache
-                  ? "实时来源失败 · 已披露旧缓存降级"
-                  : usesCache
-                    ? "生产来源 · 已披露新鲜缓存"
-                    : result.offers.some((offer) => offer.environment === "production")
-                      ? "实时生产来源"
-                  : "Sandbox 来源 · 不代表可购买库存"}
+              <div className={`demo-badge ${sourceStatus?.productionStyle ? "production-badge" : ""}`}>
+                {sourceStatus?.label}
               </div>
             )}
           </div>
