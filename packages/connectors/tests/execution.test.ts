@@ -296,9 +296,16 @@ test("forwards the original search parameters when resolving SerpApi booking opt
   });
 
   const bookingRequest = requestedUrls.find((url) => url.searchParams.has("booking_token"));
+  const initialRequest = requestedUrls.find((url) =>
+    url.pathname === "/search.json" &&
+    !url.searchParams.has("booking_token") &&
+    !url.searchParams.has("departure_token")
+  );
   assert.equal(bookingRequest?.searchParams.get("departure_id"), "PVG");
   assert.equal(bookingRequest?.searchParams.get("arrival_id"), "NRT");
   assert.equal(bookingRequest?.searchParams.get("outbound_date"), "2026-08-24");
+  assert.equal(initialRequest?.searchParams.get("deep_search"), null);
+  assert.equal(initialRequest?.searchParams.get("no_cache"), "true");
   assert.equal(result.offers.length, 1);
 });
 
