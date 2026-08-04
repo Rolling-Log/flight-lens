@@ -266,7 +266,14 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     }
   });
 
-  app.post("/v1/searches", async (request, reply) => {
+  app.post("/v1/searches", {
+    config: {
+      rateLimit: {
+        max: 2,
+        timeWindow: "1 minute",
+      },
+    },
+  }, async (request, reply) => {
     const parsed = searchIntentSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({

@@ -170,6 +170,44 @@ test("returns search results when audit persistence exceeds its runtime budget",
   await app.close();
 });
 
+test("limits the quota-consuming search route more strictly than read-only APIs", async () => {
+  const connector: FlightConnector = {
+    metadata: {
+      id: "rate-limit-search",
+      name: "Rate limit search",
+      kind: "aggregator",
+      environment: "sandbox",
+      authorization: "self_service_api",
+      resultRole: "verification",
+      handoff: "none",
+      configured: true,
+    },
+    health: async () => ({ state: "healthy", checkedAt: new Date().toISOString() }),
+    search: async () => ({ offers: [] }),
+  };
+  const app = await buildApp({
+    config,
+    connectors: [connector],
+    auditStore: null,
+    now: fixedNow,
+  });
+
+  const search = () => app.inject({
+    method: "POST",
+    url: "/v1/searches",
+    payload: validIntent,
+  });
+  assert.equal((await search()).statusCode, 200);
+  assert.equal((await search()).statusCode, 200);
+  const limited = await search();
+  assert.equal(limited.statusCode, 429);
+  assert.equal(limited.headers["x-ratelimit-limit"], "2");
+
+  const health = await app.inject({ method: "GET", url: "/health" });
+  assert.equal(health.statusCode, 200);
+  await app.close();
+});
+
 test("reports live connector health without exposing credentials", async () => {
   const connector: FlightConnector = {
     metadata: {

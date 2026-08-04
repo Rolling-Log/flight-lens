@@ -26,3 +26,4 @@
 - 修复 Netlify 公网部署把前端请求发往 `/v1/*` 而不是同域 Route Handler `/api/v1/*` 的问题，并加入生产/本地 API 基址回归测试。
 - 让 SerpApi 在单次查询中真实展开 V1 已配置的附近出发机场组，并把已展开或无替代机场状态传递到来源覆盖报告；Skyscanner 的原生出发地扩展同样留痕。
 - 为 Connector 和 Neon 审计写入分别设置 20 秒与 3 秒运行时预算；审计超时以 `AUDIT_PERSIST_TIMEOUT` 降级披露，不能再阻塞航班结果返回。
+- 为 `/api/v1/searches` 增加 Netlify 边缘层与 Fastify 双层每 IP 每分钟 2 次限流，降低公开候选环境被滥用耗尽免费供应商额度的风险。
