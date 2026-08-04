@@ -10,6 +10,7 @@
 - 不保存供应商 Token、支付或证件信息；
 - Runtime 使用池化数据库连接，Migration 使用直连；
 - 依赖锁定并进入 CI；
+- CI 在构建和测试前执行 `pnpm audit --prod --audit-level high`；2026-08-04 对候选依赖完成专项修复后，`pnpm audit --prod` 返回 `No known vulnerabilities found`；
 - 生产只允许 HTTPS；
 - Web 与 API 都由 Next.js 显式设置防嗅探、禁止嵌入、Referrer、权限和跨源窗口隔离响应头；Netlify 配置保留同类兜底；
 - 管理端启用前必须有强认证与最小权限。
