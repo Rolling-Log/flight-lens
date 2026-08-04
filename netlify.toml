@@ -6,17 +6,6 @@
   PNPM_VERSION = "11.9.0"
   NETLIFY_NEXT_SKEW_PROTECTION = "true"
 
-[[redirects]]
-  from = "/api/v1/searches"
-  to = "/api/v1/searches"
-  status = 200
-  force = true
-
-  [redirects.rate_limit]
-    window_limit = 2
-    window_size = 60
-    aggregate_by = ["ip", "domain"]
-
 [[headers]]
   for = "/*"
   [headers.values]
