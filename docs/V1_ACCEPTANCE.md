@@ -37,10 +37,10 @@ V1 的目标不是证明“能显示航班”，而是证明系统能稳定、�
 
 ## 已完成的 Staging 证据
 
-初次真实检索记录时间：2026-07-31 15:52 CST；本轮候选复核时间：2026-08-04 13:30 CST。
+初次真实检索记录时间：2026-07-31 15:52 CST；本轮候选复核时间：2026-08-04 13:48 CST。
 
-- Git 运行时候选提交：`833f32f`（包含附近始发机场执行、双输入一致性、Netlify 同域 API、有界搜索运行时、免费额度防滥用、不合格报价隔离、来源状态披露、Offer 信任不变量与账户级 credit 门禁）；
-- Netlify 项目：`flight-lens-staging`，当前候选 Deploy：`6a71786b4e63d9d64a96ec46`，固定候选地址：<https://v1-candidate--flight-lens-staging.netlify.app>；
+- Git 运行时候选提交：`3c16cff`（包含附近始发机场执行、双输入一致性、Netlify 同域 API、有界搜索运行时、免费额度防滥用、不合格报价隔离、来源状态披露、Offer 信任不变量、账户级 credit 门禁与依赖安全修复）；
+- Netlify 项目：`flight-lens-staging`，当前候选 Deploy：`6a717ccd8705207dd19e52a9`，固定候选地址：<https://v1-candidate--flight-lens-staging.netlify.app>；
 - Neon 项目：`flight-lens`，独立 `staging` 分支；迁移成功；
 - `/api/health`：HTTP 200，数据库为 `configured`，本地确定性中文解析器启用，1 个实时 Connector 已配置；
 - SerpApi 账户健康：`healthy`，仅允许活动中的 `$0` 套餐；branch-deploy 的 `SERPAPI_MONTHLY_CREDIT_CAP=100` 已由 Netlify CLI 回读确认，免费配额不足、月度上限将被越过或账户用量字段缺失时均在航班查询前硬停止；
@@ -55,14 +55,15 @@ V1 的目标不是证明“能显示航班”，而是证明系统能稳定、�
 - 限定条件隔离：对抗式审查发现 API 虽会将超预算、红眼、行李或中转条件冲突标记为不可比较，旧 UI 仍会把这些 Offer 混在主结果卡片中。候选改为主列表仅展示 `comparable=true` 的报价，同时披露隐藏数量；API 响应和 Neon 审计仍保留完整 Offer 与不可比较原因。桌面和移动端 E2E 注入一个 CNY 3,200 的超预算报价，验证页面显示“2 个可比报价 · 1 个不符合条件的报价已隐藏”，且不渲染该售卖方卡片；
 - 来源状态披露：真实附近机场样本曾返回生产 Connector 超时且 0 Offer，旧 UI 会仅因没有 production Offer 而显示“Sandbox 来源”。候选改为根据 Connector 状态、缓存说明和 Offer 环境共同生成徽标；单元测试覆盖生产 Offer、超时、供应商失败、正常空结果、新鲜缓存与旧缓存降级，超时现在明确显示“来源超时 · 未返回报价”；
 - Offer 信任不变量：统一 Schema 新增汇率来源、基准/报价币种和时间证据；所有必需价格组件必须与报价币一致。外币缺失汇率证据、会员/新客/银行卡/App 专享等资格价，以及其他对抗式阻断项，都会在领域层统一回写为 `comparable=false` 与明确原因；API、自然排序和 UI 使用同一审查结果，展开价格可查看汇率来源与时间，不能再由展示层恢复成最低价候选；
+- 生产依赖安全：专项 `pnpm audit --prod` 首次发现 9 个高危、7 个中危漏洞，涉及 Next.js 16.2.6、Sharp/Libvips、PostCSS 与 fast-uri；候选升级到 Next.js 16.2.12、Sharp 0.35.0、PostCSS 8.5.23、Fastify 5.11.0 和 fast-uri 3.1.5/4.1.2 后，审计返回 `No known vulnerabilities found`。CI 新增高危生产依赖门禁，Dependabot 每周向 `develop` 提交补丁更新；
 - 同域 API：运行时审查发现公网页面曾把意图解析请求发往 `/v1/*`，而 Next Route Handler 位于 `/api/v1/*`，返回 HTML 后前端出现 JSON 解析错误。修复后 Staging 页面成功完成一次不消耗供应商额度的本地意图解析；表单将目的地改为 `HND`、成人改为 4 人并启用附近机场后，切回对话仍显示并保留最新条件；
 - 落地页核价：2026-08-04 10:16 CST 打开同条件 Google Flights 结果页（北京首都 `PEK` → 上海浦东 `PVG`、2026-08-20、单程直飞、CNY），页面返回 11 个结果，当前最低公开价为 CNY 2,520（Hainan）；此前候选的 CNY 500/Trip.com 已不可见。由于交接类型是“结果页重新选择”而非精确 Offer 深链，此结果判定为价格已变化，页面必须要求用户在购买前复核，不能把旧候选价描述为仍可购买；Neon CLI 登录态已过期，数据库核价记录写回待用户解锁 Mac 后在 Edge 重新认证；
 - 覆盖披露：计划 1 个来源、成功 1 个、失败 0 个、超时 0 个；没有宣称“全网最低”；
 - 审计：`configured=true`、`persisted=true`；
 - 安全：页面与 API 均返回 `nosniff`、`DENY`、Referrer Policy、Permissions Policy、COOP 与 HSTS；API 返回限流头；
-- 回归：`pnpm check` 全部通过（64 项测试、类型检查、Lint、生产构建）；Playwright 桌面与移动端端到端测试 6/6 通过。候选页面、健康端点、Connector 健康与中文意图解析再次线上验证通过；该轮线上验证未调用航班搜索、未消耗供应商 credits。受限工作区内较早一次生产构建与浏览器启动分别因 macOS 偏好目录和 Mach 端口权限被拒，提权后同命令通过，未归因于产品代码；
+- 回归：安全升级后 `pnpm check` 全部通过（64 项测试、类型检查、Lint、生产构建）；Playwright 桌面与移动端端到端测试 6/6 通过。第一次 Netlify CLI 打包被平台取消且没有上传 source zip；调试重试成功生成 `ready` 候选。首次线上探测发生一次 TLS `ECONNRESET`，受控重试后候选页面、健康端点、Connector 健康与中文意图解析均通过；该轮线上验证未调用航班搜索、未消耗供应商 credits。受限工作区内较早一次生产构建与浏览器启动分别因 macOS 偏好目录和 Mach 端口权限被拒，提权后同命令通过，未归因于产品代码；
 - 凭据：数据库密码在配置过程中完成轮换，旧连接串失效；Netlify 中的 `DATABASE_URL` 与 `SERPAPI_API_KEY` 均为 secret；迁移后系统剪贴板已清空。
-- 回滚：在隔离 worktree 重建提交 `5503c45`，部署为 `6a71418ce8ca6745e61e690f`，候选 URL 的页面与 API 均为 HTTP 200，数据库、Connector、限流和安全响应头正常；随后恢复候选 `6a7141dbcd73917640ef8e39` 并再次通过页面与 API 健康检查。延迟修复候选 `6a71465d6ca2a08f25cd29d5`、同域 API 修复候选 `6a7154af01e4babc3c3a4e3d`、附近机场候选 `6a715684488e01b6715853b7`、有界运行时候选 `6a715f055c70d7e0d7c81d11`、Edge 限流候选 `6a71632f5c70d7f3ebc81d5e`、不合格报价隔离候选 `6a71659eff1d01ed19bbd2a4`、来源状态候选 `6a71673f0d395a1b61f0561c`、Offer 信任不变量候选 `6a71736d5e22780d2350e423` 与账户级 credit 门禁候选 `6a71786b4e63d9d64a96ec46` 随后部署并验证为 `ready`。整个演练未触碰 Production。
+- 回滚：在隔离 worktree 重建提交 `5503c45`，部署为 `6a71418ce8ca6745e61e690f`，候选 URL 的页面与 API 均为 HTTP 200，数据库、Connector、限流和安全响应头正常；随后恢复候选 `6a7141dbcd73917640ef8e39` 并再次通过页面与 API 健康检查。延迟修复候选 `6a71465d6ca2a08f25cd29d5`、同域 API 修复候选 `6a7154af01e4babc3c3a4e3d`、附近机场候选 `6a715684488e01b6715853b7`、有界运行时候选 `6a715f055c70d7e0d7c81d11`、Edge 限流候选 `6a71632f5c70d7f3ebc81d5e`、不合格报价隔离候选 `6a71659eff1d01ed19bbd2a4`、来源状态候选 `6a71673f0d395a1b61f0561c`、Offer 信任不变量候选 `6a71736d5e22780d2350e423`、账户级 credit 门禁候选 `6a71786b4e63d9d64a96ec46` 与依赖安全候选 `6a717ccd8705207dd19e52a9` 随后部署并验证为 `ready`。整个演练未触碰 Production。
 
 价格是当时的上游观察值，不构成持续报价。V1 正式发布门禁仍为 1/2 来源，Skyscanner 未审批前不得称为正式 V1。
 
