@@ -7,7 +7,13 @@ import type {
   SearchResponse,
 } from "@flight-lens/contracts";
 import Image from "next/image";
-import { useMemo, useState } from "react";
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { resolveApiBase } from "../src/api-base";
 import { resultSourceStatus } from "../src/result-source-status";
 
@@ -235,6 +241,59 @@ export default function Home() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showCoverage, setShowCoverage] = useState(false);
   const [error, setError] = useState("");
+  const coverageDialogRef = useRef<HTMLElement>(null);
+  const coverageTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!showCoverage) return;
+    const dialog = coverageDialogRef.current;
+    if (!dialog) return;
+    const focusableSelector =
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const focusable = Array.from(
+      dialog.querySelectorAll<HTMLElement>(focusableSelector),
+    );
+    focusable[0]?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setShowCoverage(false);
+        return;
+      }
+      if (event.key !== "Tab" || focusable.length === 0) return;
+      const first = focusable[0]!;
+      const last = focusable.at(-1)!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      coverageTriggerRef.current?.focus();
+    };
+  }, [showCoverage]);
+
+  function openCoverage(trigger: HTMLButtonElement) {
+    coverageTriggerRef.current = trigger;
+    setShowCoverage(true);
+  }
+
+  function handleModeTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const nextMode = event.key === "ArrowLeft" || event.key === "Home" ? "agent" : "form";
+    setMode(nextMode);
+    window.requestAnimationFrame(() => {
+      document.getElementById(`search-tab-${nextMode}`)?.focus();
+    });
+  }
 
   const orderedOffers = useMemo(() => {
     if (!result) return [];
@@ -394,7 +453,7 @@ export default function Home() {
           <a href="#coverage">数据覆盖</a>
           <a href="#principles">如何推荐</a>
         </nav>
-        <button className="ghost-button" onClick={() => setShowCoverage(true)}>
+        <button className="ghost-button" onClick={(event) => openCoverage(event.currentTarget)}>
           覆盖透明度 <span className="live-dot" /> V1 接入中
         </button>
       </header>
@@ -408,16 +467,16 @@ export default function Home() {
 
         <div className="search-shell" id="search">
           <div className="mode-tabs" role="tablist" aria-label="搜索方式">
-            <button className={mode === "agent" ? "selected" : ""} onClick={() => setMode("agent")} role="tab" aria-selected={mode === "agent"}>
+            <button id="search-tab-agent" className={mode === "agent" ? "selected" : ""} onClick={() => setMode("agent")} onKeyDown={handleModeTabKeyDown} role="tab" aria-selected={mode === "agent"} aria-controls="search-panel-agent" tabIndex={mode === "agent" ? 0 : -1}>
               <span className="spark">✦</span> 对话找票
             </button>
-            <button className={mode === "form" ? "selected" : ""} onClick={() => setMode("form")} role="tab" aria-selected={mode === "form"}>
+            <button id="search-tab-form" className={mode === "form" ? "selected" : ""} onClick={() => setMode("form")} onKeyDown={handleModeTabKeyDown} role="tab" aria-selected={mode === "form"} aria-controls="search-panel-form" tabIndex={mode === "form" ? 0 : -1}>
               精确筛选
             </button>
           </div>
 
           {mode === "agent" ? (
-            <div className="agent-panel">
+            <div className="agent-panel" id="search-panel-agent" role="tabpanel" aria-labelledby="search-tab-agent">
               <label htmlFor="flight-query">直接说出完整需求，解析后可在表单中检查</label>
               <textarea
                 id="flight-query"
@@ -452,8 +511,8 @@ export default function Home() {
               )}
             </div>
           ) : (
-            <div className="form-panel">
-              <div className="trip-switch" aria-label="行程类型">
+            <div className="form-panel" id="search-panel-form" role="tabpanel" aria-labelledby="search-tab-form">
+              <div className="trip-switch" role="group" aria-label="行程类型">
                 {([
                   ["one_way", "单程"],
                   ["round_trip", "往返"],
@@ -588,7 +647,7 @@ export default function Home() {
         <div className="trust-row">
           <span>V1 原则</span>
           <b>授权来源</b><b>统一全价</b><b>失败披露</b><b>证据可追溯</b>
-          <button onClick={() => setShowCoverage(true)}>了解来源状态 +</button>
+          <button onClick={(event) => openCoverage(event.currentTarget)}>了解来源状态 +</button>
         </div>
       </section>
 
@@ -843,7 +902,7 @@ export default function Home() {
                     </li>
                   ))}
                 </ul>
-                <button onClick={() => setShowCoverage(true)}>查看来源规则</button>
+                <button onClick={(event) => openCoverage(event.currentTarget)}>查看来源规则</button>
                 <div className="adversarial-note">
                   <b>对抗式检查</b>
                   <p>演示报价、总价构成错误、缺失汇率或没有购买落点的报价不会进入最低全价结论。</p>
@@ -873,11 +932,11 @@ export default function Home() {
 
       {showCoverage && (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowCoverage(false)}>
-          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="coverage-title" onMouseDown={(event) => event.stopPropagation()}>
+          <section ref={coverageDialogRef} className="modal" role="dialog" aria-modal="true" aria-labelledby="coverage-title" aria-describedby="coverage-description" onMouseDown={(event) => event.stopPropagation()}>
             <button className="modal-close" onClick={() => setShowCoverage(false)} aria-label="关闭">×</button>
             <div className="eyebrow"><span /> 来源透明度</div>
             <h2 id="coverage-title">来源数量不等于可信度</h2>
-            <p>来源只有在合法配置、实际响应、字段完整并通过价格校验后，才计入本次检索覆盖。超时和失败会单独披露。</p>
+            <p id="coverage-description">来源只有在合法配置、实际响应、字段完整并通过价格校验后，才计入本次检索覆盖。超时和失败会单独披露。</p>
             <div className="source-table">
               <div><b>SerpApi</b><span>Google Flights 与实际售卖方报价；跳转精度单独披露</span><em>首个生产查询已验证</em></div>
               <div><b>Skyscanner</b><span>航司 / OTA Live Prices 与 deeplink</span><em>合作申请已提交</em></div>

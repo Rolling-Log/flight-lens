@@ -1,4 +1,35 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
+
+async function expectNoBlockingAccessibilityViolations(page: Page) {
+  const scan = await new AxeBuilder({ page }).analyze();
+  const blocking = scan.violations.filter(
+    (violation) => violation.impact === "serious" || violation.impact === "critical",
+  );
+  expect(blocking, JSON.stringify(blocking, null, 2)).toEqual([]);
+}
+
+test("initial, result, and coverage dialog states have no blocking accessibility violations", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  await expectNoBlockingAccessibilityViolations(page);
+
+  await page.getByRole("tab", { name: "精确筛选" }).click();
+  await page.getByRole("button", { name: "开始检索" }).click();
+  await expect(page.getByRole("heading", { name: "PVG → NRT" })).toBeVisible();
+  await expectNoBlockingAccessibilityViolations(page);
+
+  const coverageTrigger = page.getByRole("button", { name: "查看来源规则" });
+  await coverageTrigger.click();
+  await expect(page.getByRole("dialog", { name: "来源数量不等于可信度" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "关闭" })).toBeFocused();
+  await expectNoBlockingAccessibilityViolations(page);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "来源数量不等于可信度" })).toBeHidden();
+  await expect(coverageTrigger).toBeFocused();
+});
 
 test("agent input becomes an editable search and exposes source limits", async ({
   page,
