@@ -140,6 +140,14 @@ export const moneySchema = z.object({
   currency: currencySchema,
 });
 
+export const exchangeRateSchema = z.object({
+  baseCurrency: currencySchema,
+  quoteCurrency: currencySchema,
+  rate: z.number().positive(),
+  source: z.string().min(1),
+  quotedAt: isoDateTimeSchema,
+});
+
 export const priceComponentSchema = moneySchema.extend({
   kind: z.enum(["base", "tax", "fuel", "baggage", "payment", "required_service", "discount"]),
   label: z.string().min(1),
@@ -200,6 +208,7 @@ export const offerSchema = z.object({
   priceComponents: z.array(priceComponentSchema).min(1),
   totalPrice: moneySchema,
   totalPriceCny: moneySchema.optional(),
+  exchangeRate: exchangeRateSchema.optional(),
   baggage: z.array(baggageAllowanceSchema).default([]),
   fareBrand: z.string().optional(),
   refundable: z.boolean().nullable(),

@@ -10,13 +10,13 @@ import {
   searchIntentSchema,
   searchResponseSchema,
   type ConnectorReport,
-  type Offer,
   type SearchIntent,
   type SearchResponse,
 } from "@flight-lens/contracts";
 import { createSearchAuditStore } from "@flight-lens/database";
 import {
   applyIntentConstraints,
+  applyAdversarialComparability,
   deduplicateOffers,
   disclosureStatement,
   rankByBestBaggage,
@@ -25,7 +25,6 @@ import {
   rankRecommended,
   rankByRefundFlexibility,
   rankByShortestDuration,
-  reviewOffers,
 } from "@flight-lens/domain";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { ApiConfig } from "./config.js";
@@ -88,16 +87,6 @@ function coverage(reports: ConnectorReport[]) {
   };
 }
 
-function liveComparableOffers(offers: Offer[], reports: ConnectorReport[]): Offer[] {
-  const findings = reviewOffers(offers, reports);
-  const blocked = new Set(
-    findings
-      .filter((finding) => finding.severity === "blocking" && finding.offerId)
-      .map((finding) => finding.offerId),
-  );
-  return offers.filter((offer) => !blocked.has(offer.id));
-}
-
 async function runSearch(
   intent: SearchIntent,
   connectors: FlightConnector[],
@@ -115,18 +104,18 @@ async function runSearch(
     deduplicateOffers(executions.flatMap((execution) => execution.result.offers)),
     intent,
   );
-  const allowed = liveComparableOffers(normalized, reports);
-  const cheapest = rankByLowestComparablePrice(allowed);
-  const recommended = rankRecommended(allowed);
-  const shortest = rankByShortestDuration(allowed);
-  const fewestStops = rankByFewestStops(allowed);
-  const bestBaggage = rankByBestBaggage(allowed);
-  const mostFlexible = rankByRefundFlexibility(allowed);
+  const reviewed = applyAdversarialComparability(normalized, reports);
+  const cheapest = rankByLowestComparablePrice(reviewed);
+  const recommended = rankRecommended(reviewed);
+  const shortest = rankByShortestDuration(reviewed);
+  const fewestStops = rankByFewestStops(reviewed);
+  const bestBaggage = rankByBestBaggage(reviewed);
+  const mostFlexible = rankByRefundFlexibility(reviewed);
 
   return {
     requestId,
     intent,
-    offers: normalized,
+    offers: reviewed,
     connectorReports: reports,
     lowestComparableOfferId: cheapest[0]?.id ?? null,
     recommendedOfferId: recommended[0]?.id ?? null,

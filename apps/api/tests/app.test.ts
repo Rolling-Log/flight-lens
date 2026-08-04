@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { FlightConnector } from "@flight-lens/connectors";
+import type { Offer } from "@flight-lens/contracts";
 import { buildApp } from "../src/app.js";
 import type { ApiConfig } from "../src/config.js";
 
@@ -30,6 +31,62 @@ const validIntent = {
   departureDate: "2026-08-24",
 };
 const fixedNow = () => new Date("2026-07-30T00:00:00.000Z");
+
+function comparableOffer(overrides: Partial<Offer> = {}): Offer {
+  return {
+    schemaVersion: "1",
+    id: "api-offer",
+    sourceOfferId: "api-source-offer",
+    connectorId: "api-trust",
+    environment: "production",
+    seller: {
+      id: "seller",
+      name: "Seller",
+      kind: "ota",
+      deepLink: "https://example.com/checkout",
+      handoffPrecision: "exact_offer",
+    },
+    legs: [{
+      id: "leg-0",
+      segmentIds: ["segment-0"],
+      origin: { kind: "airport", code: "PVG" },
+      destination: { kind: "airport", code: "NRT" },
+      departureAt: "2026-08-24T10:00:00+08:00",
+      arrivalAt: "2026-08-24T14:00:00+09:00",
+      durationMinutes: 180,
+      stopCount: 0,
+    }],
+    segments: [{
+      id: "segment-0",
+      legIndex: 0,
+      marketingCarrier: "MU",
+      flightNumber: "521",
+      origin: { kind: "airport", code: "PVG" },
+      destination: { kind: "airport", code: "NRT" },
+      departureAt: "2026-08-24T10:00:00+08:00",
+      arrivalAt: "2026-08-24T14:00:00+09:00",
+      durationMinutes: 180,
+    }],
+    priceComponents: [{
+      kind: "required_service",
+      label: "Total",
+      amountMinor: 200000,
+      currency: "CNY",
+      required: true,
+    }],
+    totalPrice: { amountMinor: 200000, currency: "CNY" },
+    totalPriceCny: { amountMinor: 200000, currency: "CNY" },
+    baggage: [],
+    refundable: null,
+    changeable: null,
+    eligibility: [],
+    fetchedAt: "2026-07-30T00:00:00.000Z",
+    comparable: true,
+    incomparabilityReasons: [],
+    qualityScore: 90,
+    ...overrides,
+  };
+}
 
 test("health discloses connector release readiness", async () => {
   const app = await buildApp({ config, connectors: [], auditStore: null, now: fixedNow });
@@ -127,6 +184,45 @@ test("returns transparent coverage for a configured empty source", async () => {
   assert.equal(response.json().disclosure.successfulSources, 1);
   assert.equal(response.json().offers.length, 0);
   assert.equal(response.json().audit.persisted, false);
+  await app.close();
+});
+
+test("returns adversarially blocked offers as non-comparable", async () => {
+  const connector: FlightConnector = {
+    metadata: {
+      id: "api-trust",
+      name: "API trust",
+      kind: "aggregator",
+      environment: "production",
+      authorization: "self_service_api",
+      resultRole: "purchase_handoff",
+      handoff: "deep_link",
+      configured: true,
+    },
+    health: async () => ({ state: "healthy", checkedAt: new Date().toISOString() }),
+    search: async () => ({
+      offers: [comparableOffer({ eligibility: ["NEW_CUSTOMER_ONLY"] })],
+    }),
+  };
+  const app = await buildApp({
+    config,
+    connectors: [connector],
+    auditStore: null,
+    now: fixedNow,
+  });
+  const response = await app.inject({
+    method: "POST",
+    url: "/v1/searches",
+    payload: validIntent,
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().offers[0].comparable, false);
+  assert.equal(
+    response.json().offers[0].incomparabilityReasons.includes("CONDITIONAL_PRICE"),
+    true,
+  );
+  assert.equal(response.json().lowestComparableOfferId, null);
   await app.close();
 });
 
