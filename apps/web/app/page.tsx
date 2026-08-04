@@ -338,7 +338,11 @@ export default function Home() {
     let searchIntent: SearchIntent | null;
     if (mode === "agent") {
       if (parseResult?.ready && parseResult.intent) {
-        searchIntent = parseResult.intent;
+        // Once parsing has populated the shared form, `intent` is the
+        // authoritative SearchIntent. The user may have edited it before
+        // switching back to the agent tab, so reusing parseResult.intent
+        // would silently discard those edits.
+        searchIntent = intent;
       } else {
         await parseQuery();
         return;
@@ -427,12 +431,12 @@ export default function Home() {
                 <div className="intent-review agent-review" role="status">
                   <b>请确认已解析条件</b>
                   <span>
-                    {parseResult.intent.origin.code} → {parseResult.intent.destination.code}
+                    {intent.origin.code} → {intent.destination.code}
                     {" · "}
-                    {parseResult.intent.departureDate}
-                    {parseResult.intent.returnDate ? ` 至 ${parseResult.intent.returnDate}` : ""}
+                    {intent.departureDate}
+                    {intent.returnDate ? ` 至 ${intent.returnDate}` : ""}
                     {" · "}
-                    {parseResult.intent.adults} 位成人
+                    {intent.adults} 位成人
                   </span>
                   <small>
                     {parseResult.parser.kind === "local_deterministic_zh"
@@ -479,7 +483,16 @@ export default function Home() {
                 <label>目的地 IATA<input value={intent.destination.code} maxLength={3} onChange={(event) => updateIntent({ destination: { ...intent.destination, code: event.target.value.toUpperCase() } })} /></label>
                 <label>出发日期<input type="date" value={intent.departureDate} onChange={(event) => updateIntent({ departureDate: event.target.value })} /></label>
                 <label>返程日期<input type="date" value={intent.returnDate ?? ""} onChange={(event) => updateIntent({ returnDate: event.target.value })} disabled={intent.tripType === "one_way"} /></label>
-                <label>成人 / 舱位<select value={intent.adults} onChange={(event) => updateIntent({ adults: Number(event.target.value) })}><option value={1}>1 成人 · 经济舱</option><option value={2}>2 成人 · 经济舱</option><option value={3}>3 成人 · 经济舱</option></select></label>
+                <label>成人 / 舱位
+                  <select
+                    value={intent.adults}
+                    onChange={(event) => updateIntent({ adults: Number(event.target.value) })}
+                  >
+                    {Array.from({ length: 9 }, (_, index) => index + 1).map((adults) => (
+                      <option key={adults} value={adults}>{adults} 成人 · 经济舱</option>
+                    ))}
+                  </select>
+                </label>
                 <label>总预算（人民币）
                   <input
                     type="number"

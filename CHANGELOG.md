@@ -22,3 +22,4 @@
 - 将 Railway 否决为试用转收费方案，把 Fastify API 适配为 Netlify 上的同域 Next.js Route Handler；
 - 默认拒绝使用 Netlify 自动注入的 AI Gateway 密钥，防止未授权 credits 消耗；
 - 增加 V1 硬门禁与 Netlify、Neon Staging Runbook。
+- 修复对话解析后经表单修改再切回对话模式会恢复旧条件的问题，确保两种输入始终提交同一份最新 `SearchIntent`；成人表单范围与契约统一为 1–9 人。

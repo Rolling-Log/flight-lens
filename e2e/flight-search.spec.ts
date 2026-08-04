@@ -79,3 +79,30 @@ test("an incomplete dialogue pre-fills known fields and leaves the missing date 
   await expect(page.getByLabel("出发日期")).toHaveValue("");
   await expect(page.getByText(/0 项推断 · 1 项待确认 · 本地解析/)).toBeVisible();
 });
+
+test("form edits remain authoritative after switching back to agent mode", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "开始检索" }).click();
+  await expect(page.getByText("请确认已解析条件")).toBeVisible();
+
+  await page.getByRole("button", { name: "打开完整表单修改" }).click();
+  await page.getByLabel("目的地 IATA").fill("HND");
+  await page.getByLabel("成人 / 舱位").selectOption("4");
+  await page.getByLabel("出发地附近机场").check();
+
+  await page.getByRole("tab", { name: "对话找票" }).click();
+  await expect(page.getByText(/PVG → HND/)).toBeVisible();
+  await expect(page.getByText(/4 位成人/)).toBeVisible();
+
+  const searchRequest = page.waitForRequest((request) =>
+    request.method() === "POST" && request.url().endsWith("/v1/searches"),
+  );
+  await page.getByRole("button", { name: "确认条件并检索" }).click();
+  const body = (await searchRequest).postDataJSON();
+
+  expect(body.destination.code).toBe("HND");
+  expect(body.adults).toBe(4);
+  expect(body.includeNearbyAirports).toBe(true);
+});
