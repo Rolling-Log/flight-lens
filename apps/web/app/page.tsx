@@ -8,6 +8,7 @@ import type {
 } from "@flight-lens/contracts";
 import Image from "next/image";
 import { useMemo, useState } from "react";
+import { resolveApiBase } from "../src/api-base";
 
 type Mode = "agent" | "form";
 type SortKey =
@@ -20,16 +21,10 @@ type SortKey =
 type BusyState = "idle" | "parsing" | "searching";
 
 function apiBase(): string {
-  if (process.env.NEXT_PUBLIC_API_BASE_URL) {
-    return process.env.NEXT_PUBLIC_API_BASE_URL;
-  }
-  if (
-    typeof window !== "undefined" &&
-    ["127.0.0.1", "localhost"].includes(window.location.hostname)
-  ) {
-    return "http://127.0.0.1:4000";
-  }
-  return "";
+  return resolveApiBase(
+    process.env.NEXT_PUBLIC_API_BASE_URL,
+    typeof window === "undefined" ? "" : window.location.hostname,
+  );
 }
 
 function dateFromToday(days: number): string {

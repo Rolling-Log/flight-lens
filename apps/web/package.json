@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint . --max-warnings=0"
+    "lint": "eslint . --max-warnings=0",
+    "test": "node --import tsx --test tests/**/*.test.ts"
   },
   "dependencies": {
     "@flight-lens/api": "workspace:*",
@@ -22,6 +23,7 @@
     "@types/react-dom": "19.2.3",
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.6",
+    "tsx": "4.20.6",
     "typescript": "5.9.3"
   }
 }
