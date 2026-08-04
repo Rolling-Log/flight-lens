@@ -49,6 +49,31 @@ type BuildAppOptions = {
   now?: () => Date;
 };
 
+class AuditPersistTimeoutError extends Error {
+  constructor() {
+    super("Search audit persistence exceeded its runtime budget.");
+    this.name = "AuditPersistTimeoutError";
+  }
+}
+
+async function persistAuditWithin(
+  auditStore: SearchAuditStore,
+  payload: Parameters<SearchAuditStore["persist"]>[0],
+  timeoutMs: number,
+): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      auditStore.persist(payload),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new AuditPersistTimeoutError()), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 function coverage(reports: ConnectorReport[]) {
   const successfulSources = reports.filter((report) =>
     ["success", "empty"].includes(report.state),
@@ -290,20 +315,27 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
     if (auditStore) {
       try {
-        await auditStore.persist({
-          requestId: result.requestId,
-          intent: result.intent,
-          status: "completed",
-          reports: result.connectorReports,
-          offers: result.offers,
-        });
+        await persistAuditWithin(
+          auditStore,
+          {
+            requestId: result.requestId,
+            intent: result.intent,
+            status: "completed",
+            reports: result.connectorReports,
+            offers: result.offers,
+          },
+          config.auditTimeoutMs,
+        );
         audit = { configured: true, persisted: true };
       } catch (error) {
         request.log.error({ error, requestId: result.requestId }, "Failed to persist search audit");
         audit = {
           configured: true,
           persisted: false,
-          errorCode: "AUDIT_PERSIST_FAILED",
+          errorCode:
+            error instanceof AuditPersistTimeoutError
+              ? "AUDIT_PERSIST_TIMEOUT"
+              : "AUDIT_PERSIST_FAILED",
         };
       }
     }

@@ -42,9 +42,15 @@ test("prefers the platform PORT while retaining API_PORT for local development",
 });
 
 test("leaves response time for the serverless wrapper after connector timeout", () => {
-  assert.equal(loadConfig({ NODE_ENV: "production" }).connectorTimeoutMs, 25_000);
+  const defaults = loadConfig({ NODE_ENV: "production" });
+  assert.equal(defaults.connectorTimeoutMs, 20_000);
+  assert.equal(defaults.auditTimeoutMs, 3_000);
   assert.equal(
     loadConfig({ NODE_ENV: "production", CONNECTOR_TIMEOUT_MS: "12000" }).connectorTimeoutMs,
     12_000,
+  );
+  assert.equal(
+    loadConfig({ NODE_ENV: "production", AUDIT_TIMEOUT_MS: "1500" }).auditTimeoutMs,
+    1_500,
   );
 });
