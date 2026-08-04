@@ -15,7 +15,7 @@ V1 的目标不是证明“能显示航班”，而是证明系统能稳定、�
 | 安全与合规 | 密钥仅服务端、输入校验、限流、CORS、跳转白名单和供应商条款记录 | Staging 已验证 secret 注入、同域 API、限流及安全响应头；第二来源条款待审批后复核 |
 | 零付费来源 | 数据源为长期 `$0` 或不收费的 revenue-share 合作；无试用转收费、自动升级或超额扣费 | SerpApi Free 的账户状态与配额硬停止已验证；Skyscanner 等待审批 |
 | 前后端数据库 Staging | 独立 Netlify Staging 项目承载 Web + Functions，连接 Neon Staging 分支，完成端到端查询和审计落库 | 已通过：Netlify Draft + Functions、Neon Staging 迁移、真实检索与审计落库 |
-| 回滚 | 候选提交可重建，部署平台可回到上一个已验证版本 | 待 Staging 演练 |
+| 回滚 | 候选提交可重建，部署平台可回到上一个已验证版本 | 已通过 Staging 回退与恢复演练 |
 | 用户确认 | 用户确认 V1 候选后才允许合并 `main`、打 Tag、正式推送和生产部署 | 未开始 |
 
 任何硬门禁未通过时，只能称为 V1 开发版或候选版，不能称为正式 V1。
@@ -37,10 +37,10 @@ V1 的目标不是证明“能显示航班”，而是证明系统能稳定、�
 
 ## 已完成的 Staging 证据
 
-记录时间：2026-07-31 15:52 CST。
+初次真实检索记录时间：2026-07-31 15:52 CST；回滚演练更新时间：2026-08-04 09:37 CST。
 
-- Git 候选提交：`54b95a1`；
-- Netlify 项目：`flight-lens-staging`，候选 Deploy：`6a6c54128e4b3bdad34248a0`；
+- Git 候选提交：`3861f78`（运行时代码包含 `54b95a1`）；
+- Netlify 项目：`flight-lens-staging`，当前候选 Deploy：`6a7141dbcd73917640ef8e39`；
 - Neon 项目：`flight-lens`，独立 `staging` 分支；迁移成功；
 - `/api/health`：HTTP 200，数据库为 `configured`，本地确定性中文解析器启用，1 个实时 Connector 已配置；
 - SerpApi 账户健康：`healthy`，仅允许活动中的 `$0` 套餐并在免费配额不足时硬停止；
@@ -51,6 +51,7 @@ V1 的目标不是证明“能显示航班”，而是证明系统能稳定、�
 - 审计：`configured=true`、`persisted=true`；
 - 安全：页面与 API 均返回 `nosniff`、`DENY`、Referrer Policy、Permissions Policy、COOP 与 HSTS；API 返回限流头；
 - 凭据：数据库密码在配置过程中完成轮换，旧连接串失效；Netlify 中的 `DATABASE_URL` 与 `SERPAPI_API_KEY` 均为 secret；迁移后系统剪贴板已清空。
+- 回滚：在隔离 worktree 重建提交 `5503c45`，部署为 `6a71418ce8ca6745e61e690f`，候选 URL 的页面与 API 均为 HTTP 200，数据库、Connector、限流和安全响应头正常；随后恢复当前候选 `6a7141dbcd73917640ef8e39` 并再次通过页面与 API 健康检查。整个演练未触碰 Production。
 
 价格是当时的上游观察值，不构成持续报价。V1 正式发布门禁仍为 1/2 来源，Skyscanner 未审批前不得称为正式 V1。
 
