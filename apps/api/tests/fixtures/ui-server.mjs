@@ -223,10 +223,23 @@ const server = createServer(async (request, response) => {
         "https://www.google.com/travel/flights?hl=zh-CN&curr=CNY&tfs=qa-fixture",
       handoffPrecision: "search_results",
     });
+    const excluded = {
+      ...offer({
+        id: "qa-over-budget",
+        connectorId: "serpapi-google-flights",
+        seller: "超预算示例",
+        amountMinor: 320000,
+        qualityScore: 91,
+        outboundFlight: "525",
+        returnFlight: "526",
+      }),
+      comparable: false,
+      incomparabilityReasons: ["OVER_BUDGET"],
+    };
     return json(response, 200, {
       requestId,
       intent: baseIntent,
-      offers: [lowest, recommended],
+      offers: [lowest, recommended, excluded],
       connectorReports: [
         {
           connectorId: "skyscanner-live-prices",

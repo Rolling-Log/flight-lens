@@ -237,7 +237,7 @@ export default function Home() {
 
   const orderedOffers = useMemo(() => {
     if (!result) return [];
-    const offers = [...result.offers];
+    const offers = result.offers.filter((offer) => offer.comparable);
     const comparableFirst = (left: Offer, right: Offer) =>
       Number(right.comparable) - Number(left.comparable);
     if (sort === "price") {
@@ -372,6 +372,8 @@ export default function Home() {
   }
 
   const lowest = result?.offers.find((offer) => offer.id === result.lowestComparableOfferId) ?? null;
+  const excludedOfferCount =
+    result?.offers.filter((offer) => !offer.comparable).length ?? 0;
   const usesSkyscanner = result?.offers.some(
     (offer) => offer.connectorId === "skyscanner-live-prices",
   ) ?? false;
@@ -652,7 +654,12 @@ export default function Home() {
                       <button key={key} className={sort === key ? "selected" : ""} onClick={() => setSort(key)}>{label}</button>
                     ))}
                   </div>
-                  <span>共 {result.offers.length} 个标准化 Offer</span>
+                  <span>
+                    共 {orderedOffers.length} 个可比报价
+                    {excludedOfferCount > 0
+                      ? ` · ${excludedOfferCount} 个不符合条件的报价已隐藏`
+                      : ""}
+                  </span>
                 </div>
 
                 {usesSkyscanner && (

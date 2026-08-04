@@ -23,6 +23,10 @@ test("agent input becomes an editable search and exposes source limits", async (
   await expect(page.getByAltText("Powered by Skyscanner")).toBeVisible();
   await expect(page.getByText("2/2", { exact: true })).toBeVisible();
   await expect(page.getByText("+1", { exact: true }).first()).toBeVisible();
+  await expect(
+    page.getByText("共 2 个可比报价 · 1 个不符合条件的报价已隐藏"),
+  ).toBeVisible();
+  await expect(page.getByText("超预算示例", { exact: true })).toHaveCount(0);
 
   for (const label of [
     "最低全价",
