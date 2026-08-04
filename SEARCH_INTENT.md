@@ -19,4 +19,4 @@ V1 SearchIntent 是对话与表单共同编辑的唯一真相源。
 - 部分日期失败必须披露，不能把部分探测表述为完整日期矩阵；
 - V2 才提供区间内逐日矩阵和去返日期独立组合。
 
-V1 的 `includeNearbyAirports` 只表示出发地附近机场。目的地附近机场组合属于 V2，界面不得使用含混标签暗示双向支持。
+V1 的 `includeNearbyAirports` 只表示出发地附近机场。Skyscanner Live Prices 原生参数也只扩展出发地；SerpApi 在一次查询中用逗号分隔的机场组扩展已配置的常用出发地，当前组为北京 `PEK/PKX`、上海 `PVG/SHA`、成都 `CTU/TFU`、东京 `HND/NRT`、大阪 `KIX/ITM/UKB`、首尔 `ICN/GMP`、台北 `TPE/TSA`、曼谷 `BKK/DMK`。没有已配置替代机场时必须在来源报告中披露，不能静默假装已展开。目的地附近机场组合属于 V2，界面不得使用含混标签暗示双向支持。

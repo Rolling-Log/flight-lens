@@ -209,6 +209,15 @@ function reportNote(note: string): string {
   if (note.startsWith("RETRY_ATTEMPTS:")) {
     return `瞬时错误重试：${note.split(":").at(-1)} 次`;
   }
+  if (note.startsWith("NEARBY_ORIGIN_EXPANDED:")) {
+    return `已展开出发机场：${note.split(":").at(-1)}`;
+  }
+  if (note.startsWith("NEARBY_ORIGIN_PROVIDER_EXPANSION:")) {
+    return `已请求来源展开 ${note.split(":").at(-1)} 附近的出发机场`;
+  }
+  if (note.startsWith("NEARBY_ORIGIN_NO_CONFIGURED_ALTERNATIVES:")) {
+    return `该来源没有 ${note.split(":").at(-1)} 的已配置附近出发机场`;
+  }
   return note;
 }
 

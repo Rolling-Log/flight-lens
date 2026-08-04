@@ -24,6 +24,7 @@ interface FlightConnector {
 - 若供应商以 Search-to-Click 等指标限制每次用户动作的搜索次数，Connector 必须声明不支持自动日期探测，仅查询基准日并在来源报告披露；
 - 往返 Offer 必须分别输出 legs，不能把返程段计作中转；
 - 异步来源必须轮询到明确完成状态；未完成会话不能伪装为完整结果；
+- Connector 可通过结构化 `notes` 披露附近机场展开、缓存、重试等执行事实；编排器必须把这些说明带入来源报告，不能在标准化时丢失；
 - Mock Connector 永远标记 `demo`，生产不得启用。
 
 `resultRole = purchase_handoff` 只表示 Connector 有能力返回消费者交接。具体 Offer 仍必须存在经过协议校验的 HTTPS deeplink，才能设置 `comparable = true`。
