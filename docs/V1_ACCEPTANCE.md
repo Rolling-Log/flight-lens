@@ -37,21 +37,26 @@ V1 的目标不是证明“能显示航班”，而是证明系统能稳定、�
 
 ## 已完成的 Staging 证据
 
-初次真实检索记录时间：2026-07-31 15:52 CST；回滚演练更新时间：2026-08-04 09:37 CST。
+初次真实检索记录时间：2026-07-31 15:52 CST；本轮候选复核时间：2026-08-04 10:16 CST。
 
-- Git 候选提交：`3861f78`（运行时代码包含 `54b95a1`）；
-- Netlify 项目：`flight-lens-staging`，当前候选 Deploy：`6a7141dbcd73917640ef8e39`；
+- Git 候选提交：`5223043`（包含 SerpApi 延迟边界修复）；
+- Netlify 项目：`flight-lens-staging`，当前候选 Deploy：`6a71465d6ca2a08f25cd29d5`；
 - Neon 项目：`flight-lens`，独立 `staging` 分支；迁移成功；
 - `/api/health`：HTTP 200，数据库为 `configured`，本地确定性中文解析器启用，1 个实时 Connector 已配置；
 - SerpApi 账户健康：`healthy`，仅允许活动中的 `$0` 套餐并在免费配额不足时硬停止；
 - 受控样本：北京首都 `PEK` → 上海浦东 `PVG`，2026-08-20，单程直飞；
 - 检索结果：HTTP 200，4 个可比报价，观察到的最低展示价为 CNY 500，售卖方标示为 Trip.com，消费者落点为 Google Flights 结果页重选；
 - 数据质量：`Y8 7596`、`CA 1883`、`CA 8357`、`CA 8331` 的承运人和班次拆分正确；
+- 中国出发国际往返样本：上海浦东 `PVG` → 东京成田 `NRT`，2026-08-20 去程、2026-08-25 回程；HTTP 200，17.772 秒，4 个可比报价，观察到的最低展示价为 CNY 3,198，售卖方 Spring，行程包含 2 个航段，消费者落点为 Google Flights 结果页重选；
+- 中国到达国际单程样本：新加坡 `SIN` → 广州 `CAN`，2026-08-22；一次 TLS 握手在请求发送前失败并人工重试，随后 HTTP 200，22.274 秒，12 个可比报价，观察到的最低展示价为 CNY 1,007，售卖方 Scoot，直飞，审计成功落库；
+- 延迟边界：往返查询曾在 Netlify Function 的 30 秒硬限制处终止。候选移除较慢且非必要的 `deep_search=true`，将 Connector 默认超时设为 25 秒，为标准化、审计和响应封装保留时间；修复后同一路线在 17.772 秒完成；
+- 落地页核价：2026-08-04 10:16 CST 打开同条件 Google Flights 结果页（北京首都 `PEK` → 上海浦东 `PVG`、2026-08-20、单程直飞、CNY），页面返回 11 个结果，当前最低公开价为 CNY 2,520（Hainan）；此前候选的 CNY 500/Trip.com 已不可见。由于交接类型是“结果页重新选择”而非精确 Offer 深链，此结果判定为价格已变化，页面必须要求用户在购买前复核，不能把旧候选价描述为仍可购买；Neon CLI 登录态已过期，数据库核价记录写回待用户解锁 Mac 后在 Edge 重新认证；
 - 覆盖披露：计划 1 个来源、成功 1 个、失败 0 个、超时 0 个；没有宣称“全网最低”；
 - 审计：`configured=true`、`persisted=true`；
 - 安全：页面与 API 均返回 `nosniff`、`DENY`、Referrer Policy、Permissions Policy、COOP 与 HSTS；API 返回限流头；
+- 回归：`pnpm check` 全部通过（45 项测试、类型检查、Lint、生产构建）；Playwright 桌面与移动端端到端测试 4/4 通过；
 - 凭据：数据库密码在配置过程中完成轮换，旧连接串失效；Netlify 中的 `DATABASE_URL` 与 `SERPAPI_API_KEY` 均为 secret；迁移后系统剪贴板已清空。
-- 回滚：在隔离 worktree 重建提交 `5503c45`，部署为 `6a71418ce8ca6745e61e690f`，候选 URL 的页面与 API 均为 HTTP 200，数据库、Connector、限流和安全响应头正常；随后恢复当前候选 `6a7141dbcd73917640ef8e39` 并再次通过页面与 API 健康检查。整个演练未触碰 Production。
+- 回滚：在隔离 worktree 重建提交 `5503c45`，部署为 `6a71418ce8ca6745e61e690f`，候选 URL 的页面与 API 均为 HTTP 200，数据库、Connector、限流和安全响应头正常；随后恢复候选 `6a7141dbcd73917640ef8e39` 并再次通过页面与 API 健康检查。延迟修复候选 `6a71465d6ca2a08f25cd29d5` 随后部署并验证为 `ready`。整个演练未触碰 Production。
 
 价格是当时的上游观察值，不构成持续报价。V1 正式发布门禁仍为 1/2 来源，Skyscanner 未审批前不得称为正式 V1。
 
