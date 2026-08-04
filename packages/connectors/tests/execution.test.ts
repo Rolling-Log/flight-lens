@@ -279,6 +279,7 @@ test("forwards the original search parameters when resolving SerpApi booking opt
         plan_monthly_price: 0,
         plan_searches_left: 250,
         total_searches_left: 250,
+        this_month_usage: 0,
       }), { status: 200 });
     }
     if (url.searchParams.has("booking_token")) {
@@ -409,6 +410,85 @@ test("refuses a SerpApi search that could exceed the remaining free quota", asyn
     (error: unknown) =>
       error instanceof ConnectorError && error.code === "SERPAPI_FREE_QUOTA_LOW",
   );
+});
+
+test("refuses SerpApi before search when the monthly safety cap would be exceeded", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const requestedUrls: URL[] = [];
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (input) => {
+    const url = new URL(
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url,
+    );
+    requestedUrls.push(url);
+    return new Response(JSON.stringify({
+      account_status: "Active",
+      plan_monthly_price: 0,
+      total_searches_left: 52,
+      this_month_usage: 198,
+    }), { status: 200 });
+  };
+
+  const connector = new SerpApiGoogleFlightsConnector({
+    apiKey: "test",
+    baseUrl: "https://serpapi.test",
+    monthlyCreditCap: 200,
+  });
+  await assert.rejects(
+    connector.search(intent, {
+      requestId: "request-monthly-cap",
+      signal: new AbortController().signal,
+    }),
+    (error: unknown) =>
+      error instanceof ConnectorError &&
+      error.code === "SERPAPI_MONTHLY_CREDIT_CAP_REACHED",
+  );
+  assert.deepEqual(requestedUrls.map((url) => url.pathname), ["/account.json"]);
+});
+
+test("fails closed when SerpApi omits the monthly usage field", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const requestedUrls: URL[] = [];
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (input) => {
+    const url = new URL(
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url,
+    );
+    requestedUrls.push(url);
+    return new Response(JSON.stringify({
+      account_status: "Active",
+      plan_monthly_price: 0,
+      total_searches_left: 250,
+    }), { status: 200 });
+  };
+
+  const connector = new SerpApiGoogleFlightsConnector({
+    apiKey: "test",
+    baseUrl: "https://serpapi.test",
+    monthlyCreditCap: 200,
+  });
+  await assert.rejects(
+    connector.search(intent, {
+      requestId: "request-usage-missing",
+      signal: new AbortController().signal,
+    }),
+    (error: unknown) =>
+      error instanceof ConnectorError &&
+      error.code === "SERPAPI_MONTHLY_CREDIT_CAP_REACHED",
+  );
+  assert.deepEqual(requestedUrls.map((url) => url.pathname), ["/account.json"]);
 });
 
 test("retries one transient provider error and discloses the retry", async () => {

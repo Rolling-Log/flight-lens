@@ -307,6 +307,7 @@ export type ConnectorRegistryConfig = {
   skyscannerBaseUrl?: string;
   serpApiKey?: string;
   serpApiBaseUrl?: string;
+  serpApiMonthlyCreditCap?: number;
   amadeusClientId?: string;
   amadeusClientSecret?: string;
   amadeusBaseUrl?: string;
@@ -329,6 +330,7 @@ export function createConnectorRegistry(config: ConnectorRegistryConfig): Flight
       new SerpApiGoogleFlightsConnector({
         apiKey: config.serpApiKey,
         baseUrl: config.serpApiBaseUrl ?? "https://serpapi.com",
+        monthlyCreditCap: config.serpApiMonthlyCreditCap ?? 200,
       }),
     );
   }
@@ -543,6 +545,7 @@ export class DuffelConnector implements FlightConnector {
 type SerpApiConfig = {
   apiKey: string;
   baseUrl: string;
+  monthlyCreditCap?: number;
 };
 
 const V1_NEARBY_ORIGIN_GROUPS = [
@@ -651,6 +654,7 @@ type SerpApiAccountPayload = {
   plan_monthly_price?: number;
   plan_searches_left?: number;
   total_searches_left?: number;
+  this_month_usage?: number;
 };
 
 export class SerpApiGoogleFlightsConnector implements FlightConnector {
@@ -674,17 +678,24 @@ export class SerpApiGoogleFlightsConnector implements FlightConnector {
     try {
       const account = await this.account(signal);
       const remaining = account.total_searches_left ?? account.plan_searches_left;
+      const used = account.this_month_usage;
+      const monthlyCreditCap = this.config.monthlyCreditCap ?? 200;
       const freeAndUsable =
         account.account_status === "Active" &&
         account.plan_monthly_price === 0 &&
         typeof remaining === "number" &&
-        remaining >= 5;
+        remaining >= 5 &&
+        typeof used === "number" &&
+        used + 5 <= monthlyCreditCap;
       return {
         state: freeAndUsable ? "healthy" : "degraded",
         checkedAt: new Date().toISOString(),
         ...(freeAndUsable
           ? {}
-          : { detail: "SerpApi must be an active $0 plan with enough free credits." }),
+          : {
+              detail:
+                "SerpApi must be an active $0 plan below the configured monthly credit cap.",
+            }),
       };
     } catch (error) {
       return {
@@ -787,6 +798,18 @@ export class SerpApiGoogleFlightsConnector implements FlightConnector {
         "SerpApi free quota is too low for a bounded flight search.",
         "SERPAPI_FREE_QUOTA_LOW",
         "unavailable",
+        false,
+      );
+    }
+    const monthlyCreditCap = this.config.monthlyCreditCap ?? 200;
+    if (
+      typeof account.this_month_usage !== "number" ||
+      account.this_month_usage + requiredCredits > monthlyCreditCap
+    ) {
+      throw new ConnectorError(
+        "SerpApi monthly safety cap reached before the provider free quota.",
+        "SERPAPI_MONTHLY_CREDIT_CAP_REACHED",
+        "rate_limited",
         false,
       );
     }
