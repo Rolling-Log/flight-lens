@@ -17,6 +17,17 @@
 
 浏览器自动化只用于补充验证，不绕过验证码、登录、访问控制或付费限制。
 
+## V1 的 2+2 来源结构
+
+“四个 Connector”不是“四个都能进入最低价”。当前采用两个独立门槛：
+
+1. V1 发布门槛：至少 2 个 production `purchase_handoff` 来源，能够把用户合法带到继续核验或购买的来源页面；
+2. 稳定运营目标：在上述 2 个来源之外，再接入至少 2 个 production `verification` 来源，用于发现价格或行程反例；
+3. Sandbox、测试 token、缓存样本和只有代码没有凭据的 Connector 都不计入 production 数量；
+4. 每个来源登记 `inventoryFamily`，用于披露库存依赖，避免把同一上游的多个包装 API 夸大为独立证据。
+
+当前进度为：购买交接 `1/2`，生产核验 `0/2`，生产运营来源合计 `1/4`。
+
 ## 进入最低价比较的硬门槛
 
 一个来源能返回航班和价格，并不等于它适合本产品。进入“最低可购买价”的 Offer 必须同时满足：
@@ -41,8 +52,8 @@
 | Wego Affiliate Flights | 暂不接入 | 生产 API 当前要求年费，测试 Key 最长两周；V1 尚未证明足以承担该固定成本的用户价值，已移除 Connector 和申请材料 | 只有在授权允许多源比较、用户价值已验证且预算获批后重审 |
 | Travelpayouts / Aviasales Search API | 拒绝接入 | 2025-11-01 起的新 Search API 要求已有 50,000 MAU，且官方使用规则禁止与其他航班元搜索 API 合并；与本产品核心冲突 | 不接入；Data API 也不能伪装成实时可购买价格 |
 | Kiwi.com Tequila | 暂不接入 | 2024 年起新合作改为邀请制，只面向与其战略匹配的选定合作方 | 仅在取得明确邀请与允许多源比较的合同后重审 |
-| Amadeus Self-Service Flight Offers | 交叉核验 | 生产环境可提供实时 published GDS fare，但不覆盖低成本航司等重要内容，且没有消费者购买 deeplink | 仅作核验；不得单独进入可购买最低价 |
-| Duffel Flights API | 交叉核验 | Test mode 明确不是真实时刻/价格；标准流程要求接入方继续创建订单 | 仅作协议与价格核验；无购买交接时不得推荐 |
+| Amadeus Self-Service Flight Offers | 生产核验候选；Connector 与固定响应测试已完成 | 只有官方 production 域名才标记为生产；可提供 published GDS fare，但不覆盖低成本航司等重要内容，且没有消费者购买 deeplink | 创建开发者应用并取得 production 凭据；仅作核验，不进入可购买最低价 |
+| Duffel Flights API | 生产核验候选；Connector 与固定响应测试已完成 | 只有 `duffel_live_` token 才标记为生产；Test mode 不是真实时刻/价格，标准流程要求接入方继续创建订单 | 完成账户与 live mode 审核；仅作核验，不进入可购买最低价 |
 | PKFARE Flight Buyer API | 中国覆盖合作候选 | 包含中国航信、GDS、航司直连等广泛内容，但面向 OTA/旅行社继续下单出票 | 若取得仅搜索+合法消费者交接合作再接入；否则只核验 |
 
 ### 官方依据
@@ -80,3 +91,5 @@
 - 以上均为特定时刻的受控观察值，不代表持续价格，也不改变 V1 双来源门禁仍为 1/2 的结论。
 
 每个 Connector 必须登记授权依据、环境、支持范围、字段、限流、成本、新鲜度、深链、失败策略和当前状态。
+
+登录、凭据和生产验证的操作顺序见 [`docs/PROVIDER_ONBOARDING.md`](docs/PROVIDER_ONBOARDING.md)。

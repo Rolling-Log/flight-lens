@@ -46,17 +46,15 @@ test("labels sandbox offers even when their local connectors succeed", () => {
 test("detects a single successful production source", () => {
   assert.equal(
     isSingleSourceLiveResult(
-      [{ environment: "production" }],
-      [{ state: "success", notes: [] }],
+      [{ environment: "production", connectorId: "source-a" }],
     ),
     true,
   );
   assert.equal(
     isSingleSourceLiveResult(
-      [{ environment: "production" }],
       [
-        { state: "success", notes: [] },
-        { state: "empty", notes: [] },
+        { environment: "production", connectorId: "source-a" },
+        { environment: "production", connectorId: "source-b" },
       ],
     ),
     false,
@@ -64,9 +62,17 @@ test("detects a single successful production source", () => {
   assert.equal(
     isSingleSourceLiveResult(
       [{ environment: "sandbox" }],
-      [{ state: "success", notes: [] }],
     ),
     false,
+  );
+  assert.equal(
+    isSingleSourceLiveResult(
+      [
+        { environment: "production", connectorId: "source-a" },
+        { environment: "sandbox", connectorId: "sandbox-source" },
+      ],
+    ),
+    true,
   );
 });
 

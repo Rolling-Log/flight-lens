@@ -456,7 +456,7 @@ export default function Home() {
     ? resultSourceStatus(result.offers, result.connectorReports)
     : null;
   const singleSourceLiveResult = result
-    ? isSingleSourceLiveResult(result.offers, result.connectorReports)
+    ? isSingleSourceLiveResult(result.offers)
     : false;
 
   return (

@@ -1,6 +1,6 @@
 import type { ConnectorReport, Offer } from "@flight-lens/contracts";
 
-type StatusOffer = Pick<Offer, "environment">;
+type StatusOffer = Pick<Offer, "environment"> & Partial<Pick<Offer, "connectorId">>;
 type StatusReport = Pick<ConnectorReport, "state" | "notes">;
 
 export type ResultSourceStatus = {
@@ -52,13 +52,11 @@ export function resultSourceStatus(
 
 export function isSingleSourceLiveResult(
   offers: readonly StatusOffer[],
-  reports: readonly StatusReport[],
 ): boolean {
-  const successfulSources = reports.filter((report) =>
-    ["success", "empty"].includes(report.state),
-  ).length;
-  return (
-    offers.some((offer) => offer.environment === "production") &&
-    successfulSources === 1
+  const productionSources = new Set(
+    offers
+      .filter((offer) => offer.environment === "production")
+      .map((offer) => offer.connectorId ?? "unknown-production-source"),
   );
+  return productionSources.size === 1;
 }

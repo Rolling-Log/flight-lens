@@ -18,6 +18,7 @@ export type ConnectorMetadata = {
   authorization: "contract" | "self_service_api" | "partner_api";
   resultRole: "discovery" | "verification" | "purchase_handoff";
   handoff: "none" | "deep_link" | "server_resolved";
+  inventoryFamily?: string;
   configured: boolean;
   supportsFlexibleDateProbe?: boolean;
 };
@@ -362,6 +363,14 @@ type AmadeusConfig = {
 
 type AmadeusToken = { access_token?: string; expires_in?: number };
 
+export function amadeusEnvironment(baseUrl: string): ConnectorEnvironment {
+  try {
+    return new URL(baseUrl).hostname === "api.amadeus.com" ? "production" : "sandbox";
+  } catch {
+    return "sandbox";
+  }
+}
+
 export class AmadeusConnector implements FlightConnector {
   readonly metadata: ConnectorMetadata;
   private token: { value: string; expiresAt: number } | undefined;
@@ -371,10 +380,11 @@ export class AmadeusConnector implements FlightConnector {
       id: "amadeus-self-service",
       name: "Amadeus Self-Service",
       kind: "aggregator",
-      environment: config.baseUrl.includes("test.") ? "sandbox" : "production",
+      environment: amadeusEnvironment(config.baseUrl),
       authorization: "self_service_api",
       resultRole: "verification",
       handoff: "none",
+      inventoryFamily: "amadeus-gds",
       configured: true,
     };
   }
@@ -451,6 +461,10 @@ export class AmadeusConnector implements FlightConnector {
 
 type DuffelConfig = { accessToken: string; baseUrl: string };
 
+export function duffelEnvironment(accessToken: string): ConnectorEnvironment {
+  return accessToken.startsWith("duffel_live_") ? "production" : "sandbox";
+}
+
 export class DuffelConnector implements FlightConnector {
   readonly metadata: ConnectorMetadata;
 
@@ -459,10 +473,11 @@ export class DuffelConnector implements FlightConnector {
       id: "duffel-flights",
       name: "Duffel Flights",
       kind: "aggregator",
-      environment: config.accessToken.startsWith("duffel_test_") ? "sandbox" : "production",
+      environment: duffelEnvironment(config.accessToken),
       authorization: "self_service_api",
       resultRole: "verification",
       handoff: "none",
+      inventoryFamily: "duffel-air-content",
       configured: true,
     };
   }
@@ -680,6 +695,7 @@ export class SerpApiGoogleFlightsConnector implements FlightConnector {
       authorization: "self_service_api",
       resultRole: "purchase_handoff",
       handoff: "deep_link",
+      inventoryFamily: "google-flights-metasearch",
       configured: true,
       supportsFlexibleDateProbe: false,
     };
@@ -1170,7 +1186,7 @@ function durationMinutes(value: unknown): number | undefined {
   return Number(match[1] ?? 0) * 60 + Number(match[2] ?? 0);
 }
 
-function mapAmadeusOffer(
+export function mapAmadeusOffer(
   value: unknown,
   environment: ConnectorEnvironment,
   requestId: string,
@@ -1271,7 +1287,7 @@ function mapAmadeusOffer(
       ? { totalPriceCny: { amountMinor: total, currency: "CNY" as const } }
       : {}),
     baggage: [],
-    refundable: Boolean(item.refundable),
+    refundable: null,
     changeable: null,
     eligibility: [],
     fetchedAt: new Date().toISOString(),
@@ -1284,7 +1300,7 @@ function mapAmadeusOffer(
   }];
 }
 
-function mapDuffelOffer(
+export function mapDuffelOffer(
   value: unknown,
   environment: ConnectorEnvironment,
   requestId: string,

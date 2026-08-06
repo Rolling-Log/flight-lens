@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-- 当前版本：V1 开发候选；正式购买交接来源 1/2；
+- 当前版本：V1 开发候选；正式购买交接来源 1/2，生产运营来源 1/4；
 - Web：Next.js，部署到 Netlify；
 - API：Fastify 独立服务，部署到 Railway；
 - 数据库：Neon Postgres；
@@ -55,4 +55,4 @@ docs                产品、架构与运行文档
 
 航探不会在证据不足时宣称“全网最低”。结论必须包含成功、失败和超时来源、统一价格口径以及报价核验时间。只能跳到来源结果页的报价会显示为“抓取时来源展示价”，而不是可支付总价。
 
-详细范围见 [PRD](./PRD.md)，工程决策见 [ARCHITECTURE](./ARCHITECTURE.md)，部署步骤见 [DEPLOYMENT](./DEPLOYMENT.md)，V1 发布门禁见 [V1_ACCEPTANCE](./docs/V1_ACCEPTANCE.md)。
+详细范围见 [PRD](./PRD.md)，工程决策见 [ARCHITECTURE](./ARCHITECTURE.md)，部署步骤见 [DEPLOYMENT](./DEPLOYMENT.md)，V1 发布门禁见 [V1_ACCEPTANCE](./docs/V1_ACCEPTANCE.md)，四来源登录与验证步骤见 [PROVIDER_ONBOARDING](./docs/PROVIDER_ONBOARDING.md)。

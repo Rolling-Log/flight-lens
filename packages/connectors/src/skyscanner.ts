@@ -484,6 +484,7 @@ export class SkyscannerConnector implements FlightConnector {
     authorization: "partner_api",
     resultRole: "purchase_handoff",
     handoff: "deep_link",
+    inventoryFamily: "skyscanner-metasearch",
     configured: true,
   };
 

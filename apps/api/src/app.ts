@@ -183,19 +183,72 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       verificationConfigured: connectors.filter(
         (connector) => connector.metadata.resultRole === "verification",
       ).length,
+      productionConfigured: connectors.filter(
+        (connector) => connector.metadata.environment === "production",
+      ).length,
+      productionPurchaseHandoffConfigured: connectors.filter(
+        (connector) =>
+          connector.metadata.environment === "production" &&
+          connector.metadata.resultRole === "purchase_handoff",
+      ).length,
+      productionVerificationConfigured: connectors.filter(
+        (connector) =>
+          connector.metadata.environment === "production" &&
+          connector.metadata.resultRole === "verification",
+      ).length,
+      productionInventoryFamilies: new Set(
+        connectors
+          .filter((connector) => connector.metadata.environment === "production")
+          .map((connector) => connector.metadata.inventoryFamily)
+          .filter(Boolean),
+      ).size,
+      releaseMinimumProductionSources: 4,
       releaseMinimumPurchaseHandoff: 2,
+      releaseMinimumVerification: 2,
     },
     timestamp: new Date().toISOString(),
   }));
 
-  app.get("/v1/meta/connectors", async () => ({
-    connectors: connectors.map((connector) => connector.metadata),
-    disclosure:
-      connectors.filter((connector) => connector.metadata.resultRole === "purchase_handoff")
-        .length >= 2
-        ? "Two or more purchase-handoff connectors are configured. Real coverage still depends on each search response."
-        : "V1 release requires at least two independently verified real-time sources with a legal consumer purchase handoff.",
-  }));
+  app.get("/v1/meta/connectors", async () => {
+    const production = connectors.filter(
+      (connector) => connector.metadata.environment === "production",
+    );
+    const purchaseHandoff = production.filter(
+      (connector) => connector.metadata.resultRole === "purchase_handoff",
+    );
+    const verification = production.filter(
+      (connector) => connector.metadata.resultRole === "verification",
+    );
+    const inventoryFamilies = new Set(
+      production
+        .map((connector) => connector.metadata.inventoryFamily)
+        .filter(Boolean),
+    );
+    const operationalTargetMet =
+      production.length >= 4 &&
+      purchaseHandoff.length >= 2 &&
+      verification.length >= 2 &&
+      inventoryFamilies.size >= 4;
+    return {
+      connectors: connectors.map((connector) => connector.metadata),
+      readiness: {
+        operationalTargetMet,
+        productionSources: production.length,
+        productionPurchaseHandoffSources: purchaseHandoff.length,
+        productionVerificationSources: verification.length,
+        productionInventoryFamilies: inventoryFamilies.size,
+        target: {
+          productionSources: 4,
+          purchaseHandoffSources: 2,
+          verificationSources: 2,
+          inventoryFamilies: 4,
+        },
+      },
+      disclosure: operationalTargetMet
+        ? "The 2+2 production connector target is configured. Real coverage still depends on each search response."
+        : "V1 targets two production purchase-handoff sources plus two production verification sources; sandbox connectors never count toward this target.",
+    };
+  });
 
   app.get("/v1/meta/connectors/health", async () => {
     const checks = await Promise.all(

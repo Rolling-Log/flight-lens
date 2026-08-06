@@ -89,6 +89,28 @@ function comparableOffer(overrides: Partial<Offer> = {}): Offer {
   };
 }
 
+function readinessConnector(
+  id: string,
+  resultRole: FlightConnector["metadata"]["resultRole"],
+  inventoryFamily: string,
+): FlightConnector {
+  return {
+    metadata: {
+      id,
+      name: id,
+      kind: "aggregator",
+      environment: "production",
+      authorization: "partner_api",
+      resultRole,
+      handoff: resultRole === "purchase_handoff" ? "deep_link" : "none",
+      inventoryFamily,
+      configured: true,
+    },
+    health: async () => ({ state: "healthy", checkedAt: fixedNow().toISOString() }),
+    search: async () => ({ offers: [] }),
+  };
+}
+
 test("health discloses connector release readiness", async () => {
   const app = await buildApp({ config, connectors: [], auditStore: null, now: fixedNow });
   const response = await app.inject({ method: "GET", url: "/health" });
@@ -97,8 +119,44 @@ test("health discloses connector release readiness", async () => {
     configured: 0,
     purchaseHandoffConfigured: 0,
     verificationConfigured: 0,
+    productionConfigured: 0,
+    productionPurchaseHandoffConfigured: 0,
+    productionVerificationConfigured: 0,
+    productionInventoryFamilies: 0,
+    releaseMinimumProductionSources: 4,
     releaseMinimumPurchaseHandoff: 2,
+    releaseMinimumVerification: 2,
   });
+  await app.close();
+});
+
+test("requires a truthful two-purchase plus two-verification production mix", async () => {
+  const connectors = [
+    readinessConnector("purchase-a", "purchase_handoff", "inventory-a"),
+    readinessConnector("purchase-b", "purchase_handoff", "inventory-b"),
+    readinessConnector("verification-a", "verification", "inventory-c"),
+    readinessConnector("verification-b", "verification", "inventory-d"),
+  ];
+  const app = await buildApp({ config, connectors, auditStore: null, now: fixedNow });
+
+  const metadata = await app.inject({ method: "GET", url: "/v1/meta/connectors" });
+  assert.equal(metadata.statusCode, 200);
+  assert.deepEqual(metadata.json().readiness, {
+    operationalTargetMet: true,
+    productionSources: 4,
+    productionPurchaseHandoffSources: 2,
+    productionVerificationSources: 2,
+    productionInventoryFamilies: 4,
+    target: {
+      productionSources: 4,
+      purchaseHandoffSources: 2,
+      verificationSources: 2,
+      inventoryFamilies: 4,
+    },
+  });
+
+  const health = await app.inject({ method: "GET", url: "/health" });
+  assert.equal(health.json().connectors.productionInventoryFamilies, 4);
   await app.close();
 });
 

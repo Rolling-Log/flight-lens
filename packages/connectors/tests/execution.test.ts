@@ -2,9 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { SearchIntent } from "@flight-lens/contracts";
 import {
+  AmadeusConnector,
+  amadeusEnvironment,
   clearConnectorExecutionCache,
   ConnectorError,
+  DuffelConnector,
+  duffelEnvironment,
   executeConnector,
+  mapAmadeusOffer,
+  mapDuffelOffer,
   mapSerpApiBookingPayload,
   mapSerpApiSearchChoices,
   mapSkyscannerSearchResults,
@@ -32,6 +38,156 @@ const intent: SearchIntent = {
   inferredFields: [],
   pendingQuestions: [],
 };
+
+const amadeusOffer = {
+  id: "amadeus-offer-1",
+  price: { grandTotal: "1200.00", base: "1000.00", currency: "CNY" },
+  itineraries: [{
+    duration: "PT3H",
+    segments: [{
+      id: "amadeus-segment-1",
+      carrierCode: "MU",
+      number: "523",
+      departure: { iataCode: "PVG", at: "2026-08-24T09:00:00+08:00" },
+      arrival: { iataCode: "NRT", at: "2026-08-24T13:00:00+09:00" },
+      duration: "PT3H",
+      aircraft: { code: "320" },
+    }],
+  }],
+};
+
+const duffelOffer = {
+  id: "duffel-offer-1",
+  total_amount: "900.00",
+  base_amount: "700.00",
+  tax_amount: "200.00",
+  total_currency: "CNY",
+  expires_at: "2026-08-20T00:00:00.000Z",
+  owner: { id: "airline-mu", name: "Example Airline" },
+  slices: [{
+    duration: "PT3H",
+    segments: [{
+      id: "duffel-segment-1",
+      marketing_carrier_flight_number: "523",
+      origin: { iata_code: "PVG" },
+      destination: { iata_code: "NRT" },
+      departing_at: "2026-08-24T09:00:00+08:00",
+      arriving_at: "2026-08-24T13:00:00+09:00",
+      marketing_carrier: { iata_code: "MU" },
+      operating_carrier: { iata_code: "MU" },
+      duration: "PT3H",
+    }],
+  }],
+};
+
+test("marks only explicit Amadeus and Duffel live credentials as production", () => {
+  assert.equal(amadeusEnvironment("https://api.amadeus.com"), "production");
+  assert.equal(amadeusEnvironment("https://test.api.amadeus.com"), "sandbox");
+  assert.equal(amadeusEnvironment("https://amadeus.proxy.invalid"), "sandbox");
+  assert.equal(duffelEnvironment("duffel_live_configured"), "production");
+  assert.equal(duffelEnvironment("duffel_test_configured"), "sandbox");
+  assert.equal(duffelEnvironment("unknown-token-format"), "sandbox");
+});
+
+test("maps Amadeus production fares as verification-only evidence", () => {
+  const offers = mapAmadeusOffer(amadeusOffer, "production", "request-amadeus");
+
+  assert.equal(offers.length, 1);
+  assert.equal(offers[0]?.environment, "production");
+  assert.equal(offers[0]?.totalPrice.amountMinor, 120_000);
+  assert.equal(offers[0]?.seller.deepLink, undefined);
+  assert.equal(offers[0]?.refundable, null);
+  assert.equal(offers[0]?.comparable, false);
+  assert.deepEqual(offers[0]?.incomparabilityReasons, ["NO_PURCHASE_HANDOFF"]);
+});
+
+test("sends a bounded Amadeus Flight Offers request and reuses its OAuth token", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const requestedUrls: URL[] = [];
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (input) => {
+    const url = new URL(
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url,
+    );
+    requestedUrls.push(url);
+    if (url.pathname === "/v1/security/oauth2/token") {
+      return new Response(JSON.stringify({ access_token: "access", expires_in: 900 }), {
+        status: 200,
+      });
+    }
+    return new Response(JSON.stringify({ data: [amadeusOffer] }), {
+      status: 200,
+      headers: { "ama-request-id": "ama-request-1" },
+    });
+  };
+
+  const connector = new AmadeusConnector({
+    clientId: "client",
+    clientSecret: "secret",
+    baseUrl: "https://test.api.amadeus.com",
+  });
+  const context = { requestId: "request-amadeus", signal: new AbortController().signal };
+  const first = await connector.search(intent, context);
+  await connector.search(intent, context);
+
+  const offerRequest = requestedUrls.find((url) =>
+    url.pathname === "/v2/shopping/flight-offers",
+  );
+  assert.equal(requestedUrls.filter((url) => url.pathname.includes("oauth2")).length, 1);
+  assert.equal(offerRequest?.searchParams.get("originLocationCode"), "PVG");
+  assert.equal(offerRequest?.searchParams.get("destinationLocationCode"), "NRT");
+  assert.equal(offerRequest?.searchParams.get("max"), "50");
+  assert.equal(first.providerRequestId, "ama-request-1");
+  assert.equal(first.offers[0]?.environment, "sandbox");
+});
+
+test("maps and requests Duffel offers without promoting test data to live", async (t) => {
+  const mapped = mapDuffelOffer(duffelOffer, "production", "request-duffel");
+  assert.equal(mapped.length, 1);
+  assert.equal(mapped[0]?.totalPrice.amountMinor, 90_000);
+  assert.equal(mapped[0]?.seller.name, "Example Airline");
+  assert.equal(mapped[0]?.comparable, false);
+  assert.deepEqual(mapped[0]?.incomparabilityReasons, ["NO_PURCHASE_HANDOFF"]);
+
+  const originalFetch = globalThis.fetch;
+  let requestBody: unknown;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (_input, init) => {
+    requestBody = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify({
+      data: { id: "offer-request-1", offers: [duffelOffer] },
+    }), { status: 200 });
+  };
+
+  const connector = new DuffelConnector({
+    accessToken: "duffel_test_configured",
+    baseUrl: "https://api.duffel.com",
+  });
+  const result = await connector.search(intent, {
+    requestId: "request-duffel",
+    signal: new AbortController().signal,
+  });
+
+  assert.equal(connector.metadata.environment, "sandbox");
+  assert.deepEqual(requestBody, {
+    data: {
+      slices: [{ origin: "PVG", destination: "NRT", departure_date: "2026-08-24" }],
+      passengers: [{ id: "adult-1", type: "adult" }],
+      cabin_class: "economy",
+      max_connections: 1,
+    },
+  });
+  assert.equal(result.providerRequestId, "offer-request-1");
+  assert.equal(result.offers[0]?.environment, "sandbox");
+});
 
 test("expands only configured nearby origin airports for SerpApi", () => {
   assert.deepEqual(
