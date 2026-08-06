@@ -9,10 +9,10 @@ const portNumber = z.coerce.number().int().min(1).max(65535);
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  API_HOST: z.string().default("0.0.0.0"),
+  API_HOST: z.string().default("::"),
   PORT: portNumber.optional(),
   API_PORT: portNumber.default(4000),
-  WEB_ORIGINS: z.string().default("http://localhost:3000"),
+  WEB_ORIGINS: z.string().default("http://localhost:3000,http://127.0.0.1:3000"),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
   DATABASE_URL: optionalNonEmpty,
   OPENAI_INTENT_PARSER_ENABLED: z
@@ -34,10 +34,10 @@ const envSchema = z.object({
   AMADEUS_BASE_URL: z.string().url().default("https://test.api.amadeus.com"),
   DUFFEL_ACCESS_TOKEN: optionalNonEmpty,
   DUFFEL_BASE_URL: z.string().url().default("https://api.duffel.com"),
-  // Netlify Free functions stop at 30 seconds. Leave enough time to normalize,
-  // attempt a bounded audit write, and return a transparent timeout response.
+  // Keep each request bounded even though Railway runs a long-lived process.
   CONNECTOR_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(20_000),
   AUDIT_TIMEOUT_MS: z.coerce.number().int().min(250).max(10_000).default(3_000),
+  SEARCH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1_000).default(2),
   CONNECTOR_MAX_RETRIES: z.coerce.number().int().min(0).max(3).default(1),
   CONNECTOR_CACHE_TTL_MS: z.coerce.number().int().min(0).max(300_000).default(60_000),
   CONNECTOR_STALE_IF_ERROR_MS: z.coerce
@@ -60,6 +60,7 @@ export type ApiConfig = {
   openaiModel: string;
   connectorTimeoutMs: number;
   auditTimeoutMs: number;
+  searchRateLimitMax?: number;
   connectorMaxRetries?: number;
   connectorCacheTtlMs?: number;
   connectorStaleIfErrorMs?: number;
@@ -91,6 +92,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     openaiModel: parsed.OPENAI_MODEL,
     connectorTimeoutMs: parsed.CONNECTOR_TIMEOUT_MS,
     auditTimeoutMs: parsed.AUDIT_TIMEOUT_MS,
+    searchRateLimitMax: parsed.SEARCH_RATE_LIMIT_MAX,
     connectorMaxRetries: parsed.CONNECTOR_MAX_RETRIES,
     connectorCacheTtlMs: parsed.CONNECTOR_CACHE_TTL_MS,
     connectorStaleIfErrorMs: parsed.CONNECTOR_STALE_IF_ERROR_MS,

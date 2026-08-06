@@ -8,17 +8,13 @@
       "types": "./src/app.ts",
       "development": "./src/app.ts",
       "default": "./dist/app.js"
-    },
-    "./fetch-handler": {
-      "types": "./src/fetch-handler.ts",
-      "development": "./src/fetch-handler.ts",
-      "default": "./dist/fetch-handler.js"
     }
   },
   "scripts": {
     "dev": "tsx watch --conditions=development src/index.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
+    "preview": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests --max-warnings=0",
     "test": "node --conditions=development --import tsx --test tests/**/*.test.ts"

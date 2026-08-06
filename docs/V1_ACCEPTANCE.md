@@ -12,10 +12,10 @@ V1 的目标不是证明“能显示航班”，而是证明系统能稳定、�
 | 全价口径 | 币种、税费、必需费用、行李、资格条件和未知项可见 | 契约、领域测试与 SerpApi Staging 响应已通过；行李与退改未知项未伪造 |
 | 失败透明 | 成功、超时、失败、缓存和部分覆盖都显示，不以空结果冒充无航班 | 已通过自动化测试 |
 | 确定性排序 | 最低价、推荐、最短时间、最少中转等排序不由模型直接决定 | 已通过自动化测试 |
-| 安全与合规 | 密钥仅服务端、输入校验、限流、CORS、跳转白名单和供应商条款记录 | Staging 已验证 secret 注入、同域 API、限流及安全响应头；第二来源条款待审批后复核 |
-| 零付费来源 | 数据源为长期 `$0` 或不收费的 revenue-share 合作；无试用转收费、自动升级或超额扣费 | SerpApi Free 的账户状态与配额硬停止已验证；Skyscanner 等待审批 |
-| 前后端数据库 Staging | 独立 Netlify Staging 项目承载 Web + Functions，连接 Neon Staging 分支，完成端到端查询和审计落库 | 已通过：Netlify Draft + Functions、Neon Staging 迁移、真实检索与审计落库 |
-| 回滚 | 候选提交可重建，部署平台可回到上一个已验证版本 | 已通过 Staging 回退与恢复演练 |
+| 安全与合规 | 密钥仅在 Railway API、输入校验、限流、CORS、跳转白名单和供应商条款记录 | Railway 架构代码已完成；新 Staging 待验证 |
+| 成本控制 | 每个平台和数据源有预算、禁止自动超额并可硬停止 | SerpApi 账户级门禁已通过自动化；Railway 预算待 Staging 配置 |
+| 前后端数据库 Staging | Netlify Web、Railway API、Neon Staging Branch 完成跨域端到端查询和审计落库 | 待按新架构重新验证；旧 Netlify Function 证据不计入 |
+| 回滚 | Railway API、Netlify Web 均可回到上一个已验证版本 | 待按新架构重新演练 |
 | 用户确认 | 用户确认 V1 候选后才允许合并 `main`、打 Tag、正式推送和生产部署 | 未开始 |
 
 任何硬门禁未通过时，只能称为 V1 开发版或候选版，不能称为正式 V1。
@@ -35,9 +35,9 @@ V1 的目标不是证明“能显示航班”，而是证明系统能稳定、�
 
 真实供应商测试应控制调用量；不得把本地密钥、响应中的供应商 Token 或个人信息写入仓库和验收报告。
 
-## 已完成的 Staging 证据
+## 历史 Staging 证据（Netlify Function 架构）
 
-初次真实检索记录时间：2026-07-31 15:52 CST；本轮候选复核时间：2026-08-04 13:48 CST。
+以下记录证明领域逻辑、Connector 和旧部署链路曾工作，但在 API 迁移 Railway 后不再满足当前 Staging 门禁。初次真实检索记录时间：2026-07-31 15:52 CST；本轮候选复核时间：2026-08-04 13:48 CST。
 
 - Git 运行时候选提交：`3c16cff`（包含附近始发机场执行、双输入一致性、Netlify 同域 API、有界搜索运行时、免费额度防滥用、不合格报价隔离、来源状态披露、Offer 信任不变量、账户级 credit 门禁与依赖安全修复）；
 - Netlify 项目：`flight-lens-staging`，当前候选 Deploy：`6a717ccd8705207dd19e52a9`，固定候选地址：<https://v1-candidate--flight-lens-staging.netlify.app>；

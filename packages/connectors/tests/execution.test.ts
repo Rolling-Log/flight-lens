@@ -6,8 +6,10 @@ import {
   ConnectorError,
   executeConnector,
   mapSerpApiBookingPayload,
+  mapSerpApiSearchChoices,
   mapSkyscannerSearchResults,
   serpApiOriginSelection,
+  serpApiRequiredCredits,
   SerpApiGoogleFlightsConnector,
   type FlightConnector,
 } from "../src/index.js";
@@ -258,6 +260,44 @@ test("uses the canonical Google Flights result page without pretending it is exa
   );
 });
 
+test("maps initial SerpApi prices as disclosed search-result fallbacks", () => {
+  const offers = mapSerpApiSearchChoices(
+    [{
+      price: 880,
+      total_duration: 180,
+      flights: [{
+        departure_airport: { id: "PVG", time: "2026-08-24 09:00" },
+        arrival_airport: { id: "NRT", time: "2026-08-24 13:00" },
+        duration: 180,
+        flight_number: "MU 523",
+      }],
+    }],
+    intent,
+    "request-initial",
+    "https://www.google.com/travel/flights?hl=en&curr=CNY&tfs=opaque",
+    "provider-initial",
+  );
+
+  assert.equal(offers.length, 1);
+  assert.equal(offers[0]?.seller.name, "Google Flights");
+  assert.equal(offers[0]?.seller.handoffPrecision, "search_results");
+  assert.equal(offers[0]?.totalPrice.amountMinor, 88_000);
+  assert.equal(offers[0]?.comparable, true);
+  assert.deepEqual(
+    mapSerpApiSearchChoices(
+      [{ price: 880 }],
+      {
+        ...intent,
+        tripType: "round_trip",
+        returnDate: "2026-08-29",
+      },
+      "request-incomplete-round-trip",
+      "https://www.google.com/travel/flights?hl=en&curr=CNY&tfs=opaque",
+    ),
+    [],
+  );
+});
+
 test("forwards the original search parameters when resolving SerpApi booking options", async (t) => {
   const requestedUrls: URL[] = [];
   const originalFetch = globalThis.fetch;
@@ -345,6 +385,129 @@ test("forwards the original search parameters when resolving SerpApi booking opt
   assert.equal(initialRequest?.searchParams.get("deep_search"), null);
   assert.equal(initialRequest?.searchParams.get("no_cache"), "true");
   assert.equal(result.offers.length, 1);
+});
+
+test("bounds a one-way SerpApi search to its five reserved credits", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const requestedUrls: URL[] = [];
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (input) => {
+    const url = new URL(
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url,
+    );
+    requestedUrls.push(url);
+    if (url.pathname === "/account.json") {
+      return new Response(JSON.stringify({
+        account_status: "Active",
+        plan_monthly_price: 0,
+        total_searches_left: 250,
+        this_month_usage: 0,
+      }), { status: 200 });
+    }
+    if (url.searchParams.has("booking_token")) {
+      return new Response(JSON.stringify({ booking_options: [] }), { status: 200 });
+    }
+    return new Response(JSON.stringify({
+      best_flights: Array.from({ length: 8 }, (_, index) => ({
+        booking_token: `booking-${index}`,
+        flights: [{
+          departure_airport: { id: "PVG", time: "2026-08-24 09:00" },
+          arrival_airport: { id: "NRT", time: "2026-08-24 13:00" },
+        }],
+      })),
+    }), { status: 200 });
+  };
+
+  const connector = new SerpApiGoogleFlightsConnector({
+    apiKey: "test",
+    baseUrl: "https://serpapi.test",
+  });
+  await connector.search(intent, {
+    requestId: "request-bounded",
+    signal: new AbortController().signal,
+  });
+
+  const searchRequests = requestedUrls.filter((url) => url.pathname === "/search.json");
+  assert.equal(serpApiRequiredCredits("one_way"), 5);
+  assert.equal(serpApiRequiredCredits("round_trip"), 9);
+  assert.equal(searchRequests.length, serpApiRequiredCredits("one_way"));
+  assert.equal(
+    searchRequests.filter((url) => url.searchParams.has("booking_token")).length,
+    4,
+  );
+});
+
+test("keeps real initial results when every Booking Options request fails", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (input) => {
+    const url = new URL(
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url,
+    );
+    if (url.pathname === "/account.json") {
+      return new Response(JSON.stringify({
+        account_status: "Active",
+        plan_monthly_price: 0,
+        total_searches_left: 250,
+        this_month_usage: 0,
+      }), { status: 200 });
+    }
+    if (url.searchParams.has("booking_token")) {
+      throw new DOMException("Booking lookup timed out.", "AbortError");
+    }
+    return new Response(JSON.stringify({
+      search_metadata: {
+        id: "search-fallback",
+        google_flights_url:
+          "https://www.google.com/travel/flights?hl=en&curr=CNY&tfs=opaque",
+      },
+      best_flights: [{
+        booking_token: "booking-fallback",
+        price: 880,
+        total_duration: 180,
+        flights: [{
+          departure_airport: { id: "PVG", time: "2026-08-24 09:00" },
+          arrival_airport: { id: "NRT", time: "2026-08-24 13:00" },
+          duration: 180,
+          flight_number: "MU 523",
+        }],
+      }],
+    }), { status: 200 });
+  };
+
+  const connector = new SerpApiGoogleFlightsConnector({
+    apiKey: "test",
+    baseUrl: "https://serpapi.test",
+  });
+  const result = await connector.search(intent, {
+    requestId: "request-fallback",
+    signal: new AbortController().signal,
+  });
+
+  assert.equal(result.offers.length, 1);
+  assert.equal(result.offers[0]?.seller.handoffPrecision, "search_results");
+  assert.equal(
+    result.notes?.includes("SERPAPI_BOOKING_OPTIONS_PARTIAL_FAILURE:1/1"),
+    true,
+  );
+  assert.equal(
+    result.notes?.includes(
+      "SERPAPI_INITIAL_RESULTS_FALLBACK:SEARCH_RESULTS_HANDOFF_REQUIRES_REVALIDATION",
+    ),
+    true,
+  );
 });
 
 test("refuses SerpApi paid plans before consuming a search credit", async (t) => {

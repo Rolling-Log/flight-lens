@@ -35,6 +35,9 @@ export function resultSourceStatus(
   if (offers.some((offer) => offer.environment === "production")) {
     return { label: "实时生产来源", productionStyle: true };
   }
+  if (offers.some((offer) => offer.environment === "sandbox")) {
+    return { label: "Sandbox 来源 · 不代表可购买库存", productionStyle: false };
+  }
   if (reports.some((report) => report.state === "timeout")) {
     return { label: "来源超时 · 未返回报价", productionStyle: false };
   }
@@ -45,4 +48,17 @@ export function resultSourceStatus(
     return { label: "来源已完成 · 无符合报价", productionStyle: false };
   }
   return { label: "Sandbox 来源 · 不代表可购买库存", productionStyle: false };
+}
+
+export function isSingleSourceLiveResult(
+  offers: readonly StatusOffer[],
+  reports: readonly StatusReport[],
+): boolean {
+  const successfulSources = reports.filter((report) =>
+    ["success", "empty"].includes(report.state),
+  ).length;
+  return (
+    offers.some((offer) => offer.environment === "production") &&
+    successfulSources === 1
+  );
 }

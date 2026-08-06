@@ -341,7 +341,8 @@ export class LocalChineseIntentParser implements IntentParser {
     const departure = dates[0];
     const durationMatch = /(?:往返|玩|停留|待)(\d{1,2})天/.exec(text);
     const roundTrip =
-      /往返|来回|返程|回程|回来/.test(text) ||
+      Boolean(dates[1]) ||
+      /往返|来回|返程|回程|回来|返回/.test(text) ||
       Boolean(durationMatch && !/单程/.test(text));
     const returnDate = dates[1] ??
       (roundTrip && departure && durationMatch
@@ -400,7 +401,7 @@ export class LocalChineseIntentParser implements IntentParser {
       location.assumption ? [location.assumption] : [],
     );
     if (!adultMatch) assumptions.push("未说明乘客人数，按 1 名成人解析。");
-    if (!/单程|往返|来回|返程|回程|回来/.test(text)) {
+    if (!dates[1] && !/单程|往返|来回|返程|回程|回来|返回/.test(text)) {
       assumptions.push(
         durationMatch
           ? "根据旅行天数按往返解析。"

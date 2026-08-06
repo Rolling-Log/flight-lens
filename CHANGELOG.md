@@ -2,6 +2,9 @@
 
 ## Unreleased — V1.0.0
 
+- 将部署架构调整为 Netlify Web + Railway Fastify API + Neon，移除 Netlify Route Handler 与 Edge Function；增加 Railway Config as Code、健康检查和优雅停机。
+- 收紧正式 V1 为 1 位成人固定日期；多人和灵活日期留待后续验证，不再让默认搜索生成全部不可比结果。
+- 将结果页重选报价改称“抓取时来源展示价”，并只在存在正向证据时生成行李与退改胜出排序；综合推荐改为可解释的平衡排序。
 - 建立正式单仓多应用基线；
 - 确定 Netlify Web + Functions、Neon 架构；
 - 建立 SearchIntent、Offer、Connector 和数据库契约；

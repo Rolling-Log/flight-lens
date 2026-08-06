@@ -242,7 +242,7 @@ export function rankByFewestStops(offers: readonly Offer[]): Offer[] {
 }
 
 export function rankByBestBaggage(offers: readonly Offer[]): Offer[] {
-  return comparableOffers(offers).sort(
+  return comparableOffers(offers).filter((offer) => checkedBaggageKg(offer) > 0).sort(
     (left, right) =>
       checkedBaggageKg(right) - checkedBaggageKg(left) ||
       comparablePriceMinor(left) - comparablePriceMinor(right),
@@ -252,7 +252,7 @@ export function rankByBestBaggage(offers: readonly Offer[]): Offer[] {
 export function rankByRefundFlexibility(offers: readonly Offer[]): Offer[] {
   const flexibility = (offer: Offer) =>
     Number(offer.refundable === true) * 2 + Number(offer.changeable === true);
-  return comparableOffers(offers).sort(
+  return comparableOffers(offers).filter((offer) => flexibility(offer) > 0).sort(
     (left, right) =>
       flexibility(right) - flexibility(left) ||
       comparablePriceMinor(left) - comparablePriceMinor(right),
@@ -269,8 +269,12 @@ export function rankRecommended(offers: readonly Offer[]): Offer[] {
       const pricePenalty = ((price - cheapest) / cheapest) * 45;
       const stopPenalty = totalStops(offer) * 8;
       const durationPenalty = journeyMinutes(offer) / 120;
-      const eligibilityPenalty = offer.eligibility.length * 5;
-      return offer.qualityScore - pricePenalty - stopPenalty - durationPenalty - eligibilityPenalty;
+      const exactHandoffBonus = offer.seller.handoffPrecision === "exact_offer" ? 6 : 0;
+      const baggageEvidenceBonus = checkedBaggageKg(offer) > 0 ? 2 : 0;
+      const rulesEvidenceBonus =
+        Number(offer.refundable !== null) + Number(offer.changeable !== null);
+      return 100 - pricePenalty - stopPenalty - durationPenalty + exactHandoffBonus +
+        baggageEvidenceBonus + rulesEvidenceBonus;
     };
     return score(right) - score(left);
   });

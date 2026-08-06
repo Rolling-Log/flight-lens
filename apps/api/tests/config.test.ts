@@ -35,17 +35,20 @@ test("requires an explicit opt-in before an injected OpenAI key can be used", ()
 });
 
 test("prefers the platform PORT while retaining API_PORT for local development", () => {
-  assert.equal(loadConfig({ NODE_ENV: "test", API_PORT: "4100" }).port, 4100);
+  const local = loadConfig({ NODE_ENV: "test", API_PORT: "4100" });
+  assert.equal(local.host, "::");
+  assert.equal(local.port, 4100);
   assert.equal(
     loadConfig({ NODE_ENV: "production", PORT: "8080", API_PORT: "4100" }).port,
     8080,
   );
 });
 
-test("leaves response time for the serverless wrapper after connector timeout", () => {
+test("keeps connector and audit work within bounded request budgets", () => {
   const defaults = loadConfig({ NODE_ENV: "production" });
   assert.equal(defaults.connectorTimeoutMs, 20_000);
   assert.equal(defaults.auditTimeoutMs, 3_000);
+  assert.equal(defaults.searchRateLimitMax, 2);
   assert.equal(
     loadConfig({ NODE_ENV: "production", CONNECTOR_TIMEOUT_MS: "12000" }).connectorTimeoutMs,
     12_000,
@@ -53,6 +56,10 @@ test("leaves response time for the serverless wrapper after connector timeout", 
   assert.equal(
     loadConfig({ NODE_ENV: "production", AUDIT_TIMEOUT_MS: "1500" }).auditTimeoutMs,
     1_500,
+  );
+  assert.equal(
+    loadConfig({ NODE_ENV: "test", SEARCH_RATE_LIMIT_MAX: "100" }).searchRateLimitMax,
+    100,
   );
 });
 

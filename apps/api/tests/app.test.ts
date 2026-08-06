@@ -102,6 +102,26 @@ test("health discloses connector release readiness", async () => {
   await app.close();
 });
 
+test("grants CORS only to an explicitly configured web origin", async () => {
+  const app = await buildApp({ config, connectors: [], auditStore: null, now: fixedNow });
+  const allowed = await app.inject({
+    method: "GET",
+    url: "/health",
+    headers: { origin: "http://localhost:3000" },
+  });
+  const denied = await app.inject({
+    method: "GET",
+    url: "/health",
+    headers: { origin: "https://untrusted.invalid" },
+  });
+
+  assert.equal(allowed.statusCode, 200);
+  assert.equal(allowed.headers["access-control-allow-origin"], "http://localhost:3000");
+  assert.equal(denied.statusCode, 200);
+  assert.equal(denied.headers["access-control-allow-origin"], undefined);
+  await app.close();
+});
+
 test("refuses to pretend demo data is a live search", async () => {
   const app = await buildApp({ config, connectors: [], auditStore: null, now: fixedNow });
   const response = await app.inject({
@@ -369,5 +389,19 @@ test("rejects a search date in the past", async () => {
 
   assert.equal(response.statusCode, 400);
   assert.equal(response.json().error.code, "SEARCH_DATE_IN_PAST");
+  await app.close();
+});
+
+test("keeps the formal V1 search path to one adult and fixed dates", async () => {
+  const app = await buildApp({ config, connectors: [], auditStore: null, now: fixedNow });
+  const response = await app.inject({
+    method: "POST",
+    url: "/v1/searches",
+    payload: { ...validIntent, adults: 2, flexibleDays: 3 },
+  });
+
+  assert.equal(response.statusCode, 422);
+  assert.equal(response.json().error.code, "V1_SCOPE_UNSUPPORTED");
+  assert.deepEqual(response.json().error.fields, ["adults", "flexibleDays"]);
   await app.close();
 });

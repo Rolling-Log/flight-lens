@@ -649,6 +649,17 @@ type CompleteSerpApiChoice = {
   bookingToken: string;
 };
 
+const SERPAPI_MAX_ONE_WAY_CHOICES = 4;
+const SERPAPI_MAX_ROUND_TRIP_OUTBOUNDS = 2;
+const SERPAPI_MAX_RETURNS_PER_OUTBOUND = 3;
+const SERPAPI_MAX_BOOKING_REQUESTS = 6;
+
+export function serpApiRequiredCredits(tripType: SearchIntent["tripType"]): number {
+  return tripType === "round_trip"
+    ? 1 + SERPAPI_MAX_ROUND_TRIP_OUTBOUNDS + SERPAPI_MAX_BOOKING_REQUESTS
+    : 1 + SERPAPI_MAX_ONE_WAY_CHOICES;
+}
+
 type SerpApiAccountPayload = {
   account_status?: string;
   plan_monthly_price?: number;
@@ -666,7 +677,7 @@ export class SerpApiGoogleFlightsConnector implements FlightConnector {
       name: "SerpApi · Google Flights",
       kind: "metasearch",
       environment: "production",
-      authorization: "contract",
+      authorization: "self_service_api",
       resultRole: "purchase_handoff",
       handoff: "deep_link",
       configured: true,
@@ -684,9 +695,9 @@ export class SerpApiGoogleFlightsConnector implements FlightConnector {
         account.account_status === "Active" &&
         account.plan_monthly_price === 0 &&
         typeof remaining === "number" &&
-        remaining >= 5 &&
+        remaining >= serpApiRequiredCredits("one_way") &&
         typeof used === "number" &&
-        used + 5 <= monthlyCreditCap;
+        used + serpApiRequiredCredits("one_way") <= monthlyCreditCap;
       return {
         state: freeAndUsable ? "healthy" : "degraded",
         checkedAt: new Date().toISOString(),
@@ -739,7 +750,7 @@ export class SerpApiGoogleFlightsConnector implements FlightConnector {
       context.signal,
     ) as SerpApiSearchPayload;
 
-    const initialChoices = flightChoices(initial).slice(0, 4);
+    const initialChoices = flightChoices(initial).slice(0, SERPAPI_MAX_ONE_WAY_CHOICES);
     const googleFlightsSearchUrl = safeGoogleFlightsSearchUrl(
       initial.search_metadata?.google_flights_url,
     );
@@ -752,8 +763,8 @@ export class SerpApiGoogleFlightsConnector implements FlightConnector {
               : [],
           );
 
-    const bookingPayloads = await Promise.all(
-      complete.slice(0, 6).map(async (choice) => ({
+    const bookingAttempts = await Promise.allSettled(
+      complete.slice(0, SERPAPI_MAX_BOOKING_REQUESTS).map(async (choice) => ({
         choice,
         payload: await this.request(
           { ...searchParameters, booking_token: choice.bookingToken },
@@ -762,7 +773,10 @@ export class SerpApiGoogleFlightsConnector implements FlightConnector {
       })),
     );
 
-    const offers = bookingPayloads.flatMap(({ choice, payload }) =>
+    const bookingPayloads = bookingAttempts.flatMap((attempt) =>
+      attempt.status === "fulfilled" ? [attempt.value] : [],
+    );
+    const bookingOffers = bookingPayloads.flatMap(({ choice, payload }) =>
       mapSerpApiBookingPayload(
         payload as SerpApiBookingPayload,
         choice.legs,
@@ -771,10 +785,34 @@ export class SerpApiGoogleFlightsConnector implements FlightConnector {
         googleFlightsSearchUrl,
       ),
     );
+    const fallbackOffers = bookingOffers.length === 0
+      ? mapSerpApiSearchChoices(
+          initialChoices,
+          intent,
+          context.requestId,
+          googleFlightsSearchUrl,
+          initial.search_metadata?.id,
+        )
+      : [];
+    const failedBookingAttempts = bookingAttempts.length - bookingPayloads.length;
 
     return {
-      offers,
-      ...(originSelection.notes.length ? { notes: originSelection.notes } : {}),
+      offers: bookingOffers.length ? bookingOffers : fallbackOffers,
+      ...(
+        originSelection.notes.length || failedBookingAttempts > 0 || fallbackOffers.length > 0
+          ? {
+              notes: [
+                ...originSelection.notes,
+                ...(failedBookingAttempts > 0
+                  ? [`SERPAPI_BOOKING_OPTIONS_PARTIAL_FAILURE:${failedBookingAttempts}/${bookingAttempts.length}`]
+                  : []),
+                ...(fallbackOffers.length > 0
+                  ? ["SERPAPI_INITIAL_RESULTS_FALLBACK:SEARCH_RESULTS_HANDOFF_REQUIRES_REVALIDATION"]
+                  : []),
+              ],
+            }
+          : {}
+      ),
       ...(initial.search_metadata?.id
         ? { providerRequestId: initial.search_metadata.id }
         : {}),
@@ -792,7 +830,7 @@ export class SerpApiGoogleFlightsConnector implements FlightConnector {
       );
     }
     const remaining = account.total_searches_left ?? account.plan_searches_left;
-    const requiredCredits = intent.tripType === "round_trip" ? 9 : 5;
+    const requiredCredits = serpApiRequiredCredits(intent.tripType);
     if (typeof remaining !== "number" || remaining < requiredCredits) {
       throw new ConnectorError(
         "SerpApi free quota is too low for a bounded flight search.",
@@ -832,7 +870,7 @@ export class SerpApiGoogleFlightsConnector implements FlightConnector {
     signal: AbortSignal,
   ): Promise<CompleteSerpApiChoice[]> {
     const returningPayloads = await Promise.all(
-      outboundChoices.slice(0, 2).flatMap((outbound) =>
+      outboundChoices.slice(0, SERPAPI_MAX_ROUND_TRIP_OUTBOUNDS).flatMap((outbound) =>
         outbound.departure_token && outbound.flights?.length
           ? [
               this.request(
@@ -848,7 +886,7 @@ export class SerpApiGoogleFlightsConnector implements FlightConnector {
 
     return returningPayloads.flatMap(({ outbound, payload }) =>
       flightChoices(payload)
-        .slice(0, 3)
+        .slice(0, SERPAPI_MAX_RETURNS_PER_OUTBOUND)
         .flatMap((returning): CompleteSerpApiChoice[] =>
           returning.booking_token && returning.flights?.length && outbound.flights?.length
             ? [{
@@ -922,6 +960,40 @@ function includedCheckedBaggage(labels: readonly string[]): boolean {
   return labels.some((label) =>
     /(?:free|included).{0,20}checked bag|checked bag.{0,20}(?:free|included)/i.test(label),
   );
+}
+
+export function mapSerpApiSearchChoices(
+  choices: SerpApiFlightChoice[],
+  intent: SearchIntent,
+  requestId: string,
+  googleFlightsSearchUrl?: string,
+  providerRequestId?: string,
+): Offer[] {
+  if (intent.tripType !== "one_way" || !googleFlightsSearchUrl) return [];
+  return choices.flatMap((choice, choiceIndex) => {
+    if (typeof choice.price !== "number") return [];
+    return mapSerpApiBookingPayload(
+      {
+        search_metadata: {
+          id: `${providerRequestId ?? requestId}:initial-${choiceIndex}`,
+          status: "Success",
+        },
+        booking_options: [{
+          together: {
+            book_with: "Google Flights",
+            price: choice.price,
+            // The canonical result page is not an exact seller offer. Supplying
+            // post_data deliberately prevents exact-offer classification.
+            booking_request: { url: googleFlightsSearchUrl, post_data: "search-results" },
+          },
+        }],
+      },
+      [choice],
+      intent,
+      requestId,
+      googleFlightsSearchUrl,
+    );
+  });
 }
 
 export function mapSerpApiBookingPayload(

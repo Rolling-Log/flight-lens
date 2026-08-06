@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resultSourceStatus } from "../src/result-source-status.js";
+import {
+  isSingleSourceLiveResult,
+  resultSourceStatus,
+} from "../src/result-source-status.js";
 
 test("labels production offers as live production data", () => {
   assert.deepEqual(
@@ -27,6 +30,43 @@ test("distinguishes provider failure from an honest empty response", () => {
   assert.equal(
     resultSourceStatus([], [{ state: "empty", notes: [] }]).label,
     "来源已完成 · 无符合报价",
+  );
+});
+
+test("labels sandbox offers even when their local connectors succeed", () => {
+  assert.deepEqual(
+    resultSourceStatus(
+      [{ environment: "sandbox" }],
+      [{ state: "success", notes: ["LOCAL_SANDBOX_CONNECTOR"] }],
+    ),
+    { label: "Sandbox 来源 · 不代表可购买库存", productionStyle: false },
+  );
+});
+
+test("detects a single successful production source", () => {
+  assert.equal(
+    isSingleSourceLiveResult(
+      [{ environment: "production" }],
+      [{ state: "success", notes: [] }],
+    ),
+    true,
+  );
+  assert.equal(
+    isSingleSourceLiveResult(
+      [{ environment: "production" }],
+      [
+        { state: "success", notes: [] },
+        { state: "empty", notes: [] },
+      ],
+    ),
+    false,
+  );
+  assert.equal(
+    isSingleSourceLiveResult(
+      [{ environment: "sandbox" }],
+      [{ state: "success", notes: [] }],
+    ),
+    false,
   );
 });
 

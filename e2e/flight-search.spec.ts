@@ -43,8 +43,8 @@ test("agent input becomes an editable search and exposes source limits", async (
   await expect(page.getByLabel("出发地 IATA")).toHaveValue("PVG");
   await expect(page.getByLabel("目的地 IATA")).toHaveValue("NRT");
   await expect(page.getByLabel("总预算（人民币）")).toHaveValue("3000");
-  await expect(page.getByLabel("最早起飞")).toHaveValue("06:00");
-  await expect(page.getByLabel("最晚起飞")).toHaveValue("22:00");
+  await expect(page.getByLabel("最早起飞")).toHaveValue("");
+  await expect(page.getByLabel("最晚起飞")).toHaveValue("");
 
   await page.getByRole("button", { name: "开始检索" }).click();
 
@@ -52,6 +52,9 @@ test("agent input becomes an editable search and exposes source limits", async (
   await expect(page.getByText("¥2,388").first()).toBeVisible();
   await expect(page.getByText("示例航旅", { exact: true })).toBeVisible();
   await expect(page.getByAltText("Powered by Skyscanner")).toBeVisible();
+  await expect(
+    page.getByText("Sandbox 来源 · 不代表可购买库存", { exact: true }),
+  ).toBeVisible();
   await expect(page.getByText("2/2", { exact: true })).toBeVisible();
   await expect(page.getByText("+1", { exact: true }).first()).toBeVisible();
   await expect(
@@ -61,14 +64,14 @@ test("agent input becomes an editable search and exposes source limits", async (
 
   for (const label of [
     "最低全价",
-    "综合推荐",
+    "平衡排序",
     "最短耗时",
     "最少中转",
     "最佳行李",
-    "最宽松退改",
   ]) {
     await expect(page.getByRole("button", { name: label })).toBeVisible();
   }
+  await expect(page.getByRole("button", { name: "最宽松退改" })).toHaveCount(0);
 
   const recommended = page
     .locator("article")
@@ -82,6 +85,7 @@ test("agent input becomes an editable search and exposes source limits", async (
     "href",
     /https:\/\/www\.google\.com\/travel\/flights/,
   );
+  await expect(recommended.getByText("抓取时来源展示价")).toBeVisible();
 
   await recommended.getByRole("button", { name: /查看价格构成/ }).click();
   await expect(
@@ -112,7 +116,7 @@ test("an incomplete dialogue pre-fills known fields and leaves the missing date 
   await expect(page.getByLabel("出发地 IATA")).toHaveValue("CAN");
   await expect(page.getByLabel("目的地 IATA")).toHaveValue("SIN");
   await expect(page.getByLabel("出发日期")).toHaveValue("");
-  await expect(page.getByText(/0 项推断 · 1 项待确认 · 本地解析/)).toBeVisible();
+  await expect(page.getByText(/1 项推断 · 1 项待确认 · 本地解析/)).toBeVisible();
 });
 
 test("form edits remain authoritative after switching back to agent mode", async ({
@@ -124,12 +128,11 @@ test("form edits remain authoritative after switching back to agent mode", async
 
   await page.getByRole("button", { name: "打开完整表单修改" }).click();
   await page.getByLabel("目的地 IATA").fill("HND");
-  await page.getByLabel("成人 / 舱位").selectOption("4");
   await page.getByLabel("出发地附近机场").check();
 
   await page.getByRole("tab", { name: "对话找票" }).click();
   await expect(page.getByText(/PVG → HND/)).toBeVisible();
-  await expect(page.getByText(/4 位成人/)).toBeVisible();
+  await expect(page.locator(".agent-review").getByText(/1 位成人/)).toBeVisible();
 
   const searchRequest = page.waitForRequest((request) =>
     request.method() === "POST" && request.url().endsWith("/v1/searches"),
@@ -138,6 +141,7 @@ test("form edits remain authoritative after switching back to agent mode", async
   const body = (await searchRequest).postDataJSON();
 
   expect(body.destination.code).toBe("HND");
-  expect(body.adults).toBe(4);
+  expect(body.adults).toBe(1);
+  expect(body.flexibleDays).toBe(0);
   expect(body.includeNearbyAirports).toBe(true);
 });

@@ -75,9 +75,6 @@ importers:
 
   apps/web:
     dependencies:
-      '@flight-lens/api':
-        specifier: workspace:*
-        version: link:../api
       '@flight-lens/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts

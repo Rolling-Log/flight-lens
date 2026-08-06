@@ -11,6 +11,7 @@
     "dev": "pnpm --parallel --filter @flight-lens/web --filter @flight-lens/api dev",
     "dev:web": "pnpm --filter @flight-lens/web dev",
     "dev:api": "pnpm --filter @flight-lens/api dev",
+    "preview": "pnpm --parallel --filter @flight-lens/web --filter @flight-lens/api preview",
     "build": "pnpm -r --if-present build",
     "build:web": "pnpm --filter @flight-lens/web... build",
     "build:api": "pnpm --filter @flight-lens/api... build",

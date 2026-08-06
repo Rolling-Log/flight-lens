@@ -1,6 +1,6 @@
 # ADR-0002：Netlify Web + Functions + Neon
 
-状态：已接受。
+状态：已被 ADR-0004 替代。
 
 前端部署 Netlify，Fastify API 通过 Next.js Route Handler 由 Netlify OpenNext Adapter 配置为同域 Serverless Function，持久化使用 Neon Postgres。
 

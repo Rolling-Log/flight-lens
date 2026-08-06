@@ -7,8 +7,11 @@ test("uses the separately hosted API during local development", () => {
   assert.equal(resolveApiBase(undefined, "127.0.0.1"), "http://127.0.0.1:4000");
 });
 
-test("routes public deployments through the same-origin Next API handler", () => {
-  assert.equal(resolveApiBase(undefined, "v1-candidate.example.netlify.app"), "/api");
+test("requires the Railway API URL for public deployments", () => {
+  assert.throws(
+    () => resolveApiBase(undefined, "v1-candidate.example.netlify.app"),
+    /Railway API/,
+  );
 });
 
 test("honors an explicit API base without creating a double slash", () => {

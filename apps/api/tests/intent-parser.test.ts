@@ -68,6 +68,18 @@ test("accepts explicit IATA codes and never creates price results", async () => 
   assert.equal("offers" in result, false);
 });
 
+test("treats a second ISO date followed by 返回 as a round trip", async () => {
+  const parser = new LocalChineseIntentParser(fixedNow);
+  const result = await parser.parse(
+    "2026-08-24 上海去东京，2026-08-29 返回，1 位成人，经济舱。",
+  );
+
+  assert.equal(result.ready, true);
+  assert.equal(result.intent?.tripType, "round_trip");
+  assert.equal(result.intent?.departureDate, "2026-08-24");
+  assert.equal(result.intent?.returnDate, "2026-08-29");
+});
+
 test("infers a return trip from an explicit stay length and recognizes natural red-eye wording", async () => {
   const parser = new LocalChineseIntentParser(fixedNow);
   const result = await parser.parse(

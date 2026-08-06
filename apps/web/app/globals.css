@@ -130,6 +130,7 @@ h1 em { font-style: normal; color: var(--blue); }
 .form-grid { display: grid; grid-template-columns: 1fr 32px 1fr repeat(4, minmax(110px, .9fr)); gap: 8px; align-items: end; }
 .form-grid label { color: var(--muted-strong); font-size: 10px; font-weight: 700; }
 .form-grid input, .form-grid select { width: 100%; border: 1px solid var(--line); border-radius: 9px; padding: 11px 9px; background: white; color: var(--ink); margin-top: 5px; outline: none; font-size: 12px; }
+.field-value { display: block; width: 100%; min-height: 38px; border: 1px solid var(--line); border-radius: 9px; padding: 11px 9px; background: #f7f9fd; color: var(--ink); margin-top: 5px; font-size: 12px; }
 .form-grid input:focus, .form-grid select:focus { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-pale); }
 .swap { border: 1px solid var(--line); width: 30px; height: 30px; margin-bottom: 5px; border-radius: 50%; background: white; color: var(--blue); }
 .filter-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 13px; }
@@ -159,6 +160,7 @@ h1 em { font-style: normal; color: var(--blue); }
 .price-insight strong { display: block; font-size: 29px; margin: 3px 0; }
 .price-insight small { color: #c6d6ef; font-size: 10px; }
 .price-insight .insight-copy b { font-size: 13px; }
+.price-insight .insight-copy .scope-warning { color: #ffd88a; font-size: 12px; line-height: 1.5; margin: 5px 0 0; }
 .price-insight .insight-copy p { color: #c6d6ef; font-size: 11px; line-height: 1.6; margin: 6px 0 0; }
 .price-insight .confidence strong { color: #62e3b2; font-size: 20px; }
 .result-toolbar { display: flex; justify-content: space-between; align-items: center; margin: 20px 0 10px; }

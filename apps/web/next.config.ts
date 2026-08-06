@@ -20,13 +20,7 @@ const nextConfig: NextConfig = {
       },
     ];
   },
-  transpilePackages: [
-    "@flight-lens/api",
-    "@flight-lens/connectors",
-    "@flight-lens/contracts",
-    "@flight-lens/database",
-    "@flight-lens/domain",
-  ],
+  transpilePackages: ["@flight-lens/contracts"],
 };
 
 export default nextConfig;

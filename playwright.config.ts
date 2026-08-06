@@ -12,13 +12,15 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "pnpm --filter @flight-lens/web start",
+      command: "node_modules/.bin/next start --hostname 127.0.0.1 --port 3000",
+      cwd: "apps/web",
       url: "http://127.0.0.1:3000",
       reuseExistingServer: !process.env.CI,
       timeout: 30_000,
     },
     {
-      command: "node apps/api/tests/fixtures/ui-server.mjs",
+      command: "node --conditions=development --import tsx tests/fixtures/ui-server.ts",
+      cwd: "apps/api",
       url: "http://127.0.0.1:4000/health",
       reuseExistingServer: !process.env.CI,
       timeout: 10_000,

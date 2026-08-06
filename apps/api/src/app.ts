@@ -157,7 +157,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(cors, {
     origin(origin, callback) {
       if (!origin || config.webOrigins.includes(origin)) return callback(null, true);
-      callback(new Error("Origin is not allowed."), false);
+      callback(null, false);
     },
     methods: ["GET", "POST"],
   });
@@ -258,7 +258,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.post("/v1/searches", {
     config: {
       rateLimit: {
-        max: 2,
+        max: config.searchRateLimitMax ?? 2,
         timeWindow: "1 minute",
       },
     },
@@ -280,6 +280,20 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         error: {
           code: "SEARCH_DATE_IN_PAST",
           message: "出发日期不能早于今天。",
+        },
+      });
+    }
+
+    const unsupportedV1Fields = [
+      ...(parsed.data.adults === 1 ? [] : ["adults"]),
+      ...(parsed.data.flexibleDays === 0 ? [] : ["flexibleDays"]),
+    ];
+    if (unsupportedV1Fields.length > 0) {
+      return reply.status(422).send({
+        error: {
+          code: "V1_SCOPE_UNSUPPORTED",
+          message: "V1 正式搜索当前仅支持 1 位成人和固定日期。",
+          fields: unsupportedV1Fields,
         },
       });
     }

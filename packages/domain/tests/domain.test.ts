@@ -209,6 +209,18 @@ test("exposes deterministic duration, stops, baggage, and flexibility rankings",
   assert.equal(rankByRefundFlexibility([shortest, baggage])[0]?.id, "baggage");
 });
 
+test("does not invent baggage or flexibility winners without positive evidence", () => {
+  const unknown = offer({ id: "unknown" });
+  const restrictive = offer({
+    id: "restrictive",
+    refundable: false,
+    changeable: false,
+  });
+
+  assert.deepEqual(rankByBestBaggage([unknown, restrictive]), []);
+  assert.deepEqual(rankByRefundFlexibility([unknown, restrictive]), []);
+});
+
 test("blocks a supposedly comparable offer without a purchase handoff", () => {
   const candidate = offer();
   const findings = reviewOffers([{ ...candidate, comparable: true }], []);
