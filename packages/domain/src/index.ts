@@ -381,14 +381,16 @@ export function applyAdversarialComparability(
 }
 
 export function disclosureStatement(reports: readonly ConnectorReport[]): string {
-  const success = reports.filter((report) => ["success", "empty"].includes(report.state)).length;
-  const timeout = reports.filter((report) => report.state === "timeout").length;
-  const failed = reports.length - success - timeout;
+  const unsupported = reports.filter((report) => report.state === "unsupported_query").length;
+  const applicable = reports.filter((report) => report.state !== "unsupported_query");
+  const success = applicable.filter((report) => ["success", "empty"].includes(report.state)).length;
+  const timeout = applicable.filter((report) => report.state === "timeout").length;
+  const failed = applicable.length - success - timeout;
   const partial = reports.filter(
     (report) => report.errorCode === "PARTIAL_DATE_PROBE_FAILURE",
   ).length;
   const cached = reports.filter((report) =>
     report.notes.some((note) => note.startsWith("CACHE_")),
   ).length;
-  return `本次计划检索 ${reports.length} 个来源，成功核验 ${success} 个，${timeout} 个超时，${failed} 个失败${partial ? `，其中 ${partial} 个来源仅完成部分日期探测` : ""}${cached ? `，${cached} 个来源使用了已明确标记的缓存结果` : ""}。最低价仅代表成功返回且价格口径可比的来源。`;
+  return `本次计划检索 ${applicable.length} 个适用来源，成功核验 ${success} 个，${timeout} 个超时，${failed} 个失败${unsupported ? `；另有 ${unsupported} 个来源不适用当前条件，未计入覆盖率` : ""}${partial ? `，其中 ${partial} 个来源仅完成部分日期探测` : ""}${cached ? `，${cached} 个来源使用了已明确标记的缓存结果` : ""}。最低价仅代表成功返回且价格口径可比的来源。`;
 }

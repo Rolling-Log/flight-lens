@@ -12,9 +12,9 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "smoke:domestic": "node --import tsx scripts/domestic-smoke.ts",
+    "smoke:domestic": "node --conditions=development --import tsx scripts/domestic-smoke.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test tests/**/*.test.ts"
+    "test": "node --conditions=development --import tsx --test tests/**/*.test.ts"
   },
   "dependencies": {
     "@fly-ai/flyai-cli": "1.0.16",

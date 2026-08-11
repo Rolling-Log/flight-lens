@@ -266,6 +266,43 @@ test("returns transparent coverage for a configured empty source", async () => {
   await app.close();
 });
 
+test("excludes structurally unsupported connectors from planned coverage", async () => {
+  let searched = false;
+  const connector: FlightConnector = {
+    metadata: {
+      id: "economy-only",
+      name: "Economy only",
+      kind: "ota",
+      environment: "production",
+      authorization: "browser_session",
+      resultRole: "purchase_handoff",
+      handoff: "deep_link",
+      configured: true,
+      capabilities: {
+        tripTypes: ["one_way"],
+        locationKinds: ["airport"],
+        cabins: ["economy"],
+        maxAdults: 1,
+        roundTripMode: "unsupported",
+        priceEvidence: ["listed"],
+      },
+    },
+    health: async () => ({ state: "healthy", checkedAt: new Date().toISOString() }),
+    search: async () => { searched = true; return { offers: [] }; },
+  };
+  const app = await buildApp({ config, connectors: [connector], auditStore: null, now: fixedNow });
+  const response = await app.inject({
+    method: "POST",
+    url: "/v1/searches",
+    payload: { ...validIntent, cabin: "business" },
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(searched, false);
+  assert.equal(response.json().disclosure.plannedSources, 0);
+  assert.equal(response.json().connectorReports[0].state, "unsupported_query");
+  await app.close();
+});
+
 test("returns adversarially blocked offers as non-comparable", async () => {
   const connector: FlightConnector = {
     metadata: {

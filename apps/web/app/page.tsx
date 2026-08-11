@@ -15,6 +15,7 @@ import {
   useState,
 } from "react";
 import { resolveApiBase } from "../src/api-base";
+import { LocationCombobox } from "../src/location-combobox";
 import {
   isSingleSourceLiveResult,
   resultSourceStatus,
@@ -251,7 +252,16 @@ function reportNote(note: string): string {
     return `该来源没有 ${note.split(":").at(-1)} 的已配置附近出发机场`;
   }
   if (note.startsWith("BROWSER_DIAGNOSTIC:")) {
-    return `页面诊断：${note.slice("BROWSER_DIAGNOSTIC:".length)}`;
+    return `页面诊断码：${note.slice("BROWSER_DIAGNOSTIC:".length)}`;
+  }
+  if (note.startsWith("UNSUPPORTED_QUERY:")) {
+    return `不适用当前条件：${note.split(":").at(-1)}`;
+  }
+  if (note.startsWith("CITY_AIRPORT_EXPANSION:")) {
+    return `已在搜索规划中展开 ${note.split(":").at(-1)} 个机场组合`;
+  }
+  if (note.endsWith("_ROUND_TRIP_SPLIT_TICKET")) {
+    return "去程与返程分别实时检索，按两张单程票组合";
   }
   return note;
 }
@@ -271,6 +281,7 @@ function connectorStateLabel(state: SearchResponse["connectorReports"][number]["
     provider_error: "来源异常",
     invalid_response: "响应异常",
     unavailable: "不可用",
+    unsupported_query: "不适用本次查询",
   } as const)[state];
 }
 
@@ -301,6 +312,7 @@ export default function Home() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showCoverage, setShowCoverage] = useState(false);
   const [error, setError] = useState("");
+  const [locationValidity, setLocationValidity] = useState({ origin: true, destination: true });
   const coverageDialogRef = useRef<HTMLElement>(null);
   const coverageTriggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -373,7 +385,7 @@ export default function Home() {
   const orderedOffers = useMemo(() => {
     if (!result) return [];
     const offers = result.offers.filter((offer) =>
-      offer.comparable &&
+      (offer.comparable || offer.purchaseMode === "split_ticket") &&
       (airlineFilter === "all" || offer.segments.some((segment) => segment.marketingCarrier === airlineFilter)) &&
       (stopsFilter === "all" ||
         (stopsFilter === "direct" ? offerStops(offer) === 0 : offerStops(offer) <= offer.legs.length)),
@@ -499,6 +511,10 @@ export default function Home() {
   }
 
   async function runSearch() {
+    if (!locationValidity.origin || !locationValidity.destination) {
+      setError("请从候选列表中选择有效的出发地和目的地。");
+      return;
+    }
     let searchIntent: SearchIntent | null;
     if (mode === "agent") {
       if (parseResult?.ready && parseResult.intent) {
@@ -533,7 +549,7 @@ export default function Home() {
 
   const lowest = result?.offers.find((offer) => offer.id === result.lowestComparableOfferId) ?? null;
   const excludedOfferCount =
-    result?.offers.filter((offer) => !offer.comparable).length ?? 0;
+    result?.offers.filter((offer) => !offer.comparable && offer.purchaseMode !== "split_ticket").length ?? 0;
   const usesSkyscanner = result?.offers.some(
     (offer) => ["skyscanner-live-prices", "flightapi-skyscanner"].includes(offer.connectorId),
   ) ?? false;
@@ -638,7 +654,13 @@ export default function Home() {
                 ))}
               </div>
               <div className="form-grid">
-                <label>出发地 IATA<input value={intent.origin.code} maxLength={3} onChange={(event) => updateIntent({ origin: { ...intent.origin, code: event.target.value.toUpperCase() } })} /></label>
+                <LocationCombobox
+                  key={`origin-${intent.origin.kind}-${intent.origin.code}`}
+                  label="出发地"
+                  value={intent.origin}
+                  onValidityChange={(valid) => setLocationValidity((current) => ({ ...current, origin: valid }))}
+                  onChange={(location) => updateIntent({ origin: { kind: location.kind, code: location.code, name: location.kind === "city" ? location.cityNameZh : location.airportNameZh } })}
+                />
                 <button
                   className="swap"
                   aria-label="交换出发地和目的地"
@@ -646,7 +668,13 @@ export default function Home() {
                 >
                   ⇄
                 </button>
-                <label>目的地 IATA<input value={intent.destination.code} maxLength={3} onChange={(event) => updateIntent({ destination: { ...intent.destination, code: event.target.value.toUpperCase() } })} /></label>
+                <LocationCombobox
+                  key={`destination-${intent.destination.kind}-${intent.destination.code}`}
+                  label="目的地"
+                  value={intent.destination}
+                  onValidityChange={(valid) => setLocationValidity((current) => ({ ...current, destination: valid }))}
+                  onChange={(location) => updateIntent({ destination: { kind: location.kind, code: location.code, name: location.kind === "city" ? location.cityNameZh : location.airportNameZh } })}
+                />
                 <label>出发日期<input type="date" value={intent.departureDate} onChange={(event) => updateIntent({ departureDate: event.target.value })} /></label>
                 <label>返程日期<input type="date" value={intent.returnDate ?? ""} onChange={(event) => updateIntent({ returnDate: event.target.value })} disabled={intent.tripType === "one_way"} /></label>
                 <label>成人数
@@ -898,6 +926,8 @@ export default function Home() {
                               ? distinctions.join(" · ")
                               : offer.comparable
                                 ? "可比报价"
+                                : offer.purchaseMode === "split_ticket"
+                                  ? "分开购买方案 · 不参与单票最低价"
                                 : "条件不完整"}
                           </div>
                           <div className="flight-primary">
@@ -941,7 +971,7 @@ export default function Home() {
                                 );
                               })}
                             </div>
-                            <div className="price"><small>{offerPriceLabel(offer)}</small><strong>{money(offer)}</strong><span className="plain-price">{offer.seller.handoffPrecision === "search_results" ? "需在来源页重新选择" : "购买前再次核验"}</span></div>
+                            <div className="price"><small>{offer.purchaseMode === "split_ticket" ? "分开购买合计" : offerPriceLabel(offer)}</small><strong>{money(offer)}</strong><span className="plain-price">{offer.purchaseMode === "split_ticket" ? "两张单程票，非平台往返价" : offer.seller.handoffPrecision === "search_results" ? "需在来源页重新选择" : "购买前再次核验"}</span></div>
                           </div>
                           <div className="flight-meta">
                             <div>
@@ -967,7 +997,7 @@ export default function Home() {
                                   : "待核验"}
                             </div>
                             <div className="source"><span>{offer.environment}</span><b>{offer.seller.name}</b><small>{new Date(offer.fetchedAt).toLocaleString("zh-CN")}</small></div>
-                            {offer.seller.deepLink && (
+                            {offer.seller.deepLink && offer.purchaseMode !== "split_ticket" && (
                               <a
                                 className="handoff-link"
                                 href={offer.seller.deepLink}
@@ -979,6 +1009,11 @@ export default function Home() {
                                   : `去 ${offer.seller.name} 核验 ↗`}
                               </a>
                             )}
+                            {offer.purchaseMode === "split_ticket" && offer.purchaseParts?.map((part) => (
+                              <a key={part.legIndex} className="handoff-link" href={part.bookingUrl} target="_blank" rel="noopener noreferrer">
+                                {part.label} {new Intl.NumberFormat("zh-CN", { style: "currency", currency: part.price.currency, maximumFractionDigits: 0 }).format(part.price.amountMinor / 100)} ↗
+                              </a>
+                            ))}
                             <button onClick={() => setExpanded(expanded === offer.id ? null : offer.id)} aria-expanded={expanded === offer.id}>
                               {expanded === offer.id ? "收起价格构成" : "查看价格构成"} <span>⌄</span>
                             </button>

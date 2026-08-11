@@ -5,6 +5,7 @@ import {
   AmadeusConnector,
   amadeusEnvironment,
   clearConnectorExecutionCache,
+  combineSplitTicketOffers,
   createConnectorRegistry,
   ConnectorError,
   DuffelConnector,
@@ -169,6 +170,38 @@ test("maps FlyAI flight items into a real Fliggy handoff with adult total price"
   assert.equal(offers[0]?.totalPrice.amountMinor, 80_000);
   assert.equal(offers[0]?.priceVerificationStatus, "listed_only");
   assert.equal(offers[0]?.segments[0]?.flightNumber, "1883");
+});
+
+test("combines two independently priced one-way results as a disclosed split ticket", () => {
+  const make = (from: string, to: string, date: string, flight: string, price: string) => mapFlyAiFlightPayload({
+    status: 0,
+    data: { itemList: [{
+      adultPrice: price,
+      jumpUrl: `https://example.com/${from.toLowerCase()}-${to.toLowerCase()}`,
+      journeys: [{ totalDuration: "120分钟", segments: [{
+        depStationCode: from,
+        depStationName: from,
+        depDateTime: `${date} 08:00:00`,
+        arrStationCode: to,
+        arrStationName: to,
+        arrDateTime: `${date} 10:00:00`,
+        duration: "120分钟",
+        marketingTransportNo: flight,
+      }] }],
+    }] },
+  }, { ...intent, origin: { kind: "airport", code: from }, destination: { kind: "airport", code: to }, departureDate: date }, `${from}-${to}`);
+  const combined = combineSplitTicketOffers(
+    make("XIY", "NNG", "2026-09-11", "MU1234", "¥500"),
+    make("NNG", "XIY", "2026-09-19", "MU4321", "¥600"),
+    "tongcheng",
+    "split-request",
+  );
+  assert.equal(combined[0]?.purchaseMode, "split_ticket");
+  assert.equal(combined[0]?.legs.length, 2);
+  assert.equal(combined[0]?.purchaseParts?.length, 2);
+  assert.equal(combined[0]?.totalPrice.amountMinor, 110_000);
+  assert.equal(combined[0]?.comparable, false);
+  assert.ok(combined[0]?.incomparabilityReasons.includes("SPLIT_TICKET_SEPARATE_PURCHASES"));
 });
 
 test("maps Ctrip batchSearch base fare and tax as provider-verified adult total", () => {

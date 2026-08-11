@@ -2,6 +2,7 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import {
   createConnectorRegistry,
+  connectorApplicability,
   executeConnector,
   type ConnectorExecutionPolicy,
   type FlightConnector,
@@ -74,14 +75,15 @@ async function persistAuditWithin(
 }
 
 function coverage(reports: ConnectorReport[]) {
-  const successfulSources = reports.filter((report) =>
+  const applicableReports = reports.filter((report) => report.state !== "unsupported_query");
+  const successfulSources = applicableReports.filter((report) =>
     ["success", "empty"].includes(report.state),
   ).length;
-  const timedOutSources = reports.filter((report) => report.state === "timeout").length;
+  const timedOutSources = applicableReports.filter((report) => report.state === "timeout").length;
   return {
-    plannedSources: reports.length,
+    plannedSources: applicableReports.length,
     successfulSources,
-    failedSources: reports.length - successfulSources - timedOutSources,
+    failedSources: applicableReports.length - successfulSources - timedOutSources,
     timedOutSources,
     statement: disclosureStatement(reports),
   };
@@ -94,12 +96,32 @@ async function runSearch(
   executionPolicy: ConnectorExecutionPolicy,
 ): Promise<Omit<SearchResponse, "audit">> {
   const requestId = crypto.randomUUID();
+  const applicability = connectors.map((connector) => ({
+    connector,
+    result: connectorApplicability(connector, intent),
+  }));
+  const applicable = applicability.filter((item) => item.result.applicable);
   const executions = await Promise.all(
-    connectors.map((connector) =>
+    applicable.map(({ connector }) =>
       executeConnector(connector, intent, requestId, timeoutMs, executionPolicy),
     ),
   );
-  const reports = executions.map((execution) => execution.report);
+  const now = new Date().toISOString();
+  const unsupportedReports: ConnectorReport[] = applicability.flatMap(({ connector, result }) =>
+    result.applicable ? [] : [{
+      connectorId: connector.metadata.id,
+      connectorName: connector.metadata.name,
+      state: "unsupported_query" as const,
+      startedAt: now,
+      finishedAt: now,
+      durationMs: 0,
+      offerCount: 0,
+      errorCode: result.reason,
+      retryable: false,
+      notes: [`UNSUPPORTED_QUERY:${result.reason}`],
+    }],
+  );
+  const reports = [...executions.map((execution) => execution.report), ...unsupportedReports];
   const normalized = applyIntentConstraints(
     deduplicateOffers(executions.flatMap((execution) => execution.result.offers)),
     intent,

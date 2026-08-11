@@ -1,4 +1,4 @@
-import type { ConnectorReport, Offer, SearchIntent } from "@flight-lens/contracts";
+import { airportCodesForLocation, type ConnectorReport, type Offer, type SearchIntent } from "@flight-lens/contracts";
 import { ConnectorError, providerHttpError } from "./errors.js";
 import { BrowserOtaConnector, type BrowserOtaPlatform } from "./browser-ota.js";
 import { FlightApiConnector } from "./flightapi.js";
@@ -8,6 +8,7 @@ import { SkyscannerConnector } from "./skyscanner.js";
 export { ConnectorError } from "./errors.js";
 export {
   BrowserOtaConnector,
+  combineSplitTicketOffers,
   mapCtripBatchSearchPayload,
   type BrowserOtaConfig,
   type BrowserOtaPlatform,
@@ -36,7 +37,43 @@ export type ConnectorMetadata = {
   inventoryFamily?: string;
   configured: boolean;
   supportsFlexibleDateProbe?: boolean;
+  capabilities?: ConnectorCapabilities;
 };
+
+export type ConnectorCapabilities = {
+  tripTypes: SearchIntent["tripType"][];
+  locationKinds: SearchIntent["origin"]["kind"][];
+  cabins: SearchIntent["cabin"][];
+  maxAdults: number;
+  roundTripMode: "native" | "split_ticket" | "unsupported";
+  priceEvidence: ("listed" | "provider_response" | "booking_detail")[];
+};
+
+export type ConnectorApplicability = { applicable: true } | { applicable: false; reason: string };
+
+export function connectorApplicability(
+  connector: FlightConnector,
+  intent: SearchIntent,
+): ConnectorApplicability {
+  const capabilities = connector.metadata.capabilities;
+  if (!capabilities) return { applicable: true };
+  if (!capabilities.tripTypes.includes(intent.tripType)) {
+    return { applicable: false, reason: "TRIP_TYPE_UNSUPPORTED" };
+  }
+  const originExpandable = intent.origin.kind === "city" && capabilities.locationKinds.includes("airport") && airportCodesForLocation(intent.origin).length > 0;
+  const destinationExpandable = intent.destination.kind === "city" && capabilities.locationKinds.includes("airport") && airportCodesForLocation(intent.destination).length > 0;
+  if ((!capabilities.locationKinds.includes(intent.origin.kind) && !originExpandable) ||
+      (!capabilities.locationKinds.includes(intent.destination.kind) && !destinationExpandable)) {
+    return { applicable: false, reason: "LOCATION_KIND_UNSUPPORTED" };
+  }
+  if (!capabilities.cabins.includes(intent.cabin)) {
+    return { applicable: false, reason: "CABIN_UNSUPPORTED" };
+  }
+  if (intent.adults > capabilities.maxAdults) {
+    return { applicable: false, reason: "PASSENGER_COUNT_UNSUPPORTED" };
+  }
+  return { applicable: true };
+}
 
 export type ConnectorHealth = {
   state: "healthy" | "degraded" | "unavailable" | "unconfigured";
@@ -170,18 +207,23 @@ function searchVariants(
   connector: FlightConnector,
   intent: SearchIntent,
 ): SearchIntent[] {
-  if (intent.flexibleDays === 0) return [intent];
-  if (connector.metadata.supportsFlexibleDateProbe === false) {
-    return [{ ...intent, flexibleDays: 0 }];
-  }
-  return [-intent.flexibleDays, 0, intent.flexibleDays].map((dayOffset) => ({
+  const originCodes = airportCodesForLocation(intent.origin);
+  const destinationCodes = airportCodesForLocation(intent.destination);
+  const locationVariants = originCodes.flatMap((originCode) => destinationCodes.map((destinationCode) => ({
     ...intent,
+    origin: { kind: "airport" as const, code: originCode, ...(intent.origin.name ? { name: intent.origin.name } : {}) },
+    destination: { kind: "airport" as const, code: destinationCode, ...(intent.destination.name ? { name: intent.destination.name } : {}) },
+  })));
+  const baseVariants = locationVariants.length > 0 ? locationVariants : [intent];
+  if (intent.flexibleDays === 0 || connector.metadata.supportsFlexibleDateProbe === false) {
+    return baseVariants.map((variant) => ({ ...variant, flexibleDays: 0 }));
+  }
+  return baseVariants.flatMap((variant) => [-intent.flexibleDays, 0, intent.flexibleDays].map((dayOffset) => ({
+    ...variant,
     departureDate: shiftedDate(intent.departureDate, dayOffset),
-    ...(intent.returnDate
-      ? { returnDate: shiftedDate(intent.returnDate, dayOffset) }
-      : {}),
+    ...(intent.returnDate ? { returnDate: shiftedDate(intent.returnDate, dayOffset) } : {}),
     flexibleDays: 0,
-  }));
+  })));
 }
 
 function reportState(error: unknown): Pick<ConnectorReport, "state" | "errorCode" | "retryable"> {
@@ -274,6 +316,9 @@ export async function executeConnector(
         retryable: failed.length > 0,
         notes: [
           ...(result.notes ?? []),
+          ...(intent.origin.kind === "city" || intent.destination.kind === "city"
+            ? [`CITY_AIRPORT_EXPANSION:${variants.length}`]
+            : []),
           ...(intent.flexibleDays > 0
             ? connector.metadata.supportsFlexibleDateProbe === false
               ? [`FLEXIBLE_DATE_PROBE_UNSUPPORTED:${connector.metadata.id}`]
@@ -320,7 +365,7 @@ export async function executeConnector(
         notes: [
           ...(retryCount > 0 ? [`RETRY_ATTEMPTS:${retryCount}`] : []),
           ...(error instanceof ConnectorError && /_(?:BROWSER_FAILED|PAGE_CHANGED)$/.test(error.code)
-            ? [`BROWSER_DIAGNOSTIC:${error.message.slice(0, 500)}`]
+            ? [`BROWSER_DIAGNOSTIC:${error.code}`]
             : []),
         ],
       },
@@ -754,6 +799,14 @@ export class SerpApiGoogleFlightsConnector implements FlightConnector {
       inventoryFamily: "google-flights-metasearch",
       configured: true,
       supportsFlexibleDateProbe: false,
+      capabilities: {
+        tripTypes: ["one_way", "round_trip"],
+        locationKinds: ["airport"],
+        cabins: ["economy", "premium_economy", "business", "first"],
+        maxAdults: 9,
+        roundTripMode: "native",
+        priceEvidence: ["listed", "booking_detail"],
+      },
     };
   }
 

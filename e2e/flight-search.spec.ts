@@ -40,8 +40,8 @@ test("agent input becomes an editable search and exposes source limits", async (
   await expect(page.getByText("请确认已解析条件")).toBeVisible();
 
   await page.getByRole("button", { name: "打开完整表单修改" }).click();
-  await expect(page.getByLabel("出发地 IATA")).toHaveValue("PVG");
-  await expect(page.getByLabel("目的地 IATA")).toHaveValue("NRT");
+  await expect(page.getByLabel("出发地", { exact: true })).toHaveValue(/PVG/);
+  await expect(page.getByLabel("目的地", { exact: true })).toHaveValue(/NRT/);
   await expect(page.getByLabel("总预算（人民币）")).toHaveValue("3000");
   await expect(page.getByLabel("最早起飞")).toHaveValue("");
   await expect(page.getByLabel("最晚起飞")).toHaveValue("");
@@ -113,8 +113,8 @@ test("an incomplete dialogue pre-fills known fields and leaves the missing date 
   await expect(
     page.getByRole("alert").getByText("请确认下个月的具体出发日期。"),
   ).toBeVisible();
-  await expect(page.getByLabel("出发地 IATA")).toHaveValue("CAN");
-  await expect(page.getByLabel("目的地 IATA")).toHaveValue("SIN");
+  await expect(page.getByLabel("出发地", { exact: true })).toHaveValue(/CAN/);
+  await expect(page.getByLabel("目的地", { exact: true })).toHaveValue(/SIN/);
   await expect(page.getByLabel("出发日期")).toHaveValue("");
   await expect(page.getByText(/2 项推断 · 1 项待确认 · 本地解析/)).toBeVisible();
 });
@@ -127,7 +127,8 @@ test("form edits remain authoritative after switching back to agent mode", async
   await expect(page.getByText("请确认已解析条件")).toBeVisible();
 
   await page.getByRole("button", { name: "打开完整表单修改" }).click();
-  await page.getByLabel("目的地 IATA").fill("HND");
+  await page.getByLabel("目的地", { exact: true }).fill("HND");
+  await page.getByLabel("目的地", { exact: true }).press("Enter");
   await page.getByLabel("出发地附近机场").check();
 
   await page.getByRole("tab", { name: "对话找票" }).click();
@@ -144,4 +145,23 @@ test("form edits remain authoritative after switching back to agent mode", async
   expect(body.adults).toBe(1);
   expect(body.flexibleDays).toBe(0);
   expect(body.includeNearbyAirports).toBe(true);
+});
+
+test("location combobox supports Chinese and pinyin with keyboard selection", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("tab", { name: "精确筛选" }).click();
+  const origin = page.getByLabel("出发地", { exact: true });
+  const destination = page.getByLabel("目的地", { exact: true });
+  await origin.fill("北京");
+  await expect(page.getByRole("option", { name: /北京.*所有机场/ }).first()).toBeVisible();
+  await origin.press("Enter");
+  await expect(origin).toHaveValue(/北京.*BJS/);
+  await destination.fill("chengdu");
+  await destination.press("Enter");
+  await expect(destination).toHaveValue(/成都.*CTU/);
+  const searchRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/v1/searches"));
+  await page.getByRole("button", { name: "开始检索" }).click();
+  const body = (await searchRequest).postDataJSON();
+  expect(body.origin).toMatchObject({ kind: "city", code: "BJS" });
+  expect(body.destination).toMatchObject({ kind: "city", code: "CTU" });
 });

@@ -352,6 +352,14 @@ export class FlyAiConnector implements FlightConnector {
     inventoryFamily: "fliggy",
     configured: true,
     supportsFlexibleDateProbe: false,
+    capabilities: {
+      tripTypes: ["one_way", "round_trip"],
+      locationKinds: ["airport"],
+      cabins: ["economy", "premium_economy", "business", "first"],
+      maxAdults: 9,
+      roundTripMode: "native",
+      priceEvidence: ["listed"],
+    },
   };
   private readonly cliPath: string;
 

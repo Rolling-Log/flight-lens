@@ -91,6 +91,14 @@ const DEFINITIONS: Record<BrowserOtaPlatform, PlatformDefinition> = {
       inventoryFamily: "ctrip",
       configured: true,
       supportsFlexibleDateProbe: false,
+      capabilities: {
+        tripTypes: ["one_way", "round_trip"],
+        locationKinds: ["airport"],
+        cabins: ["economy", "premium_economy", "business", "first"],
+        maxAdults: 9,
+        roundTripMode: "native",
+        priceEvidence: ["listed", "provider_response"],
+      },
     },
     buildUrl(intent) {
       const origin = intent.origin.code.toLowerCase();
@@ -131,6 +139,14 @@ const DEFINITIONS: Record<BrowserOtaPlatform, PlatformDefinition> = {
       inventoryFamily: "qunar",
       configured: true,
       supportsFlexibleDateProbe: false,
+      capabilities: {
+        tripTypes: ["one_way", "round_trip"],
+        locationKinds: ["airport"],
+        cabins: ["economy"],
+        maxAdults: 9,
+        roundTripMode: "split_ticket",
+        priceEvidence: ["listed"],
+      },
     },
     buildUrl(intent) {
       const params = new URLSearchParams({
@@ -168,6 +184,14 @@ const DEFINITIONS: Record<BrowserOtaPlatform, PlatformDefinition> = {
       inventoryFamily: "tongcheng",
       configured: true,
       supportsFlexibleDateProbe: false,
+      capabilities: {
+        tripTypes: ["one_way", "round_trip"],
+        locationKinds: ["airport"],
+        cabins: ["economy"],
+        maxAdults: 9,
+        roundTripMode: "split_ticket",
+        priceEvidence: ["listed"],
+      },
     },
     buildUrl(intent) {
       return `https://www.ly.com/flights/itinerary/oneway/${intent.origin.code}-${intent.destination.code}?date=${encodeURIComponent(intent.departureDate)}`;
@@ -532,6 +556,79 @@ function mapDomCards(
   });
 }
 
+export function combineSplitTicketOffers(
+  outbound: Offer[],
+  inbound: Offer[],
+  platform: BrowserOtaPlatform,
+  requestId: string,
+): Offer[] {
+  const candidates = outbound
+    .slice()
+    .sort((left, right) => left.totalPrice.amountMinor - right.totalPrice.amountMinor)
+    .slice(0, 4)
+    .flatMap((outboundOffer) => inbound
+      .slice()
+      .sort((left, right) => left.totalPrice.amountMinor - right.totalPrice.amountMinor)
+      .slice(0, 4)
+      .map((inboundOffer) => ({ outboundOffer, inboundOffer })))
+    .sort((left, right) =>
+      left.outboundOffer.totalPrice.amountMinor + left.inboundOffer.totalPrice.amountMinor -
+      right.outboundOffer.totalPrice.amountMinor - right.inboundOffer.totalPrice.amountMinor,
+    )
+    .slice(0, 10);
+
+  return candidates.map(({ outboundOffer, inboundOffer }, index) => {
+    const inboundSegments = inboundOffer.segments.map((segment) => ({
+      ...segment,
+      id: `${segment.id}:return`,
+      legIndex: 1,
+    }));
+    const inboundLeg = inboundOffer.legs[0]!;
+    const totalMinor = outboundOffer.totalPrice.amountMinor + inboundOffer.totalPrice.amountMinor;
+    const outboundUrl = outboundOffer.seller.deepLink!;
+    const inboundUrl = inboundOffer.seller.deepLink!;
+    const fetchedAt = [outboundOffer.fetchedAt, inboundOffer.fetchedAt].sort().at(-1)!;
+    return {
+      ...outboundOffer,
+      id: `${platform}:${requestId}:split:${index}`,
+      sourceOfferId: `${outboundOffer.sourceOfferId}+${inboundOffer.sourceOfferId}`,
+      seller: { ...outboundOffer.seller, deepLink: outboundUrl },
+      purchaseMode: "split_ticket" as const,
+      purchaseParts: [
+        { legIndex: 0, label: "去程单独购买", price: outboundOffer.totalPrice, bookingUrl: outboundUrl, fetchedAt: outboundOffer.fetchedAt },
+        { legIndex: 1, label: "返程单独购买", price: inboundOffer.totalPrice, bookingUrl: inboundUrl, fetchedAt: inboundOffer.fetchedAt },
+      ],
+      legs: [
+        outboundOffer.legs[0]!,
+        {
+          ...inboundLeg,
+          id: `${inboundLeg.id}:return`,
+          segmentIds: inboundSegments.map((segment) => segment.id),
+        },
+      ],
+      segments: [...outboundOffer.segments, ...inboundSegments],
+      priceComponents: [
+        { kind: "required_service" as const, label: "去程来源展示价", amountMinor: outboundOffer.totalPrice.amountMinor, currency: "CNY", required: true },
+        { kind: "required_service" as const, label: "返程来源展示价", amountMinor: inboundOffer.totalPrice.amountMinor, currency: "CNY", required: true },
+      ],
+      totalPrice: { amountMinor: totalMinor, currency: "CNY" as const },
+      totalPriceCny: { amountMinor: totalMinor, currency: "CNY" as const },
+      listedPrice: { amountMinor: totalMinor, currency: "CNY" as const },
+      fetchedAt,
+      evidenceRef: outboundUrl,
+      comparable: false,
+      incomparabilityReasons: [
+        ...new Set([
+          ...outboundOffer.incomparabilityReasons,
+          ...inboundOffer.incomparabilityReasons,
+          "SPLIT_TICKET_SEPARATE_PURCHASES",
+        ]),
+      ],
+      qualityScore: Math.min(outboundOffer.qualityScore, inboundOffer.qualityScore, 62),
+    };
+  });
+}
+
 async function extractDomCards(page: Page, definition: PlatformDefinition): Promise<RawDomCard[]> {
   const cardSelector = definition.selectors.flightCard.join(",");
   const cardLocators = await page.locator(cardSelector).all();
@@ -626,12 +723,39 @@ export class BrowserOtaConnector implements FlightConnector {
     context: ConnectorSearchContext,
   ): Promise<ConnectorSearchResult> {
     if (intent.tripType === "round_trip" && this.config.platform !== "ctrip") {
-      throw new ConnectorError(
-        `${this.config.platform} round-trip page mapping has not been verified.`,
-        `${this.config.platform.toUpperCase()}_ROUND_TRIP_UNVERIFIED`,
-        "unavailable",
-        false,
-      );
+      const outboundIntent: SearchIntent = { ...intent, tripType: "one_way", returnDate: undefined };
+      const inboundIntent: SearchIntent = {
+        ...intent,
+        tripType: "one_way",
+        origin: intent.destination,
+        destination: intent.origin,
+        departureDate: intent.returnDate!,
+        returnDate: undefined,
+      };
+      const [outbound, inbound] = await Promise.all([
+        this.search(outboundIntent, {
+          ...context,
+          requestId: `${context.requestId}:outbound`,
+        }),
+        this.search(inboundIntent, {
+          ...context,
+          requestId: `${context.requestId}:inbound`,
+        }),
+      ]);
+      return {
+        offers: combineSplitTicketOffers(
+          outbound.offers,
+          inbound.offers,
+          this.config.platform,
+          context.requestId,
+        ),
+        providerRequestId: context.requestId,
+        notes: [
+          ...(outbound.notes ?? []),
+          ...(inbound.notes ?? []),
+          `${this.config.platform.toUpperCase()}_ROUND_TRIP_SPLIT_TICKET`,
+        ],
+      };
     }
 
     let browser: Browser | undefined;
@@ -717,7 +841,7 @@ export class BrowserOtaConnector implements FlightConnector {
         }
         const title = await page.title().catch(() => "");
         throw new ConnectorError(
-          `${this.config.platform} result cards were not found. URL=${page.url()} TITLE=${title} BODY=${bodyText.replace(/\s+/g, " ").slice(0, 260)}`,
+          `${this.config.platform} result cards were not found (${title || "untitled"}).`,
           `${this.config.platform.toUpperCase()}_PAGE_CHANGED`,
           "page_changed",
           false,

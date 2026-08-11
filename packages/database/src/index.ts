@@ -23,7 +23,8 @@ export type SearchAuditPayload = {
       | "page_changed"
       | "provider_error"
       | "invalid_response"
-      | "unavailable";
+      | "unavailable"
+      | "unsupported_query";
     durationMs: number;
     offerCount: number;
     errorCode?: string | undefined;

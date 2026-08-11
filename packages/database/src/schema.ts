@@ -24,6 +24,7 @@ export const connectorState = pgEnum("connector_state", [
   "provider_error",
   "invalid_response",
   "unavailable",
+  "unsupported_query",
 ]);
 
 export const searches = pgTable(

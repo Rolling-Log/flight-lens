@@ -135,6 +135,18 @@ h1 em { font-style: normal; color: var(--blue); }
 .form-grid input, .form-grid select { width: 100%; border: 1px solid var(--line); border-radius: 9px; padding: 11px 9px; background: white; color: var(--ink); margin-top: 5px; outline: none; font-size: 12px; }
 .field-value { display: block; width: 100%; min-height: 38px; border: 1px solid var(--line); border-radius: 9px; padding: 11px 9px; background: #f7f9fd; color: var(--ink); margin-top: 5px; font-size: 12px; }
 .form-grid input:focus, .form-grid select:focus { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-pale); }
+.location-field { position: relative; min-width: 0; }
+.location-field > label { color: var(--muted-strong); font-size: 10px; font-weight: 700; }
+.location-combobox { position: relative; }
+.location-combobox input { padding-right: 42px; text-overflow: ellipsis; }
+.location-options { position: absolute; z-index: 20; left: 0; top: calc(100% + 5px); width: max(300px, 100%); max-height: 280px; overflow: auto; list-style: none; margin: 0; padding: 6px; background: white; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 16px 34px rgba(24, 44, 80, .16); }
+.location-options li { position: relative; display: grid; gap: 3px; padding: 9px 44px 9px 10px; border-radius: 6px; cursor: pointer; }
+.location-options li.active { background: var(--blue-pale); }
+.location-options span { color: var(--ink); font-size: 12px; font-weight: 800; }
+.location-options small { color: var(--muted); font-size: 9px; }
+.location-options b { position: absolute; right: 10px; top: 12px; color: var(--blue); font-size: 10px; }
+.location-options .location-empty { color: var(--muted); cursor: default; }
+.location-error { display: block; color: #b42318; font-size: 9px; margin-top: 4px; }
 .swap { border: 1px solid var(--line); width: 30px; height: 30px; margin-bottom: 5px; border-radius: 50%; background: white; color: var(--blue); }
 .filter-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 13px; }
 .filter-chips input { accent-color: var(--blue); vertical-align: -2px; margin-right: 5px; }
@@ -239,6 +251,7 @@ h1 em { font-style: normal; color: var(--blue); }
 .coverage-card li > strong { flex: 0 0 auto; white-space: nowrap; font-size: 10px; color: var(--green); }
 .source-state { text-transform: uppercase; }
 .state-timeout, .state-provider_error, .state-auth_error, .state-rate_limited, .state-invalid_response, .state-unavailable, .state-login_required, .state-captcha_required, .state-page_changed { color: #b54708 !important; }
+.state-unsupported_query { color: var(--muted-strong) !important; }
 .coverage-card > button { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--blue); background: white; font-size: 9px; font-weight: 800; }
 .adversarial-note { margin-top: 15px; padding: 13px; background: #fff9e9; border-left: 3px solid #e9b949; border-radius: 4px 8px 8px 4px; }
 .adversarial-note b { font-size: 10px; color: #715417; }

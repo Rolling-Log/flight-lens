@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { exchangeRateSchema, searchIntentSchema } from "../src/index.js";
+import { airportCodesForLocation, exchangeRateSchema, searchIntentSchema, searchLocations } from "../src/index.js";
+
+test("finds canonical cities and airports by Chinese, pinyin, and IATA", () => {
+  assert.equal(searchLocations("北京")[0]?.code, "BJS");
+  assert.equal(searchLocations("shanghai")[0]?.code, "SHA");
+  assert.equal(searchLocations("PKX")[0]?.code, "PKX");
+  assert.deepEqual(airportCodesForLocation({ kind: "city", code: "BJS" }), ["PEK", "PKX"]);
+  assert.deepEqual(airportCodesForLocation({ kind: "city", code: "SHA" }), ["PVG", "SHA"]);
+  assert.deepEqual(airportCodesForLocation({ kind: "city", code: "CTU" }), ["CTU", "TFU"]);
+});
 
 test("round trip requires a return date", () => {
   const result = searchIntentSchema.safeParse({

@@ -1,4 +1,5 @@
 import { z } from "zod";
+export * from "./locations.js";
 
 export const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 export const isoDateTimeSchema = z.string().datetime({ offset: true });
@@ -205,6 +206,14 @@ export const sellerSchema = z.object({
   handoffPrecision: z.enum(["exact_offer", "search_results"]).optional(),
 });
 
+export const purchasePartSchema = z.object({
+  legIndex: z.number().int().nonnegative(),
+  label: z.string().min(1),
+  price: moneySchema,
+  bookingUrl: z.string().url(),
+  fetchedAt: isoDateTimeSchema,
+});
+
 export const offerSchema = z.object({
   schemaVersion: z.literal("1"),
   id: z.string().min(1),
@@ -212,6 +221,8 @@ export const offerSchema = z.object({
   connectorId: z.string().min(1),
   environment: z.enum(["demo", "sandbox", "production"]),
   seller: sellerSchema,
+  purchaseMode: z.enum(["single_ticket", "split_ticket"]).optional(),
+  purchaseParts: z.array(purchasePartSchema).optional(),
   legs: z.array(flightLegSchema).min(1),
   segments: z.array(flightSegmentSchema).min(1),
   priceComponents: z.array(priceComponentSchema).min(1),
@@ -252,6 +263,7 @@ export const connectorStateSchema = z.enum([
   "provider_error",
   "invalid_response",
   "unavailable",
+  "unsupported_query",
 ]);
 
 export const connectorReportSchema = z.object({
