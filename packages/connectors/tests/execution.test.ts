@@ -196,6 +196,8 @@ test("maps Ctrip batchSearch base fare and tax as provider-verified adult total"
   assert.equal(offers.length, 1);
   assert.equal(offers[0]?.totalPrice.amountMinor, 114_000);
   assert.equal(offers[0]?.priceVerificationStatus, "provider_response_verified");
+  assert.equal(offers[0]?.segments[0]?.marketingCarrier, "MU");
+  assert.equal(offers[0]?.segments[0]?.flightNumber, "5101");
   assert.match(offers[0]?.evidenceRef ?? "", /batchSearch:ctrip-search/);
 });
 

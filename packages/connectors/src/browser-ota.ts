@@ -231,7 +231,7 @@ function priceMinor(value: unknown): number | undefined {
 }
 
 function flightParts(value: string): { carrier: string; number: string } | undefined {
-  const match = value.replace(/\s+/g, "").toUpperCase().match(/([A-Z0-9]{2,3})(\d{3,4})/);
+  const match = value.toUpperCase().match(/([A-Z][A-Z0-9])\s*(\d{3,4})(?!\d)/);
   return match ? { carrier: match[1]!, number: match[2]! } : undefined;
 }
 
