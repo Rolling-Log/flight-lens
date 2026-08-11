@@ -153,6 +153,10 @@ function fixtureOffer(input: {
     ],
     totalPrice: { amountMinor, currency: "CNY" },
     totalPriceCny: { amountMinor, currency: "CNY" },
+    listedPrice: { amountMinor, currency: "CNY" },
+    priceVerificationStatus:
+      handoffPrecision === "search_results" ? "listed_only" : "provider_response_verified",
+    ...(handoffPrecision === "exact_offer" ? { priceVerifiedAt: new Date().toISOString() } : {}),
     baggage: [{ type: "checked", quantity: 1, weightKg: 23, included: true }],
     fareBrand: "Economy",
     refundable: null,

@@ -1064,6 +1064,7 @@ export function mapSerpApiSearchChoices(
       intent,
       requestId,
       googleFlightsSearchUrl,
+      "listed_only",
     );
   });
 }
@@ -1074,6 +1075,7 @@ export function mapSerpApiBookingPayload(
   intent: SearchIntent,
   requestId: string,
   googleFlightsSearchUrl?: string,
+  verificationStatus: "listed_only" | "detail_verified" = "detail_verified",
 ): Offer[] {
   const selectedLegs = payload.selected_flights?.filter(
     (choice) => choice.flights?.length,
@@ -1186,6 +1188,7 @@ export function mapSerpApiBookingPayload(
     ];
     const totalMinor = Math.round(option.price * 100);
     const sourceId = payload.search_metadata?.id ?? requestId;
+    const fetchedAt = new Date().toISOString();
 
     return [{
       schemaVersion: "1",
@@ -1215,14 +1218,19 @@ export function mapSerpApiBookingPayload(
       }],
       totalPrice: { amountMinor: totalMinor, currency: "CNY" },
       totalPriceCny: { amountMinor: totalMinor, currency: "CNY" },
+      listedPrice: { amountMinor: totalMinor, currency: "CNY" },
+      priceVerificationStatus: verificationStatus,
+      ...(verificationStatus === "detail_verified" ? { priceVerifiedAt: fetchedAt } : {}),
       baggage: checkedBaggageIncluded
         ? [{ type: "checked", included: true }]
         : [],
       refundable: null,
       changeable: null,
       eligibility: entry.separate_tickets ? ["SEPARATE_TICKETS"] : [],
-      fetchedAt: new Date().toISOString(),
-      evidenceRef: sourceId,
+      fetchedAt,
+      evidenceRef: verificationStatus === "detail_verified"
+        ? `serpapi-booking-options:${sourceId}`
+        : `serpapi-initial-results:${sourceId}`,
       comparable: reasons.length === 0,
       incomparabilityReasons: reasons,
       qualityScore: reasons.length === 0 ? 82 : 55,

@@ -547,6 +547,8 @@ test("maps a SerpApi booking option only when it has a consumer handoff", () => 
   assert.equal(offers[0]?.seller.name, "Example Airline");
   assert.equal(offers[0]?.totalPrice.amountMinor, 120000);
   assert.equal(offers[0]?.comparable, true);
+  assert.equal(offers[0]?.priceVerificationStatus, "detail_verified");
+  assert.match(offers[0]?.evidenceRef ?? "", /^serpapi-booking-options:/);
   assert.equal(offers[0]?.segments[0]?.marketingCarrier, "CA");
   assert.equal(offers[0]?.segments[0]?.flightNumber, "8357");
 });
@@ -639,6 +641,7 @@ test("maps initial SerpApi prices as disclosed search-result fallbacks", () => {
   assert.equal(offers.length, 1);
   assert.equal(offers[0]?.seller.name, "Google Flights");
   assert.equal(offers[0]?.seller.handoffPrecision, "search_results");
+  assert.equal(offers[0]?.priceVerificationStatus, "listed_only");
   assert.equal(offers[0]?.totalPrice.amountMinor, 88_000);
   assert.equal(offers[0]?.comparable, true);
   assert.deepEqual(

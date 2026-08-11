@@ -191,9 +191,10 @@ function money(offer: Offer): string {
 }
 
 function offerPriceLabel(offer: Offer): string {
-  return offer.seller.handoffPrecision === "search_results"
-    ? "抓取时来源展示价"
-    : "来源报价总价";
+  if (offer.priceVerificationStatus === "detail_verified") return "二次核验报价";
+  if (offer.priceVerificationStatus === "provider_response_verified") return "来源接口核验价";
+  if (offer.priceVerificationStatus === "listed_only") return "抓取时来源展示价";
+  return "核验状态未确认";
 }
 
 function handoffSourceName(offer: Offer): string {
