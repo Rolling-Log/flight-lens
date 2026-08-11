@@ -17,6 +17,7 @@ const modelDraftSchema = z.object({
   returnDate: z.string().nullable(),
   flexibleDays: z.number().int().min(0).max(3),
   adults: z.number().int().min(1).max(9),
+  cabin: z.enum(["economy", "premium_economy", "business", "first"]),
   budgetAmountCny: z.number().int().positive().nullable(),
   departureTimeEarliest: z.string().regex(/^\d{2}:\d{2}$/).nullable(),
   departureTimeLatest: z.string().regex(/^\d{2}:\d{2}$/).nullable(),
@@ -57,7 +58,7 @@ function responseFromDraft(
           returnDate: draft.returnDate ?? undefined,
           flexibleDays: draft.flexibleDays,
           adults: draft.adults,
-          cabin: "economy",
+          cabin: draft.cabin,
           budget: draft.budgetAmountCny
             ? { amountMinor: draft.budgetAmountCny * 100, currency: "CNY" }
             : undefined,
@@ -350,6 +351,14 @@ export class LocalChineseIntentParser implements IntentParser {
         : undefined);
     const adultMatch = /([1-9一二三四五六七八九])\s*(?:名|位|个)?(?:成人|人|个人)/.exec(text);
     const adults = numberFromText(adultMatch?.[1]) ?? 1;
+    const cabin = /头等舱/.test(text)
+      ? "first"
+      : /商务舱|公务舱/.test(text)
+        ? "business"
+        : /超级经济舱|高端经济舱|豪华经济舱/.test(text)
+          ? "premium_economy"
+          : "economy";
+    const cabinExplicit = /经济舱|头等舱|商务舱|公务舱/.test(text);
     const budgetMatch =
       /(?:预算|不超过|最多|控制在)\s*(\d{2,6})\s*元?/.exec(text) ??
       /(\d{2,6})\s*元(?:以内|以下)/.exec(text);
@@ -401,6 +410,7 @@ export class LocalChineseIntentParser implements IntentParser {
       location.assumption ? [location.assumption] : [],
     );
     if (!adultMatch) assumptions.push("未说明乘客人数，按 1 名成人解析。");
+    if (!cabinExplicit) assumptions.push("未说明舱位，按经济舱解析。");
     if (!dates[1] && !/单程|往返|来回|返程|回程|回来|返回/.test(text)) {
       assumptions.push(
         durationMatch
@@ -419,6 +429,7 @@ export class LocalChineseIntentParser implements IntentParser {
       ...(departure ? ["departureDate"] : []),
       ...(returnDate ? ["returnDate"] : []),
       ...(adultMatch ? ["adults"] : []),
+      ...(cabinExplicit ? ["cabin"] : []),
       ...(budgetMatch ? ["budget"] : []),
       ...(flexibleMatch ? ["flexibleDays"] : []),
       ...(directOnly || stopMatch ? ["maxStops"] : []),
@@ -435,6 +446,7 @@ export class LocalChineseIntentParser implements IntentParser {
         returnDate: returnDate ? isoDate(returnDate) : null,
         flexibleDays: flexibleMatch ? Number(flexibleMatch[1]) : 0,
         adults,
+        cabin,
         budgetAmountCny: budgetMatch ? Number(budgetMatch[1]) : null,
         departureTimeEarliest: earliest,
         departureTimeLatest: latest,

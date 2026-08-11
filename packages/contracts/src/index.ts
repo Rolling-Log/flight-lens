@@ -23,6 +23,14 @@ export const inferredFieldSchema = z.object({
   reason: z.string().min(1),
 });
 
+export const cabinClassSchema = z.enum([
+  "economy",
+  "premium_economy",
+  "business",
+  "first",
+]);
+export type CabinClass = z.infer<typeof cabinClassSchema>;
+
 export const searchIntentSchema = z
   .object({
     schemaVersion: z.literal("1"),
@@ -33,7 +41,7 @@ export const searchIntentSchema = z
     returnDate: isoDateSchema.optional(),
     flexibleDays: z.number().int().min(0).max(3).default(0),
     adults: z.number().int().min(1).max(9).default(1),
-    cabin: z.literal("economy").default("economy"),
+    cabin: cabinClassSchema.default("economy"),
     budget: z
       .object({
         amountMinor: z.number().int().positive(),
@@ -109,6 +117,7 @@ export const searchIntentDraftSchema = z.object({
   returnDate: isoDateSchema.nullable(),
   flexibleDays: z.number().int().min(0).max(3),
   adults: z.number().int().min(1).max(9),
+  cabin: cabinClassSchema,
   budgetAmountCny: z.number().int().positive().nullable(),
   departureTimeEarliest: z.string().regex(/^\d{2}:\d{2}$/).nullable(),
   departureTimeLatest: z.string().regex(/^\d{2}:\d{2}$/).nullable(),
@@ -217,6 +226,11 @@ export const offerSchema = z.object({
   fetchedAt: isoDateTimeSchema,
   expiresAt: isoDateTimeSchema.optional(),
   evidenceRef: z.string().optional(),
+  listedPrice: moneySchema.optional(),
+  priceVerificationStatus: z
+    .enum(["unverified", "listed_only", "provider_response_verified", "detail_verified"])
+    .optional(),
+  priceVerifiedAt: isoDateTimeSchema.optional(),
   comparable: z.boolean(),
   incomparabilityReasons: z.array(z.string()).default([]),
   qualityScore: z.number().min(0).max(100),
@@ -225,11 +239,16 @@ export const offerSchema = z.object({
 export type Offer = z.infer<typeof offerSchema>;
 
 export const connectorStateSchema = z.enum([
+  "pending",
+  "searching",
   "success",
   "empty",
   "timeout",
   "rate_limited",
   "auth_error",
+  "login_required",
+  "captcha_required",
+  "page_changed",
   "provider_error",
   "invalid_response",
   "unavailable",

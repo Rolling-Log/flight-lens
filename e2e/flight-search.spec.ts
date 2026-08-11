@@ -58,7 +58,7 @@ test("agent input becomes an editable search and exposes source limits", async (
   await expect(page.getByText("2/2", { exact: true })).toBeVisible();
   await expect(page.getByText("+1", { exact: true }).first()).toBeVisible();
   await expect(
-    page.getByText("共 2 个可比报价 · 1 个不符合条件的报价已隐藏"),
+    page.getByText("共 2 个航班 · 2 个平台报价 · 1 个不符合条件的报价已隐藏"),
   ).toBeVisible();
   await expect(page.getByText("超预算示例", { exact: true })).toHaveCount(0);
 
@@ -116,7 +116,7 @@ test("an incomplete dialogue pre-fills known fields and leaves the missing date 
   await expect(page.getByLabel("出发地 IATA")).toHaveValue("CAN");
   await expect(page.getByLabel("目的地 IATA")).toHaveValue("SIN");
   await expect(page.getByLabel("出发日期")).toHaveValue("");
-  await expect(page.getByText(/1 项推断 · 1 项待确认 · 本地解析/)).toBeVisible();
+  await expect(page.getByText(/2 项推断 · 1 项待确认 · 本地解析/)).toBeVisible();
 });
 
 test("form edits remain authoritative after switching back to agent mode", async ({

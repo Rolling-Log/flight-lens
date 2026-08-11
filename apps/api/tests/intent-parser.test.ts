@@ -44,6 +44,16 @@ test("parses next-week weekday and a later return weekday deterministically", as
   );
 });
 
+test("parses an explicitly requested cabin class", async () => {
+  const parser = new LocalChineseIntentParser(fixedNow);
+  const result = await parser.parse("2026-08-24 上海到北京，单程，2位成人，商务舱。");
+
+  assert.equal(result.ready, true);
+  assert.equal(result.intent?.cabin, "business");
+  assert.equal(result.intent?.adults, 2);
+  assert.equal(result.intent?.explicitFields.includes("cabin"), true);
+});
+
 test("asks for an exact date instead of inventing one for a vague month", async () => {
   const parser = new LocalChineseIntentParser(fixedNow);
   const result = await parser.parse("下个月上海飞东京，单程，1位成人。");

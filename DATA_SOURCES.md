@@ -26,7 +26,7 @@
 3. Sandbox、测试 token、缓存样本和只有代码没有凭据的 Connector 都不计入 production 数量；
 4. 每个来源登记 `inventoryFamily`，用于披露库存依赖，避免把同一上游的多个包装 API 夸大为独立证据。
 
-当前进度为：购买交接 `1/2`，生产核验 `0/2`，生产运营来源合计 `1/4`。
+当前本地进度为：同程实时页面与 SerpApi Google Flights 已在同次查询成功；飞猪、携程、去哪儿 Connector 已接线但尚未形成稳定成功来源。上线许可与长期稳定性仍需单独验收。
 
 ## 进入最低价比较的硬门槛
 
@@ -43,18 +43,23 @@
 
 精确 Offer 落点与来源结果页必须明确区分。后者可以基于已返回的实时 Booking Option 参与价格比较，但按钮和风险说明必须告知用户需要重新选择相同行程，不能称为“一键购买此报价”。
 
-## V1 候选审查（2026-07-31）
+## V1 候选审查（2026-08-07）
 
 | 来源 | 当前角色 | 结论 | V1 发布条件 |
 |---|---|---|---|
-| Skyscanner Flights Live Prices | 购买交接 Connector 已实现，合作申请已提交 | 已实现 create/poll、PriceUnit、leg/segment、实际 agent、deeplink、多票与自助中转拦截、官方品牌展示；2026-07-31 已提交 Partnerships 申请，等待审批 | 获批 API Key、生产查询、deeplink 与支付页价格复核 |
+| Skyscanner Flights Live Prices | 暂停 | Connector 已实现，但 Partner Portal 无法完成登录；消费者天巡账号不能替代 API 权限 | 未来取得正式 Partner API 凭据后再恢复 |
+| FlightAPI Price API | 本地实验购买交接 Connector 已实现 | 可自助注册并提供 20 次免费调用，返回多供应商当前价格、航段和 Skyscanner 跳转；响应属于 `skyscanner-metasearch` 库存族，授权边界未复核 | 只做本地受控验证；确认数据展示与跳转授权前不计入正式发布门禁 |
 | SerpApi Google Flights | 已完成首个生产受控验证；仅允许 `$0` Free 计划 | 已实现单程/往返选择、booking options、实际售卖方、GET 精确落点与官方 Google Flights 条件结果页降级；POST 请求不会被违规改写。官方 Free 计划当前为每月 250 次、无需信用卡，不是限时试用；运行时会在搜索前拒绝付费账号或不足额度，并禁止自动灵活日期扩搜。实时查询使用默认快速模式而非更慢的 `deep_search`，为用户等待时间和上游超时留出边界。附近机场使用官方支持的逗号分隔多出发机场参数，只展开 V1 已登记机场组并在来源报告披露 | 绝不自动升级；再验证国内和入境路线、往返链路、价格新鲜度和落点重选提示 |
+| 同程实时页面 | 本地实时购买交接已验证 | 使用隔离浏览器会话读取公开结果页；返回价格标记为 `listed_only`，必须在同程结果页重新核验，不绕过登录或验证码 | 继续观察页面稳定性，复核展示许可与落地价 |
+| 飞猪 FlyAI | 官方 Connector 已实现 | 官方 CLI 匿名试用额度已耗尽，运行时明确返回 `FLYAI_API_KEY_REQUIRED` | 在 FlyAI 控制台取得正式 Key 后复测 |
+| 携程实时页面 | Connector 已实现，当前受阻 | 2026-08-11 实测返回 `whaleguard block`，状态记为 `page_changed`，不产生 Offer | 不绕过风控；优先寻找正式接口或用户可见会话方案 |
+| 去哪儿实时页面 | Connector 已实现，当前页面不匹配 | 页面可访问，但当前搜索壳页未出现已验证结果卡；状态记为 `page_changed` | 更新稳定入口/选择器或切换正式接口后复测 |
 | Wego Affiliate Flights | 暂不接入 | 生产 API 当前要求年费，测试 Key 最长两周；V1 尚未证明足以承担该固定成本的用户价值，已移除 Connector 和申请材料 | 只有在授权允许多源比较、用户价值已验证且预算获批后重审 |
 | Travelpayouts / Aviasales Search API | 拒绝接入 | 2025-11-01 起的新 Search API 要求已有 50,000 MAU，且官方使用规则禁止与其他航班元搜索 API 合并；与本产品核心冲突 | 不接入；Data API 也不能伪装成实时可购买价格 |
 | Kiwi.com Tequila | 暂不接入 | 2024 年起新合作改为邀请制，只面向与其战略匹配的选定合作方 | 仅在取得明确邀请与允许多源比较的合同后重审 |
-| Amadeus Self-Service Flight Offers | 生产核验候选；Connector 与固定响应测试已完成 | 只有官方 production 域名才标记为生产；可提供 published GDS fare，但不覆盖低成本航司等重要内容，且没有消费者购买 deeplink | 创建开发者应用并取得 production 凭据；仅作核验，不进入可购买最低价 |
+| Amadeus Self-Service Flight Offers | 停止作为新接入目标 | Self-Service 入口已无法用于本项目完成新账号接入；代码不再注册到应用运行时 | 由 PKFARE 替代，历史 Connector 仅保留参考 |
 | Duffel Flights API | 生产核验候选；Connector 与固定响应测试已完成 | 只有 `duffel_live_` token 才标记为生产；Test mode 不是真实时刻/价格，标准流程要求接入方继续创建订单 | 完成账户与 live mode 审核；仅作核验，不进入可购买最低价 |
-| PKFARE Flight Buyer API | 中国覆盖合作候选 | 包含中国航信、GDS、航司直连等广泛内容，但面向 OTA/旅行社继续下单出票 | 若取得仅搜索+合法消费者交接合作再接入；否则只核验 |
+| PKFARE Flight Buyer API | 已选为 Amadeus 替代核验候选 | 官方披露接入中国航信、Amadeus、Sabre、Travelport、航司直连与第三方供应，但面向 B2B 搜索、预订和出票 | 完成买家注册与商务权限；取得正式文档和凭据后实现，只核验不出票 |
 
 ### 官方依据
 
@@ -63,7 +68,7 @@
 - SerpApi Google Flights 与 Booking Options 参数及字段：<https://serpapi.com/google-flights-api>、<https://serpapi.com/google-flights-booking-options>
 - SerpApi 官方定价当前包含长期 `$0` Free 计划，每月 250 次且无需信用卡；项目只允许使用该计划，额度耗尽即停用来源：<https://serpapi.com/pricing>
 - Wego 商业页当前写明生产年费与最长两周测试 Key；V1 暂不承担该固定成本：<https://company.wego.com/api-overview/>
-- Amadeus Test 是受限缓存数据，Production 才是完整实时数据；Self-Service 不含低成本航司及部分大型航司：<https://developers.amadeus.com/self-service/apis-docs/guides/developer-guides/test-data/>、<https://developers.amadeus.com/self-service/apis-docs/guides/developer-guides/faq/>
+- FlightAPI 官方文档披露价格接口、每次 2 credits、单程/往返查询结构和 Skyscanner 衍生跳转样例：<https://www.flightapi.io/documentation/flight-price-api/>、<https://www.flightapi.io/documentation/oneway-trip-api/>、<https://www.flightapi.io/documentation/round-trip-api/>
 - Duffel Test mode 不保证真实时刻或价格：<https://duffel.com/docs/api/overview/test-mode>
 - PKFARE 官方说明其接入中国航信、GDS、航司直连等内容，Buyer API 的 production 域名需完成合作联调后提供：<https://www.pkfare.com/cn/flight>、<https://apifox.pkfare.com/apidoc/project-345083/doc-338127>
 - Travelpayouts 新 Search API 仅开放给已有 50,000 MAU 的项目，并明确禁止与其他航班元搜索 API 合并：<https://support.travelpayouts.com/hc/en-us/articles/210995808-How-to-get-access-to-the-Aviasales-Search-API>、<https://support.travelpayouts.com/hc/en-us/articles/34788165535250-Search-API-usage-rules>
@@ -89,6 +94,14 @@
 - Railway API 使用长驻 Fastify 进程，但 Connector 仍在 20 秒主动超时，Neon 审计写入最多等待 3 秒并可降级披露，避免单个供应商或数据库阻塞请求；SerpApi 使用默认快速模式并保留 `no_cache=true`，落地页仍承担最终可售性与价格复核；
 - SerpApi 除 `$0` 套餐和剩余额度检查外，还使用账户级月度 credit 硬上限：代码默认 200/250，Staging 为 100。门禁依据供应商账户的全局用量而非单个 Railway 进程；并发请求仍可能在读取用量与实际扣减之间产生小幅竞态，因此 Staging 预留 150 credits 安全余量且不做真实搜索压测；
 - 以上均为特定时刻的受控观察值，不代表持续价格，也不改变 V1 双来源门禁仍为 1/2 的结论。
+
+### 国内多来源本地验证（2026-08-11）
+
+- `PEK → SHA` 单程固定日期：同程返回 30 个来源展示价，SerpApi 返回 4 个实际来源报价；同次 API 响应成功来源 `2/5`，耗时 24.97 秒；
+- 同程三航线复测均成功：`PEK → SHA`、`SHA → CAN`、`CAN → CTU` 各返回 30 个 Offer；
+- 飞猪返回 `FLYAI_API_KEY_REQUIRED`，携程返回 `CTRIP_PAGE_CHANGED`（WhaleGuard），去哪儿返回 `QUNAR_PAGE_CHANGED`；失败均未生成价格；
+- 同程 DOM 价格只标记 `listed_only`，不能称为支付页已验证总价；用户必须到来源页复核库存、税费、行李和最终支付金额；
+- 该记录证明本地多来源真实查询链路成立，不等于云端部署或长期运行许可已经完成。
 
 每个 Connector 必须登记授权依据、环境、支持范围、字段、限流、成本、新鲜度、深链、失败策略和当前状态。
 

@@ -4,12 +4,16 @@ import { buildApp } from "../../src/app.js";
 import type { ApiConfig } from "../../src/config.js";
 
 const port = Number(process.env.PORT ?? 4000);
+const webPort = Number(process.env.PLAYWRIGHT_WEB_PORT ?? 3000);
 
 const config: ApiConfig = {
   nodeEnv: "test",
   host: "127.0.0.1",
   port,
-  webOrigins: ["http://localhost:3000", "http://127.0.0.1:3000"],
+  webOrigins: [
+    `http://localhost:${webPort}`,
+    `http://127.0.0.1:${webPort}`,
+  ],
   logLevel: "silent",
   openaiIntentParserEnabled: false,
   openaiModel: "gpt-5.6-luna",

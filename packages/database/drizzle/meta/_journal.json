@@ -15,6 +15,13 @@
       "when": 1785419955314,
       "tag": "0001_hot_nick_fury",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786418476625,
+      "tag": "0002_domestic_connector_states",
+      "breakpoints": true
     }
   ]
 }

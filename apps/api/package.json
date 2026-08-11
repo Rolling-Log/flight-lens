@@ -15,6 +15,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "preview": "node dist/index.js",
+    "smoke:live": "node --conditions=development --import tsx scripts/live-search.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests --max-warnings=0",
     "test": "node --conditions=development --import tsx --test tests/**/*.test.ts"

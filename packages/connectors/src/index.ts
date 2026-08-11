@@ -1,8 +1,23 @@
 import type { ConnectorReport, Offer, SearchIntent } from "@flight-lens/contracts";
 import { ConnectorError, providerHttpError } from "./errors.js";
+import { BrowserOtaConnector, type BrowserOtaPlatform } from "./browser-ota.js";
+import { FlightApiConnector } from "./flightapi.js";
+import { FlyAiConnector } from "./flyai.js";
 import { SkyscannerConnector } from "./skyscanner.js";
 
 export { ConnectorError } from "./errors.js";
+export {
+  BrowserOtaConnector,
+  mapCtripBatchSearchPayload,
+  type BrowserOtaConfig,
+  type BrowserOtaPlatform,
+} from "./browser-ota.js";
+export {
+  FlightApiConnector,
+  mapFlightApiSearchPayload,
+  type FlightApiSearchPayload,
+} from "./flightapi.js";
+export { FlyAiConnector, mapFlyAiFlightPayload } from "./flyai.js";
 export {
   SkyscannerConnector,
   mapSkyscannerSearchResults,
@@ -15,7 +30,7 @@ export type ConnectorMetadata = {
   name: string;
   kind: "airline" | "ota" | "metasearch" | "aggregator";
   environment: ConnectorEnvironment;
-  authorization: "contract" | "self_service_api" | "partner_api";
+  authorization: "contract" | "self_service_api" | "partner_api" | "browser_session";
   resultRole: "discovery" | "verification" | "purchase_handoff";
   handoff: "none" | "deep_link" | "server_resolved";
   inventoryFamily?: string;
@@ -201,12 +216,12 @@ export async function executeConnector(
     );
   }
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort("connector_timeout"), timeoutMs);
+  let timeout: ReturnType<typeof setTimeout>;
   let retryCount = 0;
 
   try {
     const variants = searchVariants(connector, intent);
-    const attempts = await Promise.all(
+    const attemptPromise = Promise.all(
       variants.map((variant, variantIndex) =>
         searchVariant(
           connector,
@@ -217,6 +232,13 @@ export async function executeConnector(
         ),
       ),
     );
+    const deadline = new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => {
+        controller.abort("connector_timeout");
+        reject(new DOMException("Connector deadline exceeded.", "AbortError"));
+      }, timeoutMs);
+    });
+    const attempts = await Promise.race([attemptPromise, deadline]);
     const successful = attempts.flatMap((attempt) =>
       attempt.status === "fulfilled" ? [attempt.value] : [],
     );
@@ -295,29 +317,72 @@ export async function executeConnector(
         finishedAt: new Date(finished).toISOString(),
         durationMs: finished - started,
         offerCount: 0,
-        notes: retryCount > 0 ? [`RETRY_ATTEMPTS:${retryCount}`] : [],
+        notes: [
+          ...(retryCount > 0 ? [`RETRY_ATTEMPTS:${retryCount}`] : []),
+          ...(error instanceof ConnectorError && /_(?:BROWSER_FAILED|PAGE_CHANGED)$/.test(error.code)
+            ? [`BROWSER_DIAGNOSTIC:${error.message.slice(0, 500)}`]
+            : []),
+        ],
       },
     };
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(timeout!);
   }
 }
 
 export type ConnectorRegistryConfig = {
+  flyAiEnabled?: boolean;
+  flyAiApiKey?: string;
+  flyAiCliPath?: string;
+  browserOtaEnabled?: boolean;
+  browserExecutablePath?: string;
+  browserHeadless?: boolean;
+  browserProxyServer?: string;
+  browserNavigationTimeoutMs?: number;
+  flightApiKey?: string;
+  flightApiBaseUrl?: string;
+  flightApiMaxSearchesPerProcess?: number;
   skyscannerApiKey?: string;
   skyscannerBaseUrl?: string;
   serpApiKey?: string;
   serpApiBaseUrl?: string;
   serpApiMonthlyCreditCap?: number;
-  amadeusClientId?: string;
-  amadeusClientSecret?: string;
-  amadeusBaseUrl?: string;
   duffelAccessToken?: string;
   duffelBaseUrl?: string;
 };
 
 export function createConnectorRegistry(config: ConnectorRegistryConfig): FlightConnector[] {
   const connectors: FlightConnector[] = [];
+  if (config.flyAiEnabled) {
+    connectors.push(new FlyAiConnector({
+      ...(config.flyAiApiKey ? { apiKey: config.flyAiApiKey } : {}),
+      ...(config.flyAiCliPath ? { cliPath: config.flyAiCliPath } : {}),
+    }));
+  }
+  if (config.browserOtaEnabled) {
+    for (const platform of ["ctrip", "qunar", "tongcheng"] satisfies BrowserOtaPlatform[]) {
+      connectors.push(new BrowserOtaConnector({
+        platform,
+        ...(config.browserExecutablePath
+          ? { executablePath: config.browserExecutablePath }
+          : {}),
+        headless: config.browserHeadless ?? true,
+        ...(config.browserProxyServer ? { proxyServer: config.browserProxyServer } : {}),
+        ...(config.browserNavigationTimeoutMs
+          ? { navigationTimeoutMs: config.browserNavigationTimeoutMs }
+          : {}),
+      }));
+    }
+  }
+  if (config.flightApiKey) {
+    connectors.push(
+      new FlightApiConnector({
+        apiKey: config.flightApiKey,
+        baseUrl: config.flightApiBaseUrl ?? "https://api.flightapi.io",
+        maxSearchesPerProcess: config.flightApiMaxSearchesPerProcess ?? 10,
+      }),
+    );
+  }
   if (config.skyscannerApiKey) {
     connectors.push(
       new SkyscannerConnector({
@@ -332,15 +397,6 @@ export function createConnectorRegistry(config: ConnectorRegistryConfig): Flight
         apiKey: config.serpApiKey,
         baseUrl: config.serpApiBaseUrl ?? "https://serpapi.com",
         monthlyCreditCap: config.serpApiMonthlyCreditCap ?? 200,
-      }),
-    );
-  }
-  if (config.amadeusClientId && config.amadeusClientSecret) {
-    connectors.push(
-      new AmadeusConnector({
-        clientId: config.amadeusClientId,
-        clientSecret: config.amadeusClientSecret,
-        baseUrl: config.amadeusBaseUrl ?? "https://test.api.amadeus.com",
       }),
     );
   }
@@ -528,7 +584,7 @@ export class DuffelConnector implements FlightConnector {
             id: `adult-${index + 1}`,
             type: "adult",
           })),
-          cabin_class: "economy",
+          cabin_class: intent.cabin,
           max_connections: intent.directOnly ? 0 : intent.maxStops,
         },
       }),

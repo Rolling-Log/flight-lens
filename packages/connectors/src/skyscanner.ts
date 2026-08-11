@@ -539,7 +539,12 @@ export class SkyscannerConnector implements FlightConnector {
           currency: "CNY",
           queryLegs,
           adults: intent.adults,
-          cabinClass: "CABIN_CLASS_ECONOMY",
+          cabinClass: {
+            economy: "CABIN_CLASS_ECONOMY",
+            premium_economy: "CABIN_CLASS_PREMIUM_ECONOMY",
+            business: "CABIN_CLASS_BUSINESS",
+            first: "CABIN_CLASS_FIRST",
+          }[intent.cabin],
           nearbyAirports: intent.includeNearbyAirports,
           includeSustainabilityData: false,
         },

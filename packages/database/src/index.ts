@@ -11,11 +11,16 @@ export type SearchAuditPayload = {
     connectorId: string;
     connectorName: string;
     state:
+      | "pending"
+      | "searching"
       | "success"
       | "empty"
       | "timeout"
       | "rate_limited"
       | "auth_error"
+      | "login_required"
+      | "captcha_required"
+      | "page_changed"
       | "provider_error"
       | "invalid_response"
       | "unavailable";

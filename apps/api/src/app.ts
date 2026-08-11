@@ -338,14 +338,13 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     }
 
     const unsupportedV1Fields = [
-      ...(parsed.data.adults === 1 ? [] : ["adults"]),
       ...(parsed.data.flexibleDays === 0 ? [] : ["flexibleDays"]),
     ];
     if (unsupportedV1Fields.length > 0) {
       return reply.status(422).send({
         error: {
           code: "V1_SCOPE_UNSUPPORTED",
-          message: "V1 正式搜索当前仅支持 1 位成人和固定日期。",
+          message: "V1 正式搜索当前仅支持固定日期。",
           fields: unsupportedV1Fields,
         },
       });

@@ -450,8 +450,20 @@ test("rejects a search date in the past", async () => {
   await app.close();
 });
 
-test("keeps the formal V1 search path to one adult and fixed dates", async () => {
-  const app = await buildApp({ config, connectors: [], auditStore: null, now: fixedNow });
+test("supports multiple adults while keeping the V1 search path to fixed dates", async () => {
+  const connector: FlightConnector = {
+    ...readinessConnector("adult-search", "purchase_handoff", "adult-search"),
+    search: async () => ({ offers: [comparableOffer()] }),
+  };
+  const app = await buildApp({ config, connectors: [connector], auditStore: null, now: fixedNow });
+  const adultResponse = await app.inject({
+    method: "POST",
+    url: "/v1/searches",
+    payload: { ...validIntent, adults: 2 },
+  });
+  assert.equal(adultResponse.statusCode, 200);
+  assert.equal(adultResponse.json().intent.adults, 2);
+
   const response = await app.inject({
     method: "POST",
     url: "/v1/searches",
@@ -460,6 +472,6 @@ test("keeps the formal V1 search path to one adult and fixed dates", async () =>
 
   assert.equal(response.statusCode, 422);
   assert.equal(response.json().error.code, "V1_SCOPE_UNSUPPORTED");
-  assert.deepEqual(response.json().error.fields, ["adults", "flexibleDays"]);
+  assert.deepEqual(response.json().error.fields, ["flexibleDays"]);
   await app.close();
 });

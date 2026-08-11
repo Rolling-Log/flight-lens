@@ -29,6 +29,15 @@ type SortKey =
   | "baggage"
   | "flexibility";
 type BusyState = "idle" | "parsing" | "searching";
+type StopsFilter = "all" | "direct" | "one_or_less";
+type ConnectorMeta = { id: string; name: string };
+
+const cabinLabels: Record<SearchIntent["cabin"], string> = {
+  economy: "经济舱",
+  premium_economy: "高端经济舱",
+  business: "商务舱",
+  first: "头等舱",
+};
 
 function apiBase(): string {
   return resolveApiBase(
@@ -99,7 +108,7 @@ function intentFromDraft(
       : {}),
     flexibleDays: draft.flexibleDays,
     adults: draft.adults,
-    cabin: "economy",
+    cabin: draft.cabin,
     ...(draft.budgetAmountCny
       ? {
           budget: {
@@ -187,6 +196,12 @@ function offerPriceLabel(offer: Offer): string {
     : "来源报价总价";
 }
 
+function handoffSourceName(offer: Offer): string {
+  if (offer.connectorId === "serpapi-google-flights") return "Google Flights";
+  if (offer.connectorId === "flightapi-skyscanner") return "Skyscanner";
+  return offer.seller.name;
+}
+
 function time(value: string): string {
   return value.slice(11, 16);
 }
@@ -234,7 +249,39 @@ function reportNote(note: string): string {
   if (note.startsWith("NEARBY_ORIGIN_NO_CONFIGURED_ALTERNATIVES:")) {
     return `该来源没有 ${note.split(":").at(-1)} 的已配置附近出发机场`;
   }
+  if (note.startsWith("BROWSER_DIAGNOSTIC:")) {
+    return `页面诊断：${note.slice("BROWSER_DIAGNOSTIC:".length)}`;
+  }
   return note;
+}
+
+function connectorStateLabel(state: SearchResponse["connectorReports"][number]["state"]): string {
+  return ({
+    pending: "等待中",
+    searching: "检索中",
+    success: "成功",
+    empty: "无结果",
+    timeout: "超时",
+    rate_limited: "限流",
+    auth_error: "凭据异常",
+    login_required: "需登录",
+    captcha_required: "需验证",
+    page_changed: "页面变化",
+    provider_error: "来源异常",
+    invalid_response: "响应异常",
+    unavailable: "不可用",
+  } as const)[state];
+}
+
+function offerFingerprint(offer: Offer): string {
+  return offer.segments.map((segment) => [
+    segment.marketingCarrier,
+    segment.flightNumber,
+    segment.origin.code,
+    segment.destination.code,
+    segment.departureAt,
+  ].join("|"))
+    .join("::");
 }
 
 export default function Home() {
@@ -246,12 +293,24 @@ export default function Home() {
   const [parseResult, setParseResult] = useState<IntentParseResponse | null>(null);
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [sort, setSort] = useState<SortKey>("recommended");
+  const [airlineFilter, setAirlineFilter] = useState("all");
+  const [stopsFilter, setStopsFilter] = useState<StopsFilter>("all");
+  const [connectorMeta, setConnectorMeta] = useState<ConnectorMeta[]>([]);
   const [busy, setBusy] = useState<BusyState>("idle");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showCoverage, setShowCoverage] = useState(false);
   const [error, setError] = useState("");
   const coverageDialogRef = useRef<HTMLElement>(null);
   const coverageTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(`${apiBase()}/v1/meta/connectors`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("metadata unavailable")))
+      .then((payload: { connectors?: ConnectorMeta[] }) => setConnectorMeta(payload.connectors ?? []))
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     if (!showCoverage) return;
@@ -312,7 +371,12 @@ export default function Home() {
 
   const orderedOffers = useMemo(() => {
     if (!result) return [];
-    const offers = result.offers.filter((offer) => offer.comparable);
+    const offers = result.offers.filter((offer) =>
+      offer.comparable &&
+      (airlineFilter === "all" || offer.segments.some((segment) => segment.marketingCarrier === airlineFilter)) &&
+      (stopsFilter === "all" ||
+        (stopsFilter === "direct" ? offerStops(offer) === 0 : offerStops(offer) <= offer.legs.length)),
+    );
     const comparableFirst = (left: Offer, right: Offer) =>
       Number(right.comparable) - Number(left.comparable);
     if (effectiveSort === "price") {
@@ -358,7 +422,25 @@ export default function Home() {
       if (right.id === result.recommendedOfferId) return 1;
       return 0;
     });
-  }, [effectiveSort, result]);
+  }, [airlineFilter, effectiveSort, result, stopsFilter]);
+
+  const airlines = useMemo(() => {
+    if (!result) return [];
+    return [...new Set(result.offers.flatMap((offer) =>
+      offer.segments.map((segment) => segment.marketingCarrier),
+    ))].sort();
+  }, [result]);
+
+  const groupedOffers = useMemo(() => {
+    const groups = new Map<string, Offer[]>();
+    for (const offer of orderedOffers) {
+      const fingerprint = offerFingerprint(offer);
+      const group = groups.get(fingerprint) ?? [];
+      group.push(offer);
+      groups.set(fingerprint, group);
+    }
+    return [...groups.entries()].map(([fingerprint, offers]) => ({ fingerprint, offers }));
+  }, [orderedOffers]);
 
   function updateIntent(patch: Partial<SearchIntent>) {
     setIntent((current) => ({ ...current, ...patch }));
@@ -380,6 +462,8 @@ export default function Home() {
     setQuery(value);
     setParseResult(null);
     setResult(null);
+    setAirlineFilter("all");
+    setStopsFilter("all");
     setError("");
   }
 
@@ -450,7 +534,7 @@ export default function Home() {
   const excludedOfferCount =
     result?.offers.filter((offer) => !offer.comparable).length ?? 0;
   const usesSkyscanner = result?.offers.some(
-    (offer) => offer.connectorId === "skyscanner-live-prices",
+    (offer) => ["skyscanner-live-prices", "flightapi-skyscanner"].includes(offer.connectorId),
   ) ?? false;
   const sourceStatus = result
     ? resultSourceStatus(result.offers, result.connectorReports)
@@ -517,7 +601,7 @@ export default function Home() {
                     {intent.departureDate}
                     {intent.returnDate ? ` 至 ${intent.returnDate}` : ""}
                     {" · "}
-                    {intent.adults} 位成人
+                    {intent.adults} 位成人 · {cabinLabels[intent.cabin]}
                   </span>
                   <small>
                     {parseResult.parser.kind === "local_deterministic_zh"
@@ -564,7 +648,29 @@ export default function Home() {
                 <label>目的地 IATA<input value={intent.destination.code} maxLength={3} onChange={(event) => updateIntent({ destination: { ...intent.destination, code: event.target.value.toUpperCase() } })} /></label>
                 <label>出发日期<input type="date" value={intent.departureDate} onChange={(event) => updateIntent({ departureDate: event.target.value })} /></label>
                 <label>返程日期<input type="date" value={intent.returnDate ?? ""} onChange={(event) => updateIntent({ returnDate: event.target.value })} disabled={intent.tripType === "one_way"} /></label>
-                <label>旅客 / 舱位<span className="field-value">1 成人 · 经济舱</span></label>
+                <label>成人数
+                  <input
+                    type="number"
+                    min={1}
+                    max={9}
+                    value={intent.adults}
+                    onChange={(event) =>
+                      updateIntent({ adults: Math.min(9, Math.max(1, Number(event.target.value) || 1)) })
+                    }
+                  />
+                </label>
+                <label>舱位
+                  <select
+                    value={intent.cabin}
+                    onChange={(event) =>
+                      updateIntent({ cabin: event.target.value as SearchIntent["cabin"] })
+                    }
+                  >
+                    {Object.entries(cabinLabels).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </label>
                 <label>总预算（人民币）
                   <input
                     type="number"
@@ -646,8 +752,14 @@ export default function Home() {
           </div>
           {busy === "searching" && (
             <div className="search-progress" role="status" aria-live="polite">
-              <span className="spinner dark-spinner" />
-              已并行提交所有已配置来源；完成后将逐项披露成功、失败、超时、缓存与重试状态。
+              <div><span className="spinner dark-spinner" />已并行提交所有已配置来源</div>
+              {connectorMeta.length > 0 && (
+                <div className="searching-sources">
+                  {connectorMeta.map((connector) => (
+                    <span key={connector.id}>{connector.name}<b>检索中</b></span>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -665,7 +777,7 @@ export default function Home() {
             <div>
               <div className="eyebrow"><span /> 航班检索结果</div>
               <h2>{result?.intent.origin.code ?? intent.origin.code} → {result?.intent.destination.code ?? intent.destination.code}</h2>
-              <p>{result?.intent.departureDate ?? intent.departureDate} · {result?.intent.adults ?? intent.adults} 位成人 · 经济舱 · 统一 Offer 口径</p>
+              <p>{result?.intent.departureDate ?? intent.departureDate} · {result?.intent.adults ?? intent.adults} 位成人 · {cabinLabels[result?.intent.cabin ?? intent.cabin]} · 统一 Offer 口径</p>
             </div>
             {result && (
               <div className={`demo-badge ${sourceStatus?.productionStyle ? "production-badge" : ""}`}>
@@ -718,8 +830,23 @@ export default function Home() {
                       <button key={key} className={effectiveSort === key ? "selected" : ""} onClick={() => setSort(key)}>{label}</button>
                     ))}
                   </div>
+                  <div className="result-filters">
+                    <label>航司
+                      <select value={airlineFilter} onChange={(event) => setAirlineFilter(event.target.value)}>
+                        <option value="all">全部</option>
+                        {airlines.map((airline) => <option key={airline} value={airline}>{airline}</option>)}
+                      </select>
+                    </label>
+                    <label>中转
+                      <select value={stopsFilter} onChange={(event) => setStopsFilter(event.target.value as StopsFilter)}>
+                        <option value="all">全部</option>
+                        <option value="direct">仅直飞</option>
+                        <option value="one_or_less">最多一次</option>
+                      </select>
+                    </label>
+                  </div>
                   <span>
-                    共 {orderedOffers.length} 个可比报价
+                    共 {groupedOffers.length} 个航班 · {orderedOffers.length} 个平台报价
                     {excludedOfferCount > 0
                       ? ` · ${excludedOfferCount} 个不符合条件的报价已隐藏`
                       : ""}
@@ -743,16 +870,18 @@ export default function Home() {
                   </a>
                 )}
 
-                {orderedOffers.length === 0 ? (
+                {groupedOffers.length === 0 ? (
                   <div className="empty-state">
                     <b>来源已完成核验，但没有返回符合条件的报价</b>
                     <p>这与来源失败不同；你可以调整日期、直飞或行李条件后重试。</p>
                   </div>
                 ) : (
                   <div className="flight-list">
-                    {orderedOffers.map((offer) => {
-                      const isLowest = offer.id === result.lowestComparableOfferId;
-                      const isRecommended = offer.id === result.recommendedOfferId;
+                    {groupedOffers.map((group) => {
+                      const offer = group.offers[0]!;
+                      const groupIds = new Set(group.offers.map((candidate) => candidate.id));
+                      const isLowest = result.lowestComparableOfferId ? groupIds.has(result.lowestComparableOfferId) : false;
+                      const isRecommended = result.recommendedOfferId ? groupIds.has(result.recommendedOfferId) : false;
                       const distinctions = [
                         ...(isLowest ? [offer.seller.handoffPrecision === "search_results" ? "最低展示价" : "最低可核验全价"] : []),
                         ...(isRecommended ? ["平衡排序"] : []),
@@ -762,7 +891,7 @@ export default function Home() {
                         ...(offer.id === result.mostFlexibleOfferId ? ["最宽松退改"] : []),
                       ];
                       return (
-                        <article className="flight-card" key={offer.id}>
+                        <article className="flight-card" key={group.fingerprint}>
                           <div className="flight-tag">
                             {distinctions.length
                               ? distinctions.join(" · ")
@@ -786,7 +915,7 @@ export default function Home() {
                                       <span className="airline-logo">{first.marketingCarrier}</span>
                                       <div>
                                         <b>{first.marketingCarrier} {first.flightNumber}</b>
-                                        <small>{leg.stopCount ? `${leg.stopCount} 次中转` : "直飞"} · 经济舱</small>
+                                        <small>{leg.stopCount ? `${leg.stopCount} 次中转` : "直飞"} · {offer.fareBrand ?? cabinLabels[result.intent.cabin]}</small>
                                       </div>
                                     </div>
                                     <div className="time">
@@ -845,7 +974,7 @@ export default function Home() {
                                 rel="noopener noreferrer"
                               >
                                 {offer.seller.handoffPrecision === "search_results"
-                                  ? "去 Google Flights 重新选择 ↗"
+                                  ? `去 ${handoffSourceName(offer)} 重新选择 ↗`
                                   : `去 ${offer.seller.name} 核验 ↗`}
                               </a>
                             )}
@@ -853,6 +982,24 @@ export default function Home() {
                               {expanded === offer.id ? "收起价格构成" : "查看价格构成"} <span>⌄</span>
                             </button>
                           </div>
+                          {group.offers.length > 1 && (
+                            <div className="platform-quotes" aria-label="同航班平台报价">
+                              {group.offers
+                                .slice()
+                                .sort((left, right) =>
+                                  (left.totalPriceCny ?? left.totalPrice).amountMinor -
+                                  (right.totalPriceCny ?? right.totalPrice).amountMinor,
+                                )
+                                .map((quote) => (
+                                  <div key={quote.id}>
+                                    <span>{quote.seller.name}</span>
+                                    <b>{money(quote)}</b>
+                                    <small>{offerPriceLabel(quote)}</small>
+                                    {quote.seller.deepLink && <a href={quote.seller.deepLink} target="_blank" rel="noopener noreferrer">核验 ↗</a>}
+                                  </div>
+                                ))}
+                            </div>
+                          )}
                           {expanded === offer.id && (
                             <div className="price-breakdown">
                               <div className="segment-details">
@@ -884,7 +1031,7 @@ export default function Home() {
                               <span>来源记录总价<b>{money(offer)}</b></span>
                               {offer.seller.handoffPrecision === "search_results" && (
                                 <p className="handoff-warning">
-                                  此链接返回带本次条件的 Google Flights 结果页，不是该售卖方的精确报价落点；请重新选择相同行程并核验最终价格。
+                                  此链接返回带本次条件的 {handoffSourceName(offer)} 结果页，不是该售卖方的精确报价落点；请重新选择相同行程并核验最终价格。
                                 </p>
                               )}
                               <p>请在来源平台再次核验库存和最终支付页。航探不售票、不代收款。</p>
@@ -911,7 +1058,7 @@ export default function Home() {
                           <small key={note}>{reportNote(note)}</small>
                         ))}
                       </span>
-                      <strong className={`source-state state-${report.state}`}>{report.state}</strong>
+                      <strong className={`source-state state-${report.state}`}>{connectorStateLabel(report.state)}</strong>
                     </li>
                   ))}
                 </ul>
@@ -952,8 +1099,8 @@ export default function Home() {
             <p id="coverage-description">来源只有在合法配置、实际响应、字段完整并通过价格校验后，才计入本次检索覆盖。超时和失败会单独披露。</p>
             <div className="source-table">
               <div><b>SerpApi</b><span>Google Flights 与实际售卖方报价；跳转精度单独披露</span><em>首个生产查询已验证</em></div>
-              <div><b>Skyscanner</b><span>航司 / OTA Live Prices 与 deeplink</span><em>合作申请已提交</em></div>
-              <div><b>Amadeus / Duffel</b><span>发现与交叉核验，不直接形成购买推荐</span><em>无购买落点</em></div>
+              <div><b>FlightAPI / Skyscanner</b><span>航司 / OTA 当前价格与跳转；同属一个库存族</span><em>本地实验待复核授权</em></div>
+              <div><b>PKFARE / Duffel</b><span>中国航信、GDS、航司直连等发现与交叉核验</span><em>等待生产权限</em></div>
               <div><b>航司 / OTA</b><span>按开放平台与商务授权逐步接入</span><em>禁止未授权绕过</em></div>
               <div><b>Mock 数据</b><span>只用于自动测试</span><em>生产强制禁用</em></div>
             </div>

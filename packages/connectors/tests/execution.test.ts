@@ -5,12 +5,17 @@ import {
   AmadeusConnector,
   amadeusEnvironment,
   clearConnectorExecutionCache,
+  createConnectorRegistry,
   ConnectorError,
   DuffelConnector,
   duffelEnvironment,
   executeConnector,
+  FlightApiConnector,
+  mapCtripBatchSearchPayload,
+  mapFlyAiFlightPayload,
   mapAmadeusOffer,
   mapDuffelOffer,
+  mapFlightApiSearchPayload,
   mapSerpApiBookingPayload,
   mapSerpApiSearchChoices,
   mapSkyscannerSearchResults,
@@ -79,6 +84,171 @@ const duffelOffer = {
     }],
   }],
 };
+
+const flightApiPayload = {
+  itineraries: [{
+    id: "itinerary-1",
+    leg_ids: ["leg-1"],
+    pricing_options: [{
+      id: "price-1",
+      price: { amount: 1234.56, update_status: "current" },
+      transfer_type: "MANAGED",
+      items: [{
+        agent_id: "trip",
+        url: "/transport_deeplink/4.0/CN/zh-CN/CNY/trip/1/flight",
+      }],
+    }],
+  }],
+  legs: [{
+    id: "leg-1",
+    segment_ids: ["segment-1"],
+    duration: 180,
+    stop_count: 0,
+  }],
+  segments: [{
+    id: "segment-1",
+    origin_place_id: 1,
+    destination_place_id: 2,
+    departure: "2026-08-24T09:00:00",
+    arrival: "2026-08-24T13:00:00",
+    duration: 180,
+    marketing_flight_number: "523",
+    marketing_carrier_id: -1,
+    operating_carrier_id: -1,
+  }],
+  places: [
+    { id: 1, iata: "PVG", name: "Shanghai Pudong" },
+    { id: 2, iata: "NRT", name: "Tokyo Narita" },
+  ],
+  carriers: [{ id: -1, iata: "MU", name: "China Eastern" }],
+  agents: [{ id: "trip", name: "Trip.com", type: "ota" }],
+};
+
+test("maps FlightAPI prices with an explicit Skyscanner-derived handoff", () => {
+  const offers = mapFlightApiSearchPayload(flightApiPayload, intent, "request-flightapi");
+
+  assert.equal(offers.length, 1);
+  assert.equal(offers[0]?.connectorId, "flightapi-skyscanner");
+  assert.equal(offers[0]?.totalPrice.amountMinor, 123_456);
+  assert.equal(offers[0]?.seller.name, "Trip.com");
+  assert.equal(
+    offers[0]?.seller.deepLink,
+    "https://www.skyscanner.com/transport_deeplink/4.0/CN/zh-CN/CNY/trip/1/flight",
+  );
+  assert.deepEqual(offers[0]?.eligibility, ["SKYSCANNER_DERIVED_SOURCE"]);
+  assert.equal(offers[0]?.comparable, true);
+});
+
+test("maps FlyAI flight items into a real Fliggy handoff with adult total price", () => {
+  const offers = mapFlyAiFlightPayload({
+    status: 0,
+    data: {
+      itemList: [{
+        adultPrice: "¥400.0",
+        jumpUrl: "https://market.m.taobao.com/app/trip/flight/index.html",
+        journeys: [{
+          totalDuration: "140分钟",
+          segments: [{
+            depStationCode: "PEK",
+            depStationName: "北京首都",
+            depDateTime: "2026-09-10 08:00:00",
+            arrStationCode: "SHA",
+            arrStationName: "上海虹桥",
+            arrDateTime: "2026-09-10 10:20:00",
+            duration: "140分钟",
+            marketingTransportNo: "CA1883",
+            seatClassName: "经济舱",
+          }],
+        }],
+      }],
+    },
+  }, { ...intent, origin: { kind: "airport", code: "PEK" }, destination: { kind: "airport", code: "SHA" }, adults: 2 }, "flyai-request");
+
+  assert.equal(offers.length, 1);
+  assert.equal(offers[0]?.seller.name, "飞猪");
+  assert.equal(offers[0]?.totalPrice.amountMinor, 80_000);
+  assert.equal(offers[0]?.priceVerificationStatus, "listed_only");
+  assert.equal(offers[0]?.segments[0]?.flightNumber, "1883");
+});
+
+test("maps Ctrip batchSearch base fare and tax as provider-verified adult total", () => {
+  const offers = mapCtripBatchSearchPayload({
+    data: {
+      context: { searchId: "ctrip-search" },
+      flightItineraryList: [{
+        itineraryId: "itinerary-ctrip",
+        priceList: [{ adultPrice: 520, adultTax: 50 }],
+        flightSegments: [{
+          flightList: [{
+            flightNo: "MU5101",
+            marketAirlineCode: "MU",
+            departureAirportCode: "SHA",
+            arrivalAirportCode: "PEK",
+            departureDateTime: "2026-09-10 08:30:00",
+            arrivalDateTime: "2026-09-10 10:50:00",
+            duration: "140分钟",
+          }],
+        }],
+      }],
+    },
+  }, { ...intent, origin: { kind: "airport", code: "SHA" }, destination: { kind: "airport", code: "PEK" }, adults: 2 }, "ctrip-request", "https://flights.ctrip.com/online/list/oneway-sha-pek");
+
+  assert.equal(offers.length, 1);
+  assert.equal(offers[0]?.totalPrice.amountMinor, 114_000);
+  assert.equal(offers[0]?.priceVerificationStatus, "provider_response_verified");
+  assert.match(offers[0]?.evidenceRef ?? "", /batchSearch:ctrip-search/);
+});
+
+test("registers the four V1 domestic real-source connectors without credentials in code", () => {
+  const registry = createConnectorRegistry({
+    flyAiEnabled: true,
+    browserOtaEnabled: true,
+    browserExecutablePath: "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+  });
+  assert.deepEqual(
+    registry.map((connector) => connector.metadata.id),
+    ["fliggy-flyai", "ctrip-browser", "qunar-browser", "tongcheng-browser"],
+  );
+});
+
+test("bounds FlightAPI calls per process and never probes credits in health", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const requestedUrls: URL[] = [];
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (input) => {
+    requestedUrls.push(new URL(input instanceof URL ? input.href : String(input)));
+    return new Response(JSON.stringify(flightApiPayload), { status: 200 });
+  };
+
+  const connector = new FlightApiConnector({
+    apiKey: "secret-key",
+    baseUrl: "https://api.flightapi.io",
+    maxSearchesPerProcess: 1,
+  });
+  const health = await connector.health(new AbortController().signal);
+  assert.equal(health.state, "degraded");
+  assert.equal(requestedUrls.length, 0);
+
+  const result = await connector.search(intent, {
+    requestId: "request-flightapi",
+    signal: new AbortController().signal,
+  });
+  assert.equal(result.offers.length, 1);
+  assert.equal(
+    requestedUrls[0]?.pathname,
+    "/onewaytrip/secret-key/PVG/NRT/2026-08-24/1/0/0/Economy/CNY",
+  );
+  await assert.rejects(
+    () => connector.search(intent, {
+      requestId: "request-flightapi-2",
+      signal: new AbortController().signal,
+    }),
+    (error: unknown) =>
+      error instanceof ConnectorError && error.code === "FLIGHTAPI_PROCESS_CAP_REACHED",
+  );
+});
 
 test("marks only explicit Amadeus and Duffel live credentials as production", () => {
   assert.equal(amadeusEnvironment("https://api.amadeus.com"), "production");
@@ -242,6 +412,36 @@ test("classifies an empty successful source distinctly from failure", async () =
     execution.report.notes.includes("NEARBY_ORIGIN_PROVIDER_EXPANSION:PVG"),
     true,
   );
+});
+
+test("enforces a hard deadline when a connector ignores its abort signal", async () => {
+  const slowConnector: FlightConnector = {
+    metadata: {
+      id: "ignores-abort",
+      name: "Ignores abort",
+      kind: "aggregator",
+      environment: "production",
+      authorization: "partner_api",
+      resultRole: "verification",
+      handoff: "none",
+      configured: true,
+    },
+    health: async () => ({ state: "healthy", checkedAt: new Date().toISOString() }),
+    search: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      return { offers: [] };
+    },
+  };
+  const startedAt = Date.now();
+  const execution = await executeConnector(slowConnector, intent, "hard-timeout", 15, {
+    maxRetries: 0,
+    cacheTtlMs: 0,
+    staleIfErrorMs: 0,
+  });
+
+  assert.equal(execution.report.state, "timeout");
+  assert.equal(execution.report.errorCode, "CONNECTOR_TIMEOUT");
+  assert.ok(Date.now() - startedAt < 100);
 });
 
 test("runs a disclosed three-point probe for a limited flexible-date search", async () => {

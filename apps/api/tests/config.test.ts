@@ -7,6 +7,7 @@ test("treats blank optional credentials as unconfigured", () => {
     NODE_ENV: "test",
     DATABASE_URL: "",
     OPENAI_API_KEY: "   ",
+    FLIGHTAPI_API_KEY: " ",
     SKYSCANNER_API_KEY: "",
     SERPAPI_API_KEY: "configured",
   });
@@ -14,6 +15,8 @@ test("treats blank optional credentials as unconfigured", () => {
   assert.equal(config.databaseUrl, undefined);
   assert.equal(config.openaiIntentParserEnabled, false);
   assert.equal(config.openaiApiKey, undefined);
+  assert.equal(config.connectors.flightApiKey, undefined);
+  assert.equal(config.connectors.flightApiMaxSearchesPerProcess, 10);
   assert.equal(config.connectors.skyscannerApiKey, undefined);
   assert.equal(config.connectors.serpApiKey, "configured");
   assert.equal(config.connectors.serpApiMonthlyCreditCap, 200);
@@ -71,4 +74,14 @@ test("supports a bounded SerpApi monthly free-credit budget", () => {
     }).connectors.serpApiMonthlyCreditCap,
     100,
   );
+});
+
+test("supports a bounded FlightAPI local experiment budget", () => {
+  const connectors = loadConfig({
+    NODE_ENV: "test",
+    FLIGHTAPI_API_KEY: "configured",
+    FLIGHTAPI_MAX_SEARCHES_PER_PROCESS: "3",
+  }).connectors;
+  assert.equal(connectors.flightApiKey, "configured");
+  assert.equal(connectors.flightApiMaxSearchesPerProcess, 3);
 });
