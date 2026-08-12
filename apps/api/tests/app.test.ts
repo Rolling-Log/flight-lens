@@ -422,6 +422,51 @@ test("returns adversarially blocked offers as non-comparable", async () => {
   await app.close();
 });
 
+test("returns separate verifiable-all-in, recommendation, and split-ticket conclusions", async () => {
+  const connector: FlightConnector = {
+    metadata: {
+      id: "separate-conclusions",
+      name: "Separate conclusions",
+      kind: "aggregator",
+      environment: "production",
+      authorization: "self_service_api",
+      resultRole: "purchase_handoff",
+      handoff: "deep_link",
+      configured: true,
+    },
+    health: async () => ({ state: "healthy", checkedAt: new Date().toISOString() }),
+    search: async () => ({
+      offers: [
+        comparableOffer({ id: "all-in", sourceOfferId: "all-in" }),
+        comparableOffer({
+          id: "split",
+          sourceOfferId: "split",
+          purchaseMode: "split_ticket",
+          comparable: false,
+          incomparabilityReasons: ["SPLIT_TICKET_SEPARATE_PURCHASES"],
+          totalPrice: { amountMinor: 100000, currency: "CNY" },
+          totalPriceCny: { amountMinor: 100000, currency: "CNY" },
+          priceComponents: [{
+            kind: "required_service",
+            label: "Split displayed total",
+            amountMinor: 100000,
+            currency: "CNY",
+            required: true,
+          }],
+        }),
+      ],
+    }),
+  };
+  const app = await buildApp({ config, connectors: [connector], auditStore: null, now: fixedNow });
+  const response = await app.inject({ method: "POST", url: "/v1/searches", payload: validIntent });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().lowestComparableOfferId, "all-in");
+  assert.equal(response.json().recommendedOfferId, "all-in");
+  assert.equal(response.json().lowestSplitOfferId, "split");
+  await app.close();
+});
+
 test("returns search results when audit persistence exceeds its runtime budget", async () => {
   const connector: FlightConnector = {
     metadata: {

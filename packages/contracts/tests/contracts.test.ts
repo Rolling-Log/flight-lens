@@ -123,6 +123,19 @@ test("rejects an inverted time window and inconsistent direct-only stops", () =>
   assert.equal(result.success, false);
 });
 
+test("accepts a custom overnight red-eye window", () => {
+  const parsed = searchIntentSchema.parse({
+    schemaVersion: "1",
+    tripType: "one_way",
+    origin: { kind: "airport", code: "PVG" },
+    destination: { kind: "airport", code: "NRT" },
+    departureDate: "2026-08-24",
+    avoidRedEye: true,
+    redEyeWindow: { start: "22:00", end: "06:00" },
+  });
+  assert.deepEqual(parsed.redEyeWindow, { start: "22:00", end: "06:00" });
+});
+
 test("normalizes and timestamps exchange-rate evidence", () => {
   const rate = exchangeRateSchema.parse({
     baseCurrency: "usd",

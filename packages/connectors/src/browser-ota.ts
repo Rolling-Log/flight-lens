@@ -383,7 +383,6 @@ function filterReasons(
     ...(intent.departureTime?.latest && time > intent.departureTime.latest
       ? ["DEPARTURE_TIME_CONFLICT"]
       : []),
-    ...(intent.avoidRedEye && Number(time.slice(0, 2)) < 6 ? ["RED_EYE_CONFLICT"] : []),
     ...(intent.minimumCheckedBaggageKg > 0 ? ["CHECKED_BAGGAGE_UNVERIFIED"] : []),
   ];
 }
@@ -416,8 +415,8 @@ export function mapCtripBatchSearchPayload(
     const itinerary = object(rawItinerary);
     const price = object(array(itinerary?.priceList)[0]);
     const adultBase = number(price?.adultPrice);
-    const adultTax = number(price?.adultTax) ?? 0;
-    if (adultBase === undefined || adultBase < 0 || adultTax < 0) return [];
+    const adultTax = number(price?.adultTax);
+    if (adultBase === undefined || adultBase < 0 || (adultTax !== undefined && adultTax < 0)) return [];
 
     const flightSegments = array(itinerary?.flightSegments);
     const segments: Offer["segments"] = [];
@@ -482,7 +481,8 @@ export function mapCtripBatchSearchPayload(
     if (legs.length === 0 || segments.length === 0) return [];
 
     const baseMinor = Math.round(adultBase * 100) * intent.adults;
-    const taxMinor = Math.round(adultTax * 100) * intent.adults;
+    const taxMinor = Math.round((adultTax ?? 0) * 100) * intent.adults;
+    const hasTaxBreakdown = adultTax !== undefined;
     const totalMinor = baseMinor + taxMinor;
     if (!Number.isSafeInteger(totalMinor) || totalMinor <= 0) return [];
     const reasons = filterReasons(
@@ -491,6 +491,7 @@ export function mapCtripBatchSearchPayload(
       Math.max(...legs.map((leg) => leg.stopCount)),
       JSON.stringify(rawItinerary),
     );
+    if (!hasTaxBreakdown) reasons.push("PRICE_TAX_UNVERIFIED");
     const sourceOfferId = string(itinerary?.itineraryId) ?? segments
       .map((segment) => `${segment.marketingCarrier}${segment.flightNumber}-${segment.departureAt}`)
       .join("|");
@@ -511,27 +512,37 @@ export function mapCtripBatchSearchPayload(
       },
       legs,
       segments,
-      priceComponents: [
-        {
-          kind: "base" as const,
-          label: intent.adults === 1 ? "成人票价" : `成人票价 × ${intent.adults}`,
-          amountMinor: baseMinor,
-          currency: "CNY",
-          required: true,
-        },
-        {
-          kind: "tax" as const,
-          label: intent.adults === 1 ? "税费" : `税费 × ${intent.adults}`,
-          amountMinor: taxMinor,
-          currency: "CNY",
-          required: true,
-        },
-      ],
+      priceComponents: hasTaxBreakdown
+        ? [
+            {
+              kind: "base" as const,
+              label: intent.adults === 1 ? "成人票面价" : `成人票面价 × ${intent.adults}`,
+              amountMinor: baseMinor,
+              currency: "CNY" as const,
+              required: true,
+            },
+            {
+              kind: "tax" as const,
+              label: intent.adults === 1 ? "税费（来源合并项）" : `税费（来源合并项）× ${intent.adults}`,
+              amountMinor: taxMinor,
+              currency: "CNY" as const,
+              required: true,
+            },
+          ]
+        : [{
+            kind: "required_service" as const,
+            label: intent.adults === 1 ? "来源展示价（税费待核验）" : `来源展示价 × ${intent.adults}（税费待核验）`,
+            amountMinor: baseMinor,
+            currency: "CNY" as const,
+            required: true,
+          }],
       totalPrice: { amountMinor: totalMinor, currency: "CNY" },
       totalPriceCny: { amountMinor: totalMinor, currency: "CNY" },
       listedPrice: { amountMinor: totalMinor, currency: "CNY" },
-      priceVerificationStatus: "provider_response_verified" as const,
-      priceVerifiedAt: fetchedAt,
+      priceVerificationStatus: hasTaxBreakdown
+        ? "provider_response_verified" as const
+        : "listed_only" as const,
+      ...(hasTaxBreakdown ? { priceVerifiedAt: fetchedAt } : {}),
       baggage: [],
       refundable: null,
       changeable: null,
@@ -584,8 +595,10 @@ export function mapDomCards(
     const stops = /中转|转机|转\d+次/.test(card.cardText) ? 1 : 0;
     const origin = airportRefFromText(card.departureAirport, intent.origin);
     const destination = airportRefFromText(card.arrivalAirport, intent.destination);
+    const providerResponseVerified = card.evidenceKind === "structured_response";
     const reasons = [
       ...filterReasons(intent, departureAt, stops, card.cardText),
+      ...(providerResponseVerified ? [] : ["PRICE_TAX_UNVERIFIED"]),
       ...(intent.origin.kind === "airport" && origin.code !== intent.origin.code
         ? ["ORIGIN_AIRPORT_CONFLICT"]
         : []),
@@ -593,7 +606,6 @@ export function mapDomCards(
         ? ["DESTINATION_AIRPORT_CONFLICT"]
         : []),
     ];
-    const providerResponseVerified = card.evidenceKind === "structured_response";
     return [{
       schemaVersion: "1" as const,
       id: `${platform}:${requestId}:${index}`,
@@ -658,7 +670,7 @@ export function mapDomCards(
         : [],
       fetchedAt,
       evidenceRef: bookingUrl,
-      comparable: reasons.length === 0,
+      comparable: providerResponseVerified && reasons.length === 0,
       incomparabilityReasons: reasons,
       qualityScore: providerResponseVerified
         ? (reasons.length === 0 ? 88 : 61)

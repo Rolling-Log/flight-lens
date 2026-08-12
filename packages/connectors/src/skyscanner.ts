@@ -394,7 +394,6 @@ export function mapSkyscannerSearchResults(
         ...(timeInsideWindow(resolved.firstDepartureAt, intent)
           ? []
           : ["DEPARTURE_TIME_CONFLICT"]),
-        ...(intent.avoidRedEye && resolved.redEyeDeparture ? ["RED_EYE_CONFLICT"] : []),
         ...(tooManyStops ? ["MAX_STOPS_CONFLICT"] : []),
         ...(selfTransfer ? ["SELF_TRANSFER"] : []),
         ...(intent.flexibleDays === 0 ? [] : ["FLEXIBLE_DATE_RANGE_NOT_EXPANDED"]),

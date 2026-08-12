@@ -3,6 +3,12 @@
 This unpacked MV3 extension runs domestic OTA page collection in the user's own Edge session.
 It communicates only with the local Flight Lens pages on ports `3000` and `3100`.
 
+The web app owns search intent, normalization, price comparison, recommendations, disclosures,
+and purchase handoff. Edge Companion is not a standalone metasearch product: it only collects
+source-page evidence in the user's existing Edge session and returns it to the local web app.
+It does not buy tickets, submit payment, bypass login or verification, or claim a displayed fare
+is the final tax-inclusive price when the source does not provide a complete price breakdown.
+
 ## Local install
 
 1. Open `edge://extensions`.

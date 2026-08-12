@@ -17,6 +17,11 @@ export const timeWindowSchema = z.object({
   latest: z.string().regex(/^\d{2}:\d{2}$/).optional(),
 });
 
+export const redEyeWindowSchema = z.object({
+  start: z.string().regex(/^\d{2}:\d{2}$/),
+  end: z.string().regex(/^\d{2}:\d{2}$/),
+});
+
 export const inferredFieldSchema = z.object({
   path: z.string().min(1),
   value: z.unknown(),
@@ -53,6 +58,7 @@ export const searchIntentSchema = z
     directOnly: z.boolean().default(false),
     maxStops: z.number().int().min(0).max(2).default(1),
     avoidRedEye: z.boolean().default(false),
+    redEyeWindow: redEyeWindowSchema.optional(),
     minimumCheckedBaggageKg: z.number().int().min(0).max(46).default(0),
     includeNearbyAirports: z.boolean().default(false),
     explicitFields: z.array(z.string()).default([]),
@@ -97,6 +103,13 @@ export const searchIntentSchema = z
         code: "custom",
         path: ["departureTime"],
         message: "Departure time window must be chronological.",
+      });
+    }
+    if (value.redEyeWindow && value.redEyeWindow.start === value.redEyeWindow.end) {
+      context.addIssue({
+        code: "custom",
+        path: ["redEyeWindow"],
+        message: "红眼时段起止时间不能相同。",
       });
     }
     if (value.directOnly && value.maxStops !== 0) {
@@ -180,6 +193,8 @@ export const searchIntentDraftSchema = z.object({
   directOnly: z.boolean(),
   maxStops: z.number().int().min(0).max(2),
   avoidRedEye: z.boolean(),
+  redEyeStart: z.string().regex(/^\d{2}:\d{2}$/).nullable().default(null),
+  redEyeEnd: z.string().regex(/^\d{2}:\d{2}$/).nullable().default(null),
   minimumCheckedBaggageKg: z.number().int().min(0).max(46),
   includeNearbyAirports: z.boolean(),
   assumptions: z.array(z.string()),
@@ -342,6 +357,7 @@ export const searchResponseSchema = z.object({
   offers: z.array(offerSchema),
   connectorReports: z.array(connectorReportSchema),
   lowestComparableOfferId: z.string().nullable(),
+  lowestSplitOfferId: z.string().nullable(),
   recommendedOfferId: z.string().nullable(),
   shortestOfferId: z.string().nullable(),
   fewestStopsOfferId: z.string().nullable(),

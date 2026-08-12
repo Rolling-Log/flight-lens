@@ -31,6 +31,26 @@ test("initial, result, and coverage dialog states have no blocking accessibility
   await expect(coverageTrigger).toBeFocused();
 });
 
+test("precise filters expose baggage allowance and custom red-eye controls", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("tab", { name: "精确筛选" }).click();
+  await expect(page.getByLabel("最低托运行李额度")).toHaveValue("0");
+  await page.getByLabel("最低托运行李额度").selectOption("30");
+  await expect(page.getByLabel("最低托运行李额度")).toHaveValue("30");
+  await expect(page.getByLabel("红眼开始时间")).toHaveValue("00:00");
+  await expect(page.getByLabel("最早起飞")).toBeVisible();
+  await page.getByLabel("最早起飞").fill("08:00");
+  await expect(page.getByLabel("最早起飞")).toHaveValue("08:00");
+  await page.getByLabel("红眼开始时间").fill("23:00");
+  await page.getByLabel("红眼结束时间").fill("07:00");
+
+  const request = page.waitForRequest((item) => item.method() === "POST" && item.url().endsWith("/v1/searches"));
+  await page.getByRole("button", { name: "开始检索" }).click();
+  const body = (await request).postDataJSON();
+  expect(body.minimumCheckedBaggageKg).toBe(30);
+  expect(body.redEyeWindow).toEqual({ start: "23:00", end: "07:00" });
+});
+
 test("agent input becomes an editable search and exposes source limits", async ({
   page,
 }) => {
@@ -63,15 +83,23 @@ test("agent input becomes an editable search and exposes source limits", async (
   await expect(page.getByText("超预算示例", { exact: true })).toHaveCount(0);
 
   for (const label of [
-    "最低全价",
-    "平衡排序",
+    "价格",
+    "综合推荐",
     "最短耗时",
     "最少中转",
     "最佳行李",
   ]) {
-    await expect(page.getByRole("button", { name: label })).toBeVisible();
+    await expect(page.getByRole("button", { name: label, exact: true })).toBeVisible();
   }
   await expect(page.getByRole("button", { name: "最宽松退改" })).toHaveCount(0);
+  await expect(page.getByText("最低可核验全价", { exact: true })).toBeVisible();
+  await expect(page.getByText("最低分开购买价", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "价格", exact: true }).click();
+  await expect(page.getByRole("button", { name: "切换为价格从高到低" })).toBeVisible();
+  await expect(page.locator("article").first()).toContainText("示例航旅");
+  await page.getByRole("button", { name: "切换为价格从高到低" }).click();
+  await expect(page.getByRole("button", { name: "切换为价格从低到高" })).toBeVisible();
+  await expect(page.locator("article").first()).toContainText("示例航空");
 
   const recommended = page
     .locator("article")

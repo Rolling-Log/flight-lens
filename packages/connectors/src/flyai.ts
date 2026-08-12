@@ -198,10 +198,9 @@ function mapFlyAiItem(
     ...(intent.directOnly && maximumStops > 0 ? ["MAX_STOPS_CONFLICT"] : []),
     ...(!intent.directOnly && maximumStops > intent.maxStops ? ["MAX_STOPS_CONFLICT"] : []),
     ...(timeInsideWindow(firstDeparture, intent) ? [] : ["DEPARTURE_TIME_CONFLICT"]),
-    ...(intent.avoidRedEye && Number(firstDeparture.slice(11, 13)) < 6
-      ? ["RED_EYE_CONFLICT"]
-      : []),
     ...(intent.minimumCheckedBaggageKg > 0 ? ["CHECKED_BAGGAGE_UNVERIFIED"] : []),
+    "PRICE_TAX_UNVERIFIED",
+    "SELLER_LIST_INCOMPLETE",
   ];
   const sourceOfferId = segments
     .map((segment) => `${segment.marketingCarrier}${segment.flightNumber}-${segment.departureAt}`)
@@ -225,7 +224,7 @@ function mapFlyAiItem(
     segments,
     priceComponents: [{
       kind: "required_service",
-      label: intent.adults === 1 ? "飞猪成人展示价" : `飞猪成人展示价 × ${intent.adults}`,
+      label: intent.adults === 1 ? "FlyAI 返回的飞猪来源展示价（税费待核验）" : `FlyAI 返回的飞猪来源展示价 × ${intent.adults}（税费待核验）`,
       amountMinor: totalMinor,
       currency: "CNY",
       required: true,
@@ -247,9 +246,9 @@ function mapFlyAiItem(
     eligibility: conditionalPrice ? ["CONDITIONAL_PRICE"] : [],
     fetchedAt,
     evidenceRef: jumpUrl,
-    comparable: reasons.length === 0,
+    comparable: false,
     incomparabilityReasons: reasons,
-    qualityScore: reasons.length === 0 ? 82 : 58,
+    qualityScore: 58,
   };
 }
 

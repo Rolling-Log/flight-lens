@@ -111,7 +111,7 @@ export function deduplicateOffers(offers: readonly Offer[]): Offer[] {
       .normalize("NFKC")
       .toLocaleLowerCase("en-US")
       .replace(/[\s\p{P}\p{S}]+/gu, "")}`;
-    const key = `${offerFingerprint(offer)}::${sellerIdentity}`;
+    const key = `${offerFingerprint(offer)}::${sellerIdentity}::${offer.purchaseMode ?? "single_ticket"}`;
     const current = byFingerprintAndSeller.get(key);
     const offerPrice = offer.totalPriceCny?.amountMinor ?? offer.totalPrice.amountMinor;
     const currentPrice =
@@ -145,10 +145,12 @@ function hasRequiredCheckedBaggage(offer: Offer, minimumKg: number): boolean {
   );
 }
 
-function isRedEye(value: string | undefined): boolean {
+function isRedEye(value: string | undefined, window = { start: "00:00", end: "06:00" }): boolean {
   if (!value) return false;
-  const hour = Number(value.slice(0, 2));
-  return Number.isInteger(hour) && hour >= 0 && hour < 6;
+  const time = value.slice(0, 5);
+  return window.start < window.end
+    ? time >= window.start && time < window.end
+    : time >= window.start || time < window.end;
 }
 
 export function applyIntentConstraints(
@@ -194,7 +196,7 @@ export function applyIntentConstraints(
       inbound.destination.code !== intent.origin.code
         ? ["RETURN_DESTINATION_AIRPORT_CONFLICT"]
         : []),
-      ...(intent.avoidRedEye && isRedEye(departureTime) ? ["RED_EYE_CONFLICT"] : []),
+      ...(intent.avoidRedEye && isRedEye(departureTime, intent.redEyeWindow) ? ["RED_EYE_CONFLICT"] : []),
       ...(hasRequiredCheckedBaggage(offer, intent.minimumCheckedBaggageKg)
         ? []
         : ["CHECKED_BAGGAGE_REQUIREMENT_UNVERIFIED"]),
@@ -211,6 +213,17 @@ export function applyIntentConstraints(
 export function rankByLowestComparablePrice(offers: readonly Offer[]): Offer[] {
   return offers
     .filter((offer) => offer.comparable)
+    .sort((left, right) => {
+      const leftPrice = left.totalPriceCny?.amountMinor ?? left.totalPrice.amountMinor;
+      const rightPrice = right.totalPriceCny?.amountMinor ?? right.totalPrice.amountMinor;
+      return leftPrice - rightPrice || right.qualityScore - left.qualityScore;
+    });
+}
+
+/** Split tickets are intentionally ranked separately from verifiable single-ticket totals. */
+export function rankByLowestSplitPrice(offers: readonly Offer[]): Offer[] {
+  return offers
+    .filter((offer) => offer.purchaseMode === "split_ticket")
     .sort((left, right) => {
       const leftPrice = left.totalPriceCny?.amountMinor ?? left.totalPrice.amountMinor;
       const rightPrice = right.totalPriceCny?.amountMinor ?? right.totalPrice.amountMinor;
@@ -333,6 +346,14 @@ export function reviewOffers(
         code: "DEMO_OFFER",
         severity: "blocking",
         message: "演示报价不能进入实时最低价结论。",
+        offerId: offer.id,
+      });
+    }
+    if (offer.priceVerificationStatus === "listed_only") {
+      findings.push({
+        code: "PRICE_TAX_UNVERIFIED",
+        severity: "blocking",
+        message: "当前只有来源展示价，票面价与税费/机建燃油未完整核验，不能称为含税全价。",
         offerId: offer.id,
       });
     }

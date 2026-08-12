@@ -75,6 +75,7 @@ function initialIntent(): SearchIntent {
     directOnly: false,
     maxStops: 1,
     avoidRedEye: true,
+    redEyeWindow: { start: "00:00", end: "06:00" },
     minimumCheckedBaggageKg: 0,
     includeNearbyAirports: false,
     explicitFields: [],
@@ -134,6 +135,9 @@ function intentFromDraft(
     directOnly: draft.directOnly,
     maxStops: draft.maxStops,
     avoidRedEye: draft.avoidRedEye,
+    ...(draft.redEyeStart && draft.redEyeEnd
+      ? { redEyeWindow: { start: draft.redEyeStart, end: draft.redEyeEnd } }
+      : {}),
     minimumCheckedBaggageKg: draft.minimumCheckedBaggageKg,
     includeNearbyAirports: draft.includeNearbyAirports,
     explicitFields: [],
@@ -197,6 +201,27 @@ function offerPriceLabel(offer: Offer): string {
   if (offer.priceVerificationStatus === "provider_response_verified") return "来源接口核验价";
   if (offer.priceVerificationStatus === "listed_only") return "抓取时来源展示价";
   return "核验状态未确认";
+}
+
+function priceSortValue(offer: Offer): number {
+  return (offer.totalPriceCny ?? offer.totalPrice).amountMinor;
+}
+
+function compareEqualDisplayedPrice(left: Offer, right: Offer): number {
+  const verificationRank = (offer: Offer) => ({
+    detail_verified: 3,
+    provider_response_verified: 2,
+    listed_only: 1,
+    unverified: 0,
+  })[offer.priceVerificationStatus ?? "unverified"];
+  const handoffRank = (offer: Offer) =>
+    Number(offer.seller.handoffPrecision === "exact_offer") * 2 +
+    Number(Boolean(offer.seller.deepLink));
+  return Number(right.comparable) - Number(left.comparable) ||
+    verificationRank(right) - verificationRank(left) ||
+    handoffRank(right) - handoffRank(left) ||
+    offerJourneyMinutes(left) - offerJourneyMinutes(right) ||
+    offerStops(left) - offerStops(right);
 }
 
 function handoffSourceName(offer: Offer): string {
@@ -317,7 +342,11 @@ export default function Home() {
   const [parseResult, setParseResult] = useState<IntentParseResponse | null>(null);
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [sort, setSort] = useState<SortKey>("recommended");
+  const [priceDirection, setPriceDirection] = useState<"asc" | "desc">("asc");
   const [airlineFilter, setAirlineFilter] = useState("all");
+  const [aircraftFilter, setAircraftFilter] = useState("all");
+  const [departureAirportFilter, setDepartureAirportFilter] = useState("all");
+  const [arrivalAirportFilter, setArrivalAirportFilter] = useState("all");
   const [stopsFilter, setStopsFilter] = useState<StopsFilter>("all");
   const [connectorMeta, setConnectorMeta] = useState<ConnectorMeta[]>([]);
   const [busy, setBusy] = useState<BusyState>("idle");
@@ -397,63 +426,77 @@ export default function Home() {
   const orderedOffers = useMemo(() => {
     if (!result) return [];
     const offers = result.offers.filter((offer) =>
-      (offer.comparable || offer.purchaseMode === "split_ticket") &&
+      (offer.comparable || offer.purchaseMode === "split_ticket" || offer.priceVerificationStatus === "listed_only") &&
       (airlineFilter === "all" || offer.segments.some((segment) => segment.marketingCarrier === airlineFilter)) &&
+      (aircraftFilter === "all" || offer.segments.some((segment) => segment.aircraftCode === aircraftFilter)) &&
+      (departureAirportFilter === "all" || offer.legs[0]?.origin.code === departureAirportFilter) &&
+      (arrivalAirportFilter === "all" || offer.legs[0]?.destination.code === arrivalAirportFilter) &&
       (stopsFilter === "all" ||
         (stopsFilter === "direct" ? offerStops(offer) === 0 : offerStops(offer) <= offer.legs.length)),
     );
-    const comparableFirst = (left: Offer, right: Offer) =>
-      Number(right.comparable) - Number(left.comparable);
     if (effectiveSort === "price") {
       return offers.sort((left, right) => {
-        const a = left.totalPriceCny?.amountMinor ?? left.totalPrice.amountMinor;
-        const b = right.totalPriceCny?.amountMinor ?? right.totalPrice.amountMinor;
-        return comparableFirst(left, right) || a - b;
+        const direction = priceDirection === "asc" ? 1 : -1;
+        return direction * (priceSortValue(left) - priceSortValue(right)) ||
+          compareEqualDisplayedPrice(left, right);
       });
     }
     if (effectiveSort === "duration") {
       return offers.sort(
         (left, right) =>
-          comparableFirst(left, right) ||
-          offerJourneyMinutes(left) - offerJourneyMinutes(right),
+          offerJourneyMinutes(left) - offerJourneyMinutes(right) ||
+          priceSortValue(left) - priceSortValue(right),
       );
     }
     if (effectiveSort === "stops") {
       return offers.sort(
         (left, right) =>
-          comparableFirst(left, right) ||
           offerStops(left) - offerStops(right) ||
-          offerJourneyMinutes(left) - offerJourneyMinutes(right),
+          offerJourneyMinutes(left) - offerJourneyMinutes(right) ||
+          priceSortValue(left) - priceSortValue(right),
       );
     }
     if (effectiveSort === "baggage") {
       return offers.sort(
         (left, right) =>
-          comparableFirst(left, right) ||
-          offerCheckedBaggageKg(right) - offerCheckedBaggageKg(left),
+          offerCheckedBaggageKg(right) - offerCheckedBaggageKg(left) ||
+          priceSortValue(left) - priceSortValue(right),
       );
     }
     if (effectiveSort === "flexibility") {
       return offers.sort(
         (left, right) =>
-          comparableFirst(left, right) ||
-          offerFlexibility(right) - offerFlexibility(left),
+          offerFlexibility(right) - offerFlexibility(left) ||
+          priceSortValue(left) - priceSortValue(right),
       );
     }
     return offers.sort((left, right) => {
-      const comparableOrder = comparableFirst(left, right);
-      if (comparableOrder) return comparableOrder;
       if (left.id === result.recommendedOfferId) return -1;
       if (right.id === result.recommendedOfferId) return 1;
-      return 0;
+      return priceSortValue(left) - priceSortValue(right);
     });
-  }, [airlineFilter, effectiveSort, result, stopsFilter]);
+  }, [aircraftFilter, airlineFilter, arrivalAirportFilter, departureAirportFilter, effectiveSort, priceDirection, result, stopsFilter]);
 
   const airlines = useMemo(() => {
     if (!result) return [];
     return [...new Set(result.offers.flatMap((offer) =>
       offer.segments.map((segment) => segment.marketingCarrier),
     ))].sort();
+  }, [result]);
+
+  const aircraftTypes = useMemo(() => {
+    if (!result) return [];
+    return [...new Set(result.offers.flatMap((offer) => offer.segments.map((segment) => segment.aircraftCode).filter(Boolean) as string[]))].sort();
+  }, [result]);
+
+  const departureAirports = useMemo(() => {
+    if (!result) return [];
+    return [...new Set(result.offers.map((offer) => offer.legs[0]?.origin.code).filter(Boolean) as string[])].sort();
+  }, [result]);
+
+  const arrivalAirports = useMemo(() => {
+    if (!result) return [];
+    return [...new Set(result.offers.map((offer) => offer.legs[0]?.destination.code).filter(Boolean) as string[])].sort();
   }, [result]);
 
   const groupedOffers = useMemo(() => {
@@ -488,6 +531,9 @@ export default function Home() {
     setParseResult(null);
     setResult(null);
     setAirlineFilter("all");
+    setAircraftFilter("all");
+    setDepartureAirportFilter("all");
+    setArrivalAirportFilter("all");
     setStopsFilter("all");
     setError("");
   }
@@ -564,8 +610,14 @@ export default function Home() {
   }
 
   const lowest = result?.offers.find((offer) => offer.id === result.lowestComparableOfferId) ?? null;
+  const lowestSplit = result?.offers.find((offer) => offer.id === result.lowestSplitOfferId) ?? null;
+  const recommended = result?.offers.find((offer) => offer.id === result.recommendedOfferId) ?? null;
   const excludedOfferCount =
-    result?.offers.filter((offer) => !offer.comparable && offer.purchaseMode !== "split_ticket").length ?? 0;
+    result?.offers.filter((offer) =>
+      !offer.comparable &&
+      offer.purchaseMode !== "split_ticket" &&
+      offer.priceVerificationStatus !== "listed_only",
+    ).length ?? 0;
   const usesSkyscanner = result?.offers.some(
     (offer) => ["skyscanner-live-prices", "flightapi-skyscanner"].includes(offer.connectorId),
   ) ?? false;
@@ -763,8 +815,25 @@ export default function Home() {
               </div>
               <div className="filter-chips">
                 <label><input type="checkbox" checked={intent.directOnly} onChange={(event) => updateIntent({ directOnly: event.target.checked, maxStops: event.target.checked ? 0 : 1 })} />仅直飞</label>
-                <label><input type="checkbox" checked={intent.minimumCheckedBaggageKg >= 23} onChange={(event) => updateIntent({ minimumCheckedBaggageKg: event.target.checked ? 23 : 0 })} />含 23kg 托运行李</label>
-                <label><input type="checkbox" checked={intent.avoidRedEye} onChange={(event) => updateIntent({ avoidRedEye: event.target.checked })} />拒绝红眼</label>
+                <label className="filter-control">托运行李
+                  <select
+                    aria-label="最低托运行李额度"
+                    value={intent.minimumCheckedBaggageKg}
+                    onChange={(event) => updateIntent({ minimumCheckedBaggageKg: Number(event.target.value) })}
+                  >
+                    {[0, 10, 20, 23, 30, 46].map((kg) => <option key={kg} value={kg}>{kg === 0 ? "不限" : `至少 ${kg}kg`}</option>)}
+                  </select>
+                </label>
+                <label><input type="checkbox" checked={intent.avoidRedEye} onChange={(event) => updateIntent({ avoidRedEye: event.target.checked, redEyeWindow: intent.redEyeWindow ?? { start: "00:00", end: "06:00" } })} />拒绝红眼</label>
+                {intent.avoidRedEye && (
+                  <label className="filter-control">红眼时段
+                    <span className="time-range">
+                      <input aria-label="红眼开始时间" type="time" value={intent.redEyeWindow?.start ?? "00:00"} onChange={(event) => updateIntent({ redEyeWindow: { start: event.target.value, end: intent.redEyeWindow?.end ?? "06:00" } })} />
+                      <span>至</span>
+                      <input aria-label="红眼结束时间" type="time" value={intent.redEyeWindow?.end ?? "06:00"} onChange={(event) => updateIntent({ redEyeWindow: { start: intent.redEyeWindow?.start ?? "00:00", end: event.target.value } })} />
+                    </span>
+                  </label>
+                )}
                 <label><input type="checkbox" checked={intent.includeNearbyAirports} onChange={(event) => updateIntent({ includeNearbyAirports: event.target.checked })} />出发地附近机场</label>
               </div>
               {parseResult && (
@@ -842,9 +911,19 @@ export default function Home() {
               <div className="result-main">
                 <div className="price-insight">
                   <div>
-                    <span>{lowest?.seller.handoffPrecision === "search_results" ? "本次最低来源展示价" : "本次最低可核验全价"}</span>
+                    <span>综合推荐</span>
+                    <strong>{recommended ? money(recommended) : "暂无"}</strong>
+                    <small>{recommended ? `来自 ${recommended.seller.name}` : "没有满足完整全价口径的推荐"}</small>
+                  </div>
+                  <div>
+                    <span>最低可核验全价</span>
                     <strong>{lowest ? money(lowest) : "暂无"}</strong>
                     <small>{lowest ? `来自 ${lowest.seller.name}` : "成功来源中没有完整可比价格"}</small>
+                  </div>
+                  <div>
+                    <span>最低分开购买价</span>
+                    <strong>{lowestSplit ? money(lowestSplit) : "暂无"}</strong>
+                    <small>{lowestSplit ? "两张单程票，库存与规则分别变化" : "本次没有分开购买方案"}</small>
                   </div>
                   <div className="insight-copy">
                     <b>结论范围</b>
@@ -855,18 +934,13 @@ export default function Home() {
                     )}
                     <p>{result.disclosure.statement}</p>
                   </div>
-                  <div className="confidence">
-                    <span>搜索审计</span>
-                    <strong>{result.audit.persisted ? "已保存" : "未保存"}</strong>
-                    <small>{result.audit.configured ? "Neon 审计状态已披露" : "数据库尚未配置"}</small>
-                  </div>
                 </div>
 
                 <div className="result-toolbar">
                   <div className="sort-tabs">
                     {([
-                      ["recommended", "平衡排序"],
-                      ["price", "最低全价"],
+                      ["recommended", "综合推荐"],
+                      ["price", "价格"],
                       ["duration", "最短耗时"],
                       ["stops", "最少中转"],
                       ...(result.bestBaggageOfferId ? [["baggage", "最佳行李"]] as const : []),
@@ -874,12 +948,40 @@ export default function Home() {
                     ] as ReadonlyArray<readonly [SortKey, string]>).map(([key, label]) => (
                       <button key={key} className={effectiveSort === key ? "selected" : ""} onClick={() => setSort(key)}>{label}</button>
                     ))}
+                    {effectiveSort === "price" && (
+                      <button
+                        type="button"
+                        className="selected"
+                        onClick={() => setPriceDirection((value) => value === "asc" ? "desc" : "asc")}
+                        aria-label={priceDirection === "asc" ? "切换为价格从高到低" : "切换为价格从低到高"}
+                      >
+                        {priceDirection === "asc" ? "低到高 ↑" : "高到低 ↓"}
+                      </button>
+                    )}
                   </div>
                   <div className="result-filters">
                     <label>航司
                       <select value={airlineFilter} onChange={(event) => setAirlineFilter(event.target.value)}>
                         <option value="all">全部</option>
                         {airlines.map((airline) => <option key={airline} value={airline}>{airline}</option>)}
+                      </select>
+                    </label>
+                    <label>机型
+                      <select value={aircraftFilter} onChange={(event) => setAircraftFilter(event.target.value)}>
+                        <option value="all">全部</option>
+                        {aircraftTypes.map((aircraft) => <option key={aircraft} value={aircraft}>{aircraft}</option>)}
+                      </select>
+                    </label>
+                    <label>起飞机场
+                      <select value={departureAirportFilter} onChange={(event) => setDepartureAirportFilter(event.target.value)}>
+                        <option value="all">全部</option>
+                        {departureAirports.map((airport) => <option key={airport} value={airport}>{airport}</option>)}
+                      </select>
+                    </label>
+                    <label>降落机场
+                      <select value={arrivalAirportFilter} onChange={(event) => setArrivalAirportFilter(event.target.value)}>
+                        <option value="all">全部</option>
+                        {arrivalAirports.map((airport) => <option key={airport} value={airport}>{airport}</option>)}
                       </select>
                     </label>
                     <label>中转
@@ -889,6 +991,17 @@ export default function Home() {
                         <option value="one_or_less">最多一次</option>
                       </select>
                     </label>
+                    <button
+                      type="button"
+                      className="filter-reset"
+                      onClick={() => {
+                        setAirlineFilter("all");
+                        setAircraftFilter("all");
+                        setDepartureAirportFilter("all");
+                        setArrivalAirportFilter("all");
+                        setStopsFilter("all");
+                      }}
+                    >重置筛选</button>
                   </div>
                   <span>
                     共 {groupedOffers.length} 个航班 · {orderedOffers.length} 个平台报价
@@ -928,8 +1041,9 @@ export default function Home() {
                       const isLowest = result.lowestComparableOfferId ? groupIds.has(result.lowestComparableOfferId) : false;
                       const isRecommended = result.recommendedOfferId ? groupIds.has(result.recommendedOfferId) : false;
                       const distinctions = [
-                        ...(isLowest ? [offer.seller.handoffPrecision === "search_results" ? "最低展示价" : "最低可核验全价"] : []),
-                        ...(isRecommended ? ["平衡排序"] : []),
+                        ...(isLowest ? ["最低可核验全价"] : []),
+                        ...(isRecommended ? ["综合推荐"] : []),
+                        ...(result.lowestSplitOfferId && groupIds.has(result.lowestSplitOfferId) ? ["最低分开购买价"] : []),
                         ...(offer.id === result.shortestOfferId ? ["最短耗时"] : []),
                         ...(offer.id === result.fewestStopsOfferId ? ["最少中转"] : []),
                         ...(offer.id === result.bestBaggageOfferId ? ["最佳行李"] : []),
@@ -987,7 +1101,7 @@ export default function Home() {
                                 );
                               })}
                             </div>
-                            <div className="price"><small>{offer.purchaseMode === "split_ticket" ? "分开购买合计" : offerPriceLabel(offer)}</small><strong>{money(offer)}</strong><span className="plain-price">{offer.purchaseMode === "split_ticket" ? "两张单程票，非平台往返价" : offer.seller.handoffPrecision === "search_results" ? "需在来源页重新选择" : "购买前再次核验"}</span></div>
+                            <div className="price"><small>{offer.purchaseMode === "split_ticket" ? "分开购买合计" : offerPriceLabel(offer)}</small><strong>{money(offer)}</strong><span className="plain-price">{offer.purchaseMode === "split_ticket" ? "两张单程票，非平台往返价" : offer.priceVerificationStatus === "listed_only" ? "税费、机建燃油待核验" : offer.seller.handoffPrecision === "search_results" ? "需在来源页重新选择" : "购买前再次核验"}</span></div>
                           </div>
                           <div className="flight-meta">
                             <div>
@@ -1086,6 +1200,21 @@ export default function Home() {
                                   此链接返回带本次条件的 {handoffSourceName(offer)} 结果页，不是该售卖方的精确报价落点；请重新选择相同行程并核验最终价格。
                                 </p>
                               )}
+                              {offer.priceVerificationStatus === "listed_only" && (
+                                <p className="handoff-warning">
+                                  当前金额仅是来源展示价，不代表含税最终支付价；票面价、税费、机建费和燃油附加费尚未完整核验。
+                                </p>
+                              )}
+                              {offer.connectorId === "fliggy-flyai" && (
+                                <p className="handoff-warning">
+                                  FlyAI 只返回一个飞猪来源展示价，未覆盖结果页全部代理商。来源页可能同时出现 ¥1188、¥1240 等不同卖家票面价；航探不据此宣称飞猪最低价，跳转后需重新选择卖家并核验税费。
+                                </p>
+                              )}
+                              {offer.purchaseMode === "split_ticket" && (
+                                <p className="handoff-warning">
+                                  该方案需要分别购买去程和返程两张单程票。两单退改签与行李规则可能不同，库存和价格也会分别变化；任一单失败不会自动保护另一单。
+                                </p>
+                              )}
                               <p>请在来源平台再次核验库存和最终支付页。航探不售票、不代收款。</p>
                             </div>
                           )}
@@ -1133,6 +1262,7 @@ export default function Home() {
           <article><span>01</span><h3>同口径再比较</h3><p>统一税费、行李、支付手续费、机场与中转风险，拒绝用不可购买的“起价”制造错觉。</p></article>
           <article><span>02</span><h3>每个结论可追溯</h3><p>展示来源平台、核验时间、价格构成与覆盖缺口。没有证据时，不宣称“全网最低”。</p></article>
           <article><span>03</span><h3>主动寻找反例</h3><p>检查条件价、机场变化、经停、过期 Offer 与来源失败，明确告诉用户答案的边界。</p></article>
+          <article><span>04</span><h3>网页与 Companion 分工</h3><p>航探网页负责查询、统一口径、排序和解释；Edge Companion 只借助你的 Edge 登录会话读取来源证据，不独立比价、不购票。</p></article>
         </div>
       </section>
 

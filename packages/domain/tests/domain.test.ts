@@ -7,6 +7,7 @@ import {
   deduplicateOffers,
   rankByBestBaggage,
   rankByFewestStops,
+  rankByLowestSplitPrice,
   rankByRefundFlexibility,
   rankByShortestDuration,
   reviewOffers,
@@ -153,6 +154,16 @@ test("deduplicates the same itinerary and normalized seller across connectors", 
   assert.deepEqual(deduplicateOffers([first, second]).map((item) => item.id), ["second"]);
 });
 
+test("keeps split and single-ticket offers as separate products", () => {
+  const single = offer({ id: "single" });
+  const split = offer({
+    id: "split",
+    purchaseMode: "split_ticket",
+    totalPrice: { amountMinor: 10000, currency: "CNY" },
+  });
+  assert.deepEqual(deduplicateOffers([single, split]).map((item) => item.id), ["single", "split"]);
+});
+
 test("applies budget, time, stop, red-eye, and checked-baggage rules consistently", () => {
   const constrained = applyIntentConstraints(
     [offer({
@@ -191,6 +202,33 @@ test("applies budget, time, stop, red-eye, and checked-baggage rules consistentl
     constrained.incomparabilityReasons.includes("CHECKED_BAGGAGE_REQUIREMENT_UNVERIFIED"),
     true,
   );
+});
+
+test("uses a custom red-eye window and supports overnight windows", () => {
+  const candidate = offer({
+    legs: [{ ...offer().legs[0]!, departureAt: "2026-08-24T05:30:00+08:00" }],
+    segments: [{ ...offer().segments[0]!, departureAt: "2026-08-24T05:30:00+08:00" }],
+  });
+  const constrained = applyIntentConstraints([candidate], {
+    schemaVersion: "1",
+    tripType: "one_way",
+    origin: { kind: "airport", code: "PVG" },
+    destination: { kind: "airport", code: "NRT" },
+    departureDate: "2026-08-24",
+    flexibleDays: 0,
+    adults: 1,
+    cabin: "economy",
+    directOnly: false,
+    maxStops: 1,
+    avoidRedEye: true,
+    redEyeWindow: { start: "05:00", end: "07:00" },
+    minimumCheckedBaggageKg: 0,
+    includeNearbyAirports: false,
+    explicitFields: [],
+    inferredFields: [],
+    pendingQuestions: [],
+  })[0]!;
+  assert.ok(constrained.incomparabilityReasons.includes("RED_EYE_CONFLICT"));
 });
 
 test("exposes deterministic duration, stops, baggage, and flexibility rankings", () => {
@@ -261,6 +299,38 @@ test("blocks a supposedly comparable offer without a purchase handoff", () => {
     ),
     true,
   );
+});
+
+test("blocks a listed-only source price from the verifiable all-in comparison", () => {
+  const candidate = offer({
+    seller: {
+      id: "seller",
+      name: "Seller",
+      kind: "ota",
+      deepLink: "https://example.com/results",
+      handoffPrecision: "search_results",
+    },
+    priceVerificationStatus: "listed_only",
+  });
+  const [reviewed] = applyAdversarialComparability([candidate], []);
+  assert.equal(reviewed?.comparable, false);
+  assert.ok(reviewed?.incomparabilityReasons.includes("PRICE_TAX_UNVERIFIED"));
+});
+
+test("ranks split tickets separately by their combined displayed price", () => {
+  const expensive = offer({
+    id: "split-expensive",
+    purchaseMode: "split_ticket",
+    totalPrice: { amountMinor: 15000, currency: "CNY" },
+  });
+  const cheap = offer({
+    id: "split-cheap",
+    purchaseMode: "split_ticket",
+  });
+  assert.deepEqual(rankByLowestSplitPrice([expensive, cheap]).map((item) => item.id), [
+    "split-cheap",
+    "split-expensive",
+  ]);
 });
 
 test("models a direct round trip as two zero-stop legs", () => {

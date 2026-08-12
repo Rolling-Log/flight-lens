@@ -55,6 +55,7 @@ function fixtureOffer(input: {
   qualityScore: number;
   outboundFlight: string;
   returnFlight: string;
+  aircraftCode?: string;
   deepLink?: string;
   handoffPrecision?: "exact_offer" | "search_results";
 }): Offer {
@@ -67,6 +68,7 @@ function fixtureOffer(input: {
     qualityScore,
     outboundFlight,
     returnFlight,
+    aircraftCode = "32A",
     deepLink = "https://example.com/flight-checkout",
     handoffPrecision = "exact_offer",
   } = input;
@@ -87,6 +89,7 @@ function fixtureOffer(input: {
       departureAt: `${intent.departureDate}T21:45:00+08:00`,
       arrivalAt: `${outboundArrivalDate}T01:35:00+09:00`,
       durationMinutes: 170,
+      aircraftCode,
     },
   ];
   const legs: Offer["legs"] = [
@@ -113,6 +116,7 @@ function fixtureOffer(input: {
       departureAt: `${intent.returnDate}T14:20:00+09:00`,
       arrivalAt: `${intent.returnDate}T16:50:00+08:00`,
       durationMinutes: 210,
+      aircraftCode,
     };
     segments.push(returnSegment);
     legs.push({

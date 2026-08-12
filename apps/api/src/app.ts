@@ -25,6 +25,7 @@ import {
   rankByBestBaggage,
   rankByFewestStops,
   rankByLowestComparablePrice,
+  rankByLowestSplitPrice,
   rankRecommended,
   rankByRefundFlexibility,
   rankByShortestDuration,
@@ -130,6 +131,7 @@ async function runSearch(
   );
   const reviewed = applyAdversarialComparability(normalized, reports);
   const cheapest = rankByLowestComparablePrice(reviewed);
+  const splitCheapest = rankByLowestSplitPrice(reviewed);
   const recommended = rankRecommended(reviewed);
   const shortest = rankByShortestDuration(reviewed);
   const fewestStops = rankByFewestStops(reviewed);
@@ -142,6 +144,7 @@ async function runSearch(
     offers: reviewed,
     connectorReports: reports,
     lowestComparableOfferId: cheapest[0]?.id ?? null,
+    lowestSplitOfferId: splitCheapest[0]?.id ?? null,
     recommendedOfferId: recommended[0]?.id ?? null,
     shortestOfferId: shortest[0]?.id ?? null,
     fewestStopsOfferId: fewestStops[0]?.id ?? null,

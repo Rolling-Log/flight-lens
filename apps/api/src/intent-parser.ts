@@ -24,6 +24,8 @@ const modelDraftSchema = z.object({
   directOnly: z.boolean(),
   maxStops: z.number().int().min(0).max(2),
   avoidRedEye: z.boolean(),
+  redEyeStart: z.string().regex(/^\d{2}:\d{2}$/).nullable().default(null),
+  redEyeEnd: z.string().regex(/^\d{2}:\d{2}$/).nullable().default(null),
   minimumCheckedBaggageKg: z.number().int().min(0).max(46),
   includeNearbyAirports: z.boolean(),
   assumptions: z.array(z.string()),
@@ -76,6 +78,9 @@ function responseFromDraft(
           directOnly: draft.directOnly,
           maxStops: draft.maxStops,
           avoidRedEye: draft.avoidRedEye,
+          redEyeWindow: draft.redEyeStart && draft.redEyeEnd
+            ? { start: draft.redEyeStart, end: draft.redEyeEnd }
+            : undefined,
           minimumCheckedBaggageKg: draft.minimumCheckedBaggageKg,
           includeNearbyAirports: draft.includeNearbyAirports,
           explicitFields,
@@ -453,6 +458,8 @@ export class LocalChineseIntentParser implements IntentParser {
         directOnly,
         maxStops: directOnly ? 0 : numberFromText(stopMatch?.[1]) ?? 1,
         avoidRedEye: /(?:不要|避免|避开|拒绝|不想坐|不坐|别坐).{0,4}红眼/.test(text),
+        redEyeStart: null,
+        redEyeEnd: null,
         minimumCheckedBaggageKg,
         includeNearbyAirports: /附近机场|周边机场/.test(text),
         assumptions,

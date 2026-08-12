@@ -173,6 +173,9 @@ test("maps FlyAI flight items into a real Fliggy handoff with adult total price"
   assert.equal(offers[0]?.seller.name, "飞猪");
   assert.equal(offers[0]?.totalPrice.amountMinor, 80_000);
   assert.equal(offers[0]?.priceVerificationStatus, "listed_only");
+  assert.equal(offers[0]?.comparable, false);
+  assert.ok(offers[0]?.incomparabilityReasons.includes("PRICE_TAX_UNVERIFIED"));
+  assert.ok(offers[0]?.incomparabilityReasons.includes("SELLER_LIST_INCOMPLETE"));
   assert.equal(offers[0]?.segments[0]?.flightNumber, "1883");
 });
 
@@ -263,6 +266,32 @@ test("maps Ctrip batchSearch base fare and tax as provider-verified adult total"
   assert.equal(offers[0]?.segments[0]?.marketingCarrier, "MU");
   assert.equal(offers[0]?.segments[0]?.flightNumber, "5101");
   assert.match(offers[0]?.evidenceRef ?? "", /batchSearch:ctrip-search/);
+});
+
+test("does not treat a missing Ctrip tax field as zero tax", () => {
+  const offers = mapCtripBatchSearchPayload({
+    data: {
+      flightItineraryList: [{
+        priceList: [{ adultPrice: 520 }],
+        flightSegments: [{
+          flightList: [{
+            flightNo: "MU5101",
+            marketAirlineCode: "MU",
+            departureAirportCode: "SHA",
+            arrivalAirportCode: "PEK",
+            departureDateTime: "2026-09-10 08:30:00",
+            arrivalDateTime: "2026-09-10 10:50:00",
+            duration: "140分钟",
+          }],
+        }],
+      }],
+    },
+  }, { ...intent, origin: { kind: "airport", code: "SHA" }, destination: { kind: "airport", code: "PEK" } }, "ctrip-missing-tax", "https://flights.ctrip.com/online/list/oneway-sha-pek");
+
+  assert.equal(offers[0]?.priceVerificationStatus, "listed_only");
+  assert.equal(offers[0]?.comparable, false);
+  assert.deepEqual(offers[0]?.priceComponents.map((component) => component.kind), ["required_service"]);
+  assert.ok(offers[0]?.incomparabilityReasons.includes("PRICE_TAX_UNVERIFIED"));
 });
 
 test("registers the four V1 domestic real-source connectors without credentials in code", () => {

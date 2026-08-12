@@ -1300,7 +1300,6 @@ export function mapSerpApiBookingPayload(
       ...(intent.minimumCheckedBaggageKg === 0 || checkedBaggageIncluded
         ? []
         : ["CHECKED_BAGGAGE_UNVERIFIED"]),
-      ...(intent.avoidRedEye && hasRedEye ? ["RED_EYE_CONFLICT"] : []),
       ...(entry.separate_tickets ? ["SEPARATE_TICKETS"] : []),
       ...(intent.flexibleDays === 0 ? [] : ["FLEXIBLE_DATE_RANGE_NOT_EXPANDED"]),
     ];
