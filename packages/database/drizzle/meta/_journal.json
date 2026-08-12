@@ -29,6 +29,13 @@
       "when": 1786420800000,
       "tag": "0003_unsupported_query_state",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786522220147,
+      "tag": "0004_big_thing",
+      "breakpoints": true
     }
   ]
 }

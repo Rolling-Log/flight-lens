@@ -19,9 +19,17 @@ services:
         value: "20000"
       - key: SERPAPI_MONTHLY_CREDIT_CAP
         value: "100"
+      - key: MONITOR_BATCH_MAX
+        value: "5"
+      - key: MONITOR_EXECUTION_TIMEOUT_MS
+        value: "45000"
+      - key: NTFY_BASE_URL
+        value: "https://ntfy.sh"
       - key: WEB_ORIGINS
         sync: false
       - key: DATABASE_URL
+        sync: false
+      - key: MONITOR_WAKE_SECRET
         sync: false
       - key: SERPAPI_API_KEY
         sync: false

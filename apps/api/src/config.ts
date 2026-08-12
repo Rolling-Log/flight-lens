@@ -60,6 +60,11 @@ const envSchema = z.object({
   CONNECTOR_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(20_000),
   AUDIT_TIMEOUT_MS: z.coerce.number().int().min(250).max(10_000).default(3_000),
   SEARCH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1_000).default(2),
+  MONITOR_WAKE_SECRET: optionalNonEmpty,
+  MONITOR_BATCH_MAX: z.coerce.number().int().min(1).max(20).default(5),
+  MONITOR_EXECUTION_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(55_000).default(45_000),
+  NTFY_BASE_URL: z.string().url().default("https://ntfy.sh"),
+  NTFY_ACCESS_TOKEN: optionalNonEmpty,
   CONNECTOR_MAX_RETRIES: z.coerce.number().int().min(0).max(3).default(1),
   CONNECTOR_CACHE_TTL_MS: z.coerce.number().int().min(0).max(300_000).default(60_000),
   CONNECTOR_STALE_IF_ERROR_MS: z.coerce
@@ -83,6 +88,11 @@ export type ApiConfig = {
   connectorTimeoutMs: number;
   auditTimeoutMs: number;
   searchRateLimitMax?: number;
+  monitorWakeSecret?: string;
+  monitorBatchMax: number;
+  monitorExecutionTimeoutMs: number;
+  ntfyBaseUrl: string;
+  ntfyAccessToken?: string;
   connectorMaxRetries?: number;
   connectorCacheTtlMs?: number;
   connectorStaleIfErrorMs?: number;
@@ -124,6 +134,11 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     connectorTimeoutMs: parsed.CONNECTOR_TIMEOUT_MS,
     auditTimeoutMs: parsed.AUDIT_TIMEOUT_MS,
     searchRateLimitMax: parsed.SEARCH_RATE_LIMIT_MAX,
+    ...(parsed.MONITOR_WAKE_SECRET ? { monitorWakeSecret: parsed.MONITOR_WAKE_SECRET } : {}),
+    monitorBatchMax: parsed.MONITOR_BATCH_MAX,
+    monitorExecutionTimeoutMs: parsed.MONITOR_EXECUTION_TIMEOUT_MS,
+    ntfyBaseUrl: parsed.NTFY_BASE_URL,
+    ...(parsed.NTFY_ACCESS_TOKEN ? { ntfyAccessToken: parsed.NTFY_ACCESS_TOKEN } : {}),
     connectorMaxRetries: parsed.CONNECTOR_MAX_RETRIES,
     connectorCacheTtlMs: parsed.CONNECTOR_CACHE_TTL_MS,
     connectorStaleIfErrorMs: parsed.CONNECTOR_STALE_IF_ERROR_MS,

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Offer } from "@flight-lens/contracts";
 import {
+  analyzePriceTrend,
   applyAdversarialComparability,
   applyIntentConstraints,
   deduplicateOffers,
@@ -15,6 +16,7 @@ import {
   validateCurrencyConversion,
   validateItineraryStructure,
   validatePriceArithmetic,
+  planBoundedSearch,
 } from "../src/index.js";
 
 function offer(overrides: Partial<Offer> = {}): Offer {
@@ -363,4 +365,51 @@ test("models a direct round trip as two zero-stop legs", () => {
 
   assert.deepEqual(validateItineraryStructure(roundTrip), []);
   assert.deepEqual(roundTrip.legs.map((leg) => leg.stopCount), [0, 0]);
+});
+
+test("reports insufficient trend data and filters a large outlier", () => {
+  const insufficient = analyzePriceTrend([
+    { amountMinor: 100_000, observedAt: "2026-08-01T00:00:00Z" },
+    { amountMinor: 98_000, observedAt: "2026-08-02T00:00:00Z" },
+  ]);
+  assert.equal(insufficient.direction, "insufficient_data");
+
+  const trend = analyzePriceTrend([
+    { amountMinor: 120_000, observedAt: "2026-08-01T00:00:00Z" },
+    { amountMinor: 118_000, observedAt: "2026-08-02T00:00:00Z" },
+    { amountMinor: 117_000, observedAt: "2026-08-03T00:00:00Z" },
+    { amountMinor: 95_000, observedAt: "2026-08-04T00:00:00Z" },
+    { amountMinor: 94_000, observedAt: "2026-08-05T00:00:00Z" },
+    { amountMinor: 900_000, observedAt: "2026-08-06T00:00:00Z" },
+  ]);
+  assert.equal(trend.direction, "falling");
+  assert.equal(trend.outlierCount, 1);
+  assert.equal(trend.currentAmountMinor, 94_000);
+});
+
+test("bounds flexible-date and nearby-airport exploration", () => {
+  const plan = planBoundedSearch({
+    schemaVersion: "1",
+    tripType: "round_trip",
+    origin: { kind: "city", code: "BJS" },
+    destination: { kind: "city", code: "SHA" },
+    departureDate: "2026-09-11",
+    returnDate: "2026-09-16",
+    flexibleDays: 3,
+    adults: 1,
+    cabin: "economy",
+    directOnly: false,
+    maxStops: 1,
+    avoidRedEye: false,
+    minimumCheckedBaggageKg: 0,
+    includeNearbyAirports: true,
+    explicitFields: [],
+    inferredFields: [],
+    pendingQuestions: [],
+  }, 5);
+  assert.equal(plan.intents.length, 5);
+  assert.equal(plan.stoppedReason, "combination_budget_reached");
+  assert.ok(plan.intents.every((intent) => intent.flexibleDays === 0));
+  assert.ok(plan.intents.every((intent) => intent.includeNearbyAirports === false));
+  assert.ok(plan.exploredOrigins.every((code) => ["PEK", "PKX"].includes(code)));
 });

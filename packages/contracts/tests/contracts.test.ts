@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { airportCodesForLocation, companionSearchRequestSchema, exchangeRateSchema, locationOptions, searchIntentSchema, searchLocations, searchMarket } from "../src/index.js";
+import { airportCodesForLocation, companionSearchRequestSchema, createPriceAlertSchema, exchangeRateSchema, locationOptions, priceHistoryQuerySchema, searchIntentSchema, searchLocations, searchMarket, userPreferencesSchema } from "../src/index.js";
 
 test("finds canonical cities and airports by Chinese, pinyin, and IATA", () => {
   assert.equal(searchLocations("北京")[0]?.code, "BJS");
@@ -147,4 +147,34 @@ test("normalizes and timestamps exchange-rate evidence", () => {
   assert.equal(rate.baseCurrency, "USD");
   assert.equal(rate.quoteCurrency, "CNY");
   assert.equal(rate.quotedAt, "2026-08-04T12:00:00+08:00");
+});
+
+test("validates V2 history, alert, and anonymous preference inputs", () => {
+  const history = priceHistoryQuerySchema.parse({
+    origin: "pek",
+    destination: "sha",
+    departureDate: "2026-09-11",
+  });
+  assert.equal(history.origin, "PEK");
+  assert.equal(history.days, 90);
+
+  const alert = createPriceAlertSchema.parse({
+    ownerToken: "anonymous-owner-token-1234",
+    intent: {
+      schemaVersion: "1",
+      tripType: "one_way",
+      origin: { kind: "airport", code: "PEK" },
+      destination: { kind: "airport", code: "SHA" },
+      departureDate: "2026-09-11",
+    },
+    targetAmountCnyMinor: 60_000,
+    ntfyTopic: "flight-lens-personal",
+  });
+  assert.equal(alert.checkIntervalMinutes, 360);
+
+  const preferences = userPreferencesSchema.parse({
+    ownerToken: "anonymous-owner-token-1234",
+  });
+  assert.deepEqual(preferences.redEyeWindow, { start: "00:00", end: "06:00" });
+  assert.equal(preferences.cabin, "economy");
 });

@@ -378,3 +378,128 @@ export const searchResponseSchema = z.object({
 });
 
 export type SearchResponse = z.infer<typeof searchResponseSchema>;
+
+export const priceObservationKindSchema = z.enum([
+  "verified_all_in",
+  "listed_only",
+  "split_ticket",
+]);
+export type PriceObservationKind = z.infer<typeof priceObservationKindSchema>;
+
+export const priceObservationSchema = z.object({
+  id: z.string().uuid(),
+  searchId: z.string().uuid(),
+  itineraryFingerprint: z.string().min(1),
+  routeKey: z.string().min(7),
+  departureDate: isoDateSchema,
+  returnDate: isoDateSchema.nullable(),
+  cabin: cabinClassSchema,
+  connectorId: z.string().min(1),
+  inventoryFamily: z.string().min(1),
+  sellerId: z.string().min(1),
+  sellerName: z.string().min(1),
+  observationKind: priceObservationKindSchema,
+  baseAmountMinor: z.number().int().nonnegative().nullable(),
+  taxAmountMinor: z.number().int().nonnegative().nullable(),
+  fuelAmountMinor: z.number().int().nonnegative().nullable(),
+  requiredServiceAmountMinor: z.number().int().nonnegative().nullable(),
+  totalAmountMinor: z.number().int().nonnegative(),
+  currency: currencySchema,
+  totalAmountCnyMinor: z.number().int().nonnegative().nullable(),
+  baggage: z.array(baggageAllowanceSchema),
+  priceVerificationStatus: z.enum([
+    "unverified",
+    "listed_only",
+    "provider_response_verified",
+    "detail_verified",
+  ]),
+  handoffPrecision: z.enum(["exact_offer", "search_results"]).nullable(),
+  evidenceRef: z.string().nullable(),
+  observedAt: isoDateTimeSchema,
+});
+export type PriceObservation = z.infer<typeof priceObservationSchema>;
+
+export const priceHistoryQuerySchema = z.object({
+  origin: z.string().length(3).transform((value) => value.toUpperCase()),
+  destination: z.string().length(3).transform((value) => value.toUpperCase()),
+  departureDate: isoDateSchema,
+  returnDate: isoDateSchema.optional(),
+  cabin: cabinClassSchema.default("economy"),
+  sellerId: z.string().min(1).optional(),
+  flight: z.string().min(2).max(20).optional(),
+  days: z.coerce.number().int().min(1).max(365).default(90),
+});
+export type PriceHistoryQuery = z.infer<typeof priceHistoryQuerySchema>;
+
+export const priceTrendSchema = z.object({
+  direction: z.enum(["rising", "falling", "stable", "insufficient_data"]),
+  sampleCount: z.number().int().nonnegative(),
+  windowDays: z.number().int().positive(),
+  currentAmountMinor: z.number().int().nonnegative().nullable(),
+  medianAmountMinor: z.number().int().nonnegative().nullable(),
+  recentMeanAmountMinor: z.number().int().nonnegative().nullable(),
+  historicalLowAmountMinor: z.number().int().nonnegative().nullable(),
+  percentile: z.number().min(0).max(100).nullable(),
+  changePercent: z.number().nullable(),
+  outlierCount: z.number().int().nonnegative(),
+  explanation: z.string().min(1),
+});
+export type PriceTrend = z.infer<typeof priceTrendSchema>;
+
+export const priceHistoryResponseSchema = z.object({
+  query: priceHistoryQuerySchema,
+  observations: z.array(priceObservationSchema),
+  trends: z.record(priceObservationKindSchema, priceTrendSchema),
+});
+export type PriceHistoryResponse = z.infer<typeof priceHistoryResponseSchema>;
+
+export const alertStatusSchema = z.enum(["active", "paused", "deleted"]);
+export const priceAlertSchema = z.object({
+  id: z.string().uuid(),
+  intent: searchIntentSchema,
+  targetAmountCnyMinor: z.number().int().positive(),
+  checkIntervalMinutes: z.number().int().min(60).max(10_080),
+  ntfyTopic: z.string().min(1).max(200),
+  status: alertStatusSchema,
+  nextCheckAt: isoDateTimeSchema,
+  lastCheckedAt: isoDateTimeSchema.nullable(),
+  lastTriggeredAt: isoDateTimeSchema.nullable(),
+  lastTriggeredAmountMinor: z.number().int().nonnegative().nullable(),
+  lastErrorCode: z.string().nullable(),
+  createdAt: isoDateTimeSchema,
+  updatedAt: isoDateTimeSchema,
+});
+export type PriceAlert = z.infer<typeof priceAlertSchema>;
+
+export const createPriceAlertSchema = z.object({
+  ownerToken: z.string().min(16).max(128),
+  intent: searchIntentSchema,
+  targetAmountCnyMinor: z.number().int().positive(),
+  checkIntervalMinutes: z.number().int().min(60).max(10_080).default(360),
+  ntfyTopic: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/),
+});
+export type CreatePriceAlert = z.infer<typeof createPriceAlertSchema>;
+
+export const userPreferencesSchema = z.object({
+  ownerToken: z.string().min(16).max(128),
+  homeOrigin: airportRefSchema.optional(),
+  preferredAirlines: z.array(z.string().min(2).max(3)).max(20).default([]),
+  preferredAirports: z.array(z.string().length(3)).max(20).default([]),
+  cabin: cabinClassSchema.default("economy"),
+  minimumCheckedBaggageKg: z.number().int().min(0).max(46).default(0),
+  redEyeWindow: redEyeWindowSchema.default({ start: "00:00", end: "06:00" }),
+  budgetAmountCnyMinor: z.number().int().positive().nullable().default(null),
+  ntfyTopic: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).nullable().default(null),
+});
+export type UserPreferences = z.infer<typeof userPreferencesSchema>;
+
+export const searchPlanSchema = z.object({
+  intents: z.array(searchIntentSchema).min(1).max(15),
+  maximumCombinations: z.number().int().min(1).max(15),
+  exploredDates: z.array(isoDateSchema),
+  exploredOrigins: z.array(z.string().length(3)),
+  exploredDestinations: z.array(z.string().length(3)),
+  stoppedReason: z.enum(["complete", "combination_budget_reached", "fixed_date_only"]),
+  disclosure: z.string().min(1),
+});
+export type SearchPlan = z.infer<typeof searchPlanSchema>;

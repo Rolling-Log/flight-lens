@@ -51,6 +51,28 @@ test("precise filters expose baggage allowance and custom red-eye controls", asy
   expect(body.redEyeWindow).toEqual({ start: "23:00", end: "07:00" });
 });
 
+test("V2 history, alert, and anonymous preference controls stay usable", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("tab", { name: "精确筛选" }).click();
+  await page.getByRole("button", { name: "开始检索" }).click();
+  await expect(page.getByRole("heading", { name: "PVG → NRT" })).toBeVisible();
+
+  const panel = page.getByRole("region", { name: "价格历史与提醒" });
+  await expect(panel.getByRole("button", { name: "90 天" })).toHaveClass(/selected/);
+  await panel.getByRole("button", { name: "30 天" }).click();
+  await expect(panel.getByRole("button", { name: "30 天" })).toHaveClass(/selected/);
+
+  await panel.getByRole("tab", { name: "价格提醒" }).click();
+  await expect(panel.getByLabel("目标全价（人民币）")).toBeVisible();
+  await expect(panel.getByLabel("ntfy Topic")).toBeVisible();
+
+  await panel.getByRole("tab", { name: "偏好" }).click();
+  await expect(panel.getByLabel("最低托运行李")).toHaveValue("0");
+  await expect(panel.getByLabel("红眼开始")).toHaveValue("00:00");
+  await expect(panel.getByRole("button", { name: "保存偏好" })).toBeVisible();
+  await expectNoBlockingAccessibilityViolations(page);
+});
+
 test("agent input becomes an editable search and exposes source limits", async ({
   page,
 }) => {

@@ -24,6 +24,8 @@
     "price:verify": "node dist/verify-price.js"
   },
   "dependencies": {
+    "@flight-lens/contracts": "workspace:*",
+    "@flight-lens/domain": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "postgres": "^3.4.7"
   },

@@ -6,9 +6,9 @@
 
 ## 当前状态
 
-- 当前版本：V1 本地验收候选；同程 + SerpApi 双实时来源查询已通过，国内四 Connector 状态均可披露；
+- 当前版本：V2 开发分支；保留 V1 的透明比价口径，并新增历史价格、价格提醒、有界日期/机场规划和匿名偏好；
 - Web：Next.js，部署到 Netlify；
-- API：Fastify 独立服务，部署到 Railway；
+- API：Fastify 独立服务，免费层部署使用 Render；
 - 数据库：Neon Postgres；
 - 包管理：pnpm workspace。
 
@@ -49,7 +49,7 @@ pnpm test:e2e
 
 ```text
 apps/web            Netlify Web
-apps/api            Railway Fastify API
+apps/api            Render Fastify API
 apps/edge-companion 本地 Edge MV3 页面核验扩展
 packages/contracts  API 与领域契约
 packages/domain     确定性搜索、全价、去重与排序
@@ -59,6 +59,8 @@ docs                产品、架构与运行文档
 ```
 
 航探不会在证据不足时宣称“全网最低”。结论必须包含成功、失败和超时来源、统一价格口径以及报价核验时间。只能跳到来源结果页的报价会显示为“抓取时来源展示价”，而不是可支付总价。
+
+V2 的历史曲线继续把“最低可核验全价”“来源展示价”和“两张单程分开购买价”分别保存和分析，三者不会合并成一条价格趋势。提醒任务只依据人民币最低可核验全价触发；通知失败不会丢失本次查询和价格历史。
 
 详细范围见 [PRD](./PRD.md)，工程决策见 [ARCHITECTURE](./ARCHITECTURE.md)，部署步骤见 [DEPLOYMENT](./DEPLOYMENT.md)，V1 发布门禁见 [V1_ACCEPTANCE](./docs/V1_ACCEPTANCE.md)，四来源登录与验证步骤见 [PROVIDER_ONBOARDING](./docs/PROVIDER_ONBOARDING.md)。
 

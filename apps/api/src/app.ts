@@ -10,14 +10,19 @@ import {
 } from "@flight-lens/connectors";
 import {
   companionSearchRequestSchema,
+  createPriceAlertSchema,
+  priceHistoryQuerySchema,
+  priceHistoryResponseSchema,
+  userPreferencesSchema,
   searchIntentSchema,
   searchResponseSchema,
   type ConnectorReport,
   type SearchIntent,
   type SearchResponse,
 } from "@flight-lens/contracts";
-import { createSearchAuditStore } from "@flight-lens/database";
+import { createSearchAuditStore, createV2Store, type V2Store } from "@flight-lens/database";
 import {
+  analyzePriceTrend,
   applyIntentConstraints,
   applyAdversarialComparability,
   deduplicateOffers,
@@ -29,8 +34,10 @@ import {
   rankRecommended,
   rankByRefundFlexibility,
   rankByShortestDuration,
+  planBoundedSearch,
 } from "@flight-lens/domain";
 import Fastify, { type FastifyInstance } from "fastify";
+import { timingSafeEqual } from "node:crypto";
 import type { ApiConfig } from "./config.js";
 import {
   FallbackIntentParser,
@@ -38,6 +45,8 @@ import {
   OpenAIIntentParser,
   type IntentParser,
 } from "./intent-parser.js";
+import { createMonitorQueue, type MonitorQueue } from "./monitor-queue.js";
+import { NtfyNotifier, type Notifier } from "./ntfy.js";
 
 type SearchAuditStore = {
   persist(payload: Parameters<ReturnType<typeof createSearchAuditStore>["persist"]>[0]): Promise<void>;
@@ -48,9 +57,29 @@ type BuildAppOptions = {
   config: ApiConfig;
   connectors?: FlightConnector[];
   auditStore?: SearchAuditStore | null;
+  v2Store?: V2Store | null;
+  monitorQueue?: MonitorQueue | null;
+  notifier?: Notifier;
   intentParser?: IntentParser | null;
   now?: () => Date;
 };
+
+function ownerTokenFrom(headers: Record<string, unknown>): string | null {
+  const value = headers["x-flight-lens-owner"];
+  return typeof value === "string" && value.length >= 16 && value.length <= 128 ? value : null;
+}
+
+function monitorIdempotencyKey(alertId: string, checkedAt: Date, intervalMinutes: number): string {
+  const bucket = Math.floor(checkedAt.getTime() / (intervalMinutes * 60_000));
+  return `${alertId}:${bucket}`;
+}
+
+function secretMatches(actual: string | undefined, expected: string | undefined): boolean {
+  if (!actual || !expected) return false;
+  const left = Buffer.from(actual);
+  const right = Buffer.from(expected);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
 
 class AuditPersistTimeoutError extends Error {
   constructor() {
@@ -162,6 +191,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     options.auditStore === undefined && config.databaseUrl
       ? createSearchAuditStore(config.databaseUrl)
       : options.auditStore ?? null;
+  const v2Store =
+    options.v2Store === undefined && config.databaseUrl
+      ? createV2Store(config.databaseUrl)
+      : options.v2Store ?? null;
+  const notifier = options.notifier ?? new NtfyNotifier(config.ntfyBaseUrl, config.ntfyAccessToken);
+  const monitorQueue =
+    options.monitorQueue === undefined && config.databaseUrl
+      ? createMonitorQueue(config.databaseUrl, config.monitorExecutionTimeoutMs)
+      : options.monitorQueue ?? null;
   const localIntentParser = new LocalChineseIntentParser(now);
   const intentParser =
     options.intentParser === undefined
@@ -186,18 +224,123 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       if (!origin || config.webOrigins.includes(origin)) return callback(null, true);
       callback(null, false);
     },
-    methods: ["GET", "POST"],
+    methods: ["GET", "POST", "PATCH", "DELETE"],
   });
   await app.register(rateLimit, {
-    max: 30,
+    max: config.nodeEnv === "test" ? 1_000 : 30,
     timeWindow: "1 minute",
   });
+
+  const persistSearch = async (result: Omit<SearchResponse, "audit">): Promise<void> => {
+    if (!auditStore) return;
+    await persistAuditWithin(auditStore, {
+      requestId: result.requestId,
+      intent: result.intent,
+      status: "completed",
+      reports: result.connectorReports,
+      offers: result.offers,
+    }, config.auditTimeoutMs);
+  };
+
+  const processAlert = async (alertId: string): Promise<void> => {
+    if (!v2Store) throw new Error("V2_STORE_UNCONFIGURED");
+    const alert = await v2Store.getAlert(alertId);
+    if (!alert || alert.status !== "active") return;
+    const checkedAt = now();
+    const runId = await v2Store.claimAlertRun(
+      alert.id,
+      monitorIdempotencyKey(alert.id, checkedAt, alert.checkIntervalMinutes),
+      checkedAt,
+    );
+    if (!runId) return;
+    try {
+      const searchTimeoutMs = Math.max(1_000, Math.min(
+        config.connectorTimeoutMs,
+        config.monitorExecutionTimeoutMs - config.auditTimeoutMs - 1_000,
+      ));
+      const result = await runSearch(alert.intent, connectors, searchTimeoutMs, {
+        maxRetries: Math.min(1, config.connectorMaxRetries ?? 1),
+        cacheTtlMs: config.connectorCacheTtlMs ?? 60_000,
+        staleIfErrorMs: config.connectorStaleIfErrorMs ?? 300_000,
+      });
+      await persistSearch(result);
+      const lowest = result.offers.find((offer) => offer.id === result.lowestComparableOfferId);
+      const amount = lowest?.totalPriceCny?.amountMinor ??
+        (lowest?.totalPrice.currency === "CNY" ? lowest.totalPrice.amountMinor : null);
+      if (amount === null || amount === undefined) {
+        await v2Store.finishAlertRun({
+          runId,
+          alertId: alert.id,
+          checkedAt,
+          intervalMinutes: alert.checkIntervalMinutes,
+          amountCnyMinor: null,
+          evidenceUrl: null,
+          notificationSent: false,
+          errorCode: "NO_VERIFIED_PRICE",
+          resetTrigger: false,
+        });
+        return;
+      }
+      const shouldNotify = amount <= alert.targetAmountCnyMinor &&
+        (alert.lastTriggeredAmountMinor === null || amount < alert.lastTriggeredAmountMinor);
+      let notificationSent = false;
+      let notificationError: string | null = null;
+      if (shouldNotify) {
+        try {
+          await notifier.send({
+            topic: alert.ntfyTopic,
+            title: "航探降价提醒",
+            message: `${alert.intent.origin.code} → ${alert.intent.destination.code} 的最低可核验全价已到 ¥${Math.round(amount / 100)}。`,
+            ...(lowest?.seller.deepLink ? { clickUrl: lowest.seller.deepLink } : {}),
+          }, AbortSignal.timeout(Math.max(250, Math.min(
+            10_000,
+            config.monitorExecutionTimeoutMs - searchTimeoutMs - config.auditTimeoutMs,
+          ))));
+          notificationSent = true;
+        } catch {
+          notificationError = "NOTIFICATION_FAILED";
+        }
+      }
+      await v2Store.finishAlertRun({
+        runId,
+        alertId: alert.id,
+        checkedAt,
+        intervalMinutes: alert.checkIntervalMinutes,
+        amountCnyMinor: amount,
+        evidenceUrl: lowest?.seller.deepLink ?? null,
+        notificationSent,
+        errorCode: notificationError,
+        resetTrigger: amount > alert.targetAmountCnyMinor,
+      });
+    } catch (error) {
+      await v2Store.finishAlertRun({
+        runId,
+        alertId: alert.id,
+        checkedAt,
+        intervalMinutes: alert.checkIntervalMinutes,
+        amountCnyMinor: null,
+        evidenceUrl: null,
+        notificationSent: false,
+        errorCode: error instanceof Error ? error.message.slice(0, 100) : "MONITOR_FAILED",
+        resetTrigger: false,
+      });
+      throw error;
+    }
+  };
+
+  if (monitorQueue) await monitorQueue.start(processAlert);
 
   app.get("/health", async () => ({
     status: "ok",
     service: "flight-lens-api",
-    version: "v1-development",
-    database: auditStore ? "configured" : "unconfigured",
+    version: "v2-development",
+    database: auditStore && v2Store ? "configured" : "unconfigured",
+    monitoring: {
+      storeConfigured: Boolean(v2Store),
+      queueConfigured: Boolean(monitorQueue),
+      wakeProtected: Boolean(config.monitorWakeSecret),
+      batchMaximum: config.monitorBatchMax,
+    },
     intentParser:
       config.openaiIntentParserEnabled && config.openaiApiKey
         ? "openai_with_local_fallback"
@@ -302,6 +445,121 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       healthy: checks.filter((connector) => connector.health.state === "healthy").length,
       checkedAt: now().toISOString(),
     };
+  });
+
+  app.get("/v2/prices/history", async (request, reply) => {
+    if (!v2Store) return reply.status(503).send({ error: { code: "V2_STORE_UNCONFIGURED", message: "价格历史数据库尚未配置。" } });
+    const parsed = priceHistoryQuerySchema.safeParse(request.query);
+    if (!parsed.success) return reply.status(400).send({ error: { code: "INVALID_HISTORY_QUERY", message: "价格历史查询条件不合法。", issues: parsed.error.issues } });
+    const observations = await v2Store.history(parsed.data, now());
+    const trends = Object.fromEntries(
+      (["verified_all_in", "listed_only", "split_ticket"] as const).map((kind) => [
+        kind,
+        analyzePriceTrend(
+          observations
+            .filter((item) => item.observationKind === kind && item.totalAmountCnyMinor !== null)
+            .map((item) => ({ amountMinor: item.totalAmountCnyMinor!, observedAt: item.observedAt })),
+          parsed.data.days,
+        ),
+      ]),
+    );
+    return reply.send(priceHistoryResponseSchema.parse({ query: parsed.data, observations, trends }));
+  });
+
+  app.post("/v2/searches/plan", async (request, reply) => {
+    const body = request.body as { intent?: unknown; maximumCombinations?: unknown };
+    const parsed = searchIntentSchema.safeParse(body?.intent);
+    if (!parsed.success) return reply.status(400).send({ error: { code: "INVALID_SEARCH_INTENT", message: "搜索条件不完整或不合法。" } });
+    const maximum = typeof body.maximumCombinations === "number" ? body.maximumCombinations : 9;
+    return reply.send(planBoundedSearch(parsed.data, maximum));
+  });
+
+  app.get("/v2/alerts", async (request, reply) => {
+    if (!v2Store) return reply.status(503).send({ error: { code: "V2_STORE_UNCONFIGURED" } });
+    const ownerToken = ownerTokenFrom(request.headers);
+    if (!ownerToken) return reply.status(401).send({ error: { code: "OWNER_TOKEN_REQUIRED" } });
+    return reply.send({ alerts: await v2Store.listAlerts(ownerToken) });
+  });
+
+  app.post("/v2/alerts", async (request, reply) => {
+    if (!v2Store) return reply.status(503).send({ error: { code: "V2_STORE_UNCONFIGURED" } });
+    const parsed = createPriceAlertSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ error: { code: "INVALID_ALERT", issues: parsed.error.issues } });
+    return reply.status(201).send(await v2Store.createAlert(parsed.data));
+  });
+
+  app.patch("/v2/alerts/:id", async (request, reply) => {
+    if (!v2Store) return reply.status(503).send({ error: { code: "V2_STORE_UNCONFIGURED" } });
+    const ownerToken = ownerTokenFrom(request.headers);
+    const status = (request.body as { status?: unknown })?.status;
+    const id = (request.params as { id: string }).id;
+    if (!ownerToken) return reply.status(401).send({ error: { code: "OWNER_TOKEN_REQUIRED" } });
+    if (!['active', 'paused'].includes(String(status))) return reply.status(400).send({ error: { code: "INVALID_ALERT_STATUS" } });
+    const changed = await v2Store.setAlertStatus(id, ownerToken, status as "active" | "paused");
+    return changed ? reply.status(204).send() : reply.status(404).send({ error: { code: "ALERT_NOT_FOUND" } });
+  });
+
+  app.delete("/v2/alerts/:id", async (request, reply) => {
+    if (!v2Store) return reply.status(503).send({ error: { code: "V2_STORE_UNCONFIGURED" } });
+    const ownerToken = ownerTokenFrom(request.headers);
+    const id = (request.params as { id: string }).id;
+    if (!ownerToken) return reply.status(401).send({ error: { code: "OWNER_TOKEN_REQUIRED" } });
+    const changed = await v2Store.setAlertStatus(id, ownerToken, "deleted");
+    return changed ? reply.status(204).send() : reply.status(404).send({ error: { code: "ALERT_NOT_FOUND" } });
+  });
+
+  app.delete("/v2/alerts", async (request, reply) => {
+    if (!v2Store) return reply.status(503).send({ error: { code: "V2_STORE_UNCONFIGURED" } });
+    const ownerToken = ownerTokenFrom(request.headers);
+    if (!ownerToken) return reply.status(401).send({ error: { code: "OWNER_TOKEN_REQUIRED" } });
+    return reply.send({ deleted: await v2Store.clearAlerts(ownerToken) });
+  });
+
+  app.post("/v2/alerts/:id/test", async (request, reply) => {
+    if (!v2Store || !monitorQueue) return reply.status(503).send({ error: { code: "MONITOR_UNCONFIGURED" } });
+    const ownerToken = ownerTokenFrom(request.headers);
+    const id = (request.params as { id: string }).id;
+    if (!ownerToken) return reply.status(401).send({ error: { code: "OWNER_TOKEN_REQUIRED" } });
+    const alert = await v2Store.getOwnedAlert(id, ownerToken);
+    if (!alert || alert.status === "deleted") return reply.status(404).send({ error: { code: "ALERT_NOT_FOUND" } });
+    if (alert.status !== "active") return reply.status(409).send({ error: { code: "ALERT_NOT_ACTIVE" } });
+    const jobId = await monitorQueue.enqueue(alert.id);
+    return jobId
+      ? reply.status(202).send({ queued: true, alertId: alert.id })
+      : reply.status(202).send({ queued: false, alertId: alert.id, reason: "already_queued" });
+  });
+
+  app.get("/v2/preferences", async (request, reply) => {
+    if (!v2Store) return reply.status(503).send({ error: { code: "V2_STORE_UNCONFIGURED" } });
+    const ownerToken = ownerTokenFrom(request.headers);
+    if (!ownerToken) return reply.status(401).send({ error: { code: "OWNER_TOKEN_REQUIRED" } });
+    return reply.send({ preferences: await v2Store.getPreferences(ownerToken) });
+  });
+
+  app.post("/v2/preferences", async (request, reply) => {
+    if (!v2Store) return reply.status(503).send({ error: { code: "V2_STORE_UNCONFIGURED" } });
+    const parsed = userPreferencesSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ error: { code: "INVALID_PREFERENCES", issues: parsed.error.issues } });
+    await v2Store.savePreferences(parsed.data);
+    return reply.status(204).send();
+  });
+
+  app.delete("/v2/preferences", async (request, reply) => {
+    if (!v2Store) return reply.status(503).send({ error: { code: "V2_STORE_UNCONFIGURED" } });
+    const ownerToken = ownerTokenFrom(request.headers);
+    if (!ownerToken) return reply.status(401).send({ error: { code: "OWNER_TOKEN_REQUIRED" } });
+    await v2Store.clearPreferences(ownerToken);
+    return reply.status(204).send();
+  });
+
+  app.post("/internal/monitor/wake", async (request, reply) => {
+    if (!secretMatches(request.headers.authorization?.replace(/^Bearer\s+/i, ""), config.monitorWakeSecret)) {
+      return reply.status(401).send({ error: { code: "INVALID_WAKE_SECRET" } });
+    }
+    if (!v2Store || !monitorQueue) return reply.status(503).send({ error: { code: "MONITOR_UNCONFIGURED" } });
+    const due = await v2Store.dueAlerts(config.monitorBatchMax, now());
+    const enqueued = await Promise.all(due.map((alert) => monitorQueue.enqueue(alert.id)));
+    return reply.send({ due: due.length, enqueued: enqueued.filter(Boolean).length, batchMaximum: config.monitorBatchMax });
   });
 
   app.post("/v1/intents/parse", async (request, reply) => {
@@ -415,17 +673,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
     if (auditStore) {
       try {
-        await persistAuditWithin(
-          auditStore,
-          {
-            requestId: result.requestId,
-            intent: result.intent,
-            status: "completed",
-            reports: result.connectorReports,
-            offers: result.offers,
-          },
-          config.auditTimeoutMs,
-        );
+        await persistSearch(result);
         audit = { configured: true, persisted: true };
       } catch (error) {
         request.log.error({ error, requestId: result.requestId }, "Failed to persist search audit");
@@ -445,6 +693,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
 
   app.addHook("onClose", async () => {
+    if (monitorQueue) await monitorQueue.stop();
+    if (v2Store) await v2Store.close();
     if (auditStore) await auditStore.close();
   });
 

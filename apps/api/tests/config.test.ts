@@ -52,6 +52,8 @@ test("keeps connector and audit work within bounded request budgets", () => {
   assert.equal(defaults.connectorTimeoutMs, 20_000);
   assert.equal(defaults.auditTimeoutMs, 3_000);
   assert.equal(defaults.searchRateLimitMax, 2);
+  assert.equal(defaults.monitorBatchMax, 5);
+  assert.equal(defaults.monitorExecutionTimeoutMs, 45_000);
   assert.equal(
     loadConfig({ NODE_ENV: "production", CONNECTOR_TIMEOUT_MS: "12000" }).connectorTimeoutMs,
     12_000,
@@ -64,6 +66,19 @@ test("keeps connector and audit work within bounded request budgets", () => {
     loadConfig({ NODE_ENV: "test", SEARCH_RATE_LIMIT_MAX: "100" }).searchRateLimitMax,
     100,
   );
+});
+
+test("bounds monitor wake batches and keeps the wake secret optional", () => {
+  const configured = loadConfig({
+    NODE_ENV: "production",
+    MONITOR_WAKE_SECRET: "test-secret-value",
+    MONITOR_BATCH_MAX: "3",
+    MONITOR_EXECUTION_TIMEOUT_MS: "30000",
+  });
+  assert.equal(configured.monitorWakeSecret, "test-secret-value");
+  assert.equal(configured.monitorBatchMax, 3);
+  assert.equal(configured.monitorExecutionTimeoutMs, 30_000);
+  assert.equal(loadConfig({ NODE_ENV: "test", MONITOR_WAKE_SECRET: " " }).monitorWakeSecret, undefined);
 });
 
 test("supports a bounded SerpApi monthly free-credit budget", () => {

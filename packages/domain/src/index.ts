@@ -1,4 +1,115 @@
-import type { ConnectorReport, Offer, SearchIntent } from "@flight-lens/contracts";
+import {
+  airportCodesForLocation,
+  type ConnectorReport,
+  type Offer,
+  type PriceTrend,
+  type SearchIntent,
+  type SearchPlan,
+} from "@flight-lens/contracts";
+import { mean, median, quantileSorted } from "simple-statistics";
+
+export function analyzePriceTrend(
+  samples: readonly { amountMinor: number; observedAt: string }[],
+  windowDays = 90,
+): PriceTrend {
+  const valid = samples
+    .filter((sample) => Number.isSafeInteger(sample.amountMinor) && sample.amountMinor >= 0)
+    .sort((left, right) => left.observedAt.localeCompare(right.observedAt));
+  if (valid.length < 3) {
+    return {
+      direction: "insufficient_data",
+      sampleCount: valid.length,
+      windowDays,
+      currentAmountMinor: valid.at(-1)?.amountMinor ?? null,
+      medianAmountMinor: null,
+      recentMeanAmountMinor: null,
+      historicalLowAmountMinor: valid.length ? Math.min(...valid.map((item) => item.amountMinor)) : null,
+      percentile: null,
+      changePercent: null,
+      outlierCount: 0,
+      explanation: `仅有 ${valid.length} 个样本，至少需要 3 个样本才能判断趋势。`,
+    };
+  }
+
+  const sortedAmounts = valid.map((sample) => sample.amountMinor).sort((a, b) => a - b);
+  const firstQuartile = quantileSorted(sortedAmounts, 0.25);
+  const thirdQuartile = quantileSorted(sortedAmounts, 0.75);
+  const iqr = thirdQuartile - firstQuartile;
+  const lower = Math.max(0, firstQuartile - 1.5 * iqr);
+  const upper = thirdQuartile + 1.5 * iqr;
+  const filtered = valid.filter((sample) => sample.amountMinor >= lower && sample.amountMinor <= upper);
+  const usable = filtered.length >= 3 ? filtered : valid;
+  const amounts = usable.map((sample) => sample.amountMinor);
+  const current = usable.at(-1)!.amountMinor;
+  const midpoint = median(amounts);
+  const recentCount = Math.min(3, usable.length);
+  const recentAverage = mean(amounts.slice(-recentCount));
+  const earlierAverage = mean(amounts.slice(0, Math.max(1, amounts.length - recentCount)));
+  const changePercent = earlierAverage === 0 ? 0 : ((recentAverage - earlierAverage) / earlierAverage) * 100;
+  const percentile = (sortedAmounts.filter((amount) => amount <= current).length / sortedAmounts.length) * 100;
+  const direction = changePercent >= 5 ? "rising" : changePercent <= -5 ? "falling" : "stable";
+  const labels = { rising: "上涨", falling: "下降", stable: "稳定" } as const;
+  return {
+    direction,
+    sampleCount: valid.length,
+    windowDays,
+    currentAmountMinor: current,
+    medianAmountMinor: Math.round(midpoint),
+    recentMeanAmountMinor: Math.round(recentAverage),
+    historicalLowAmountMinor: Math.min(...amounts),
+    percentile: Math.round(percentile * 10) / 10,
+    changePercent: Math.round(changePercent * 10) / 10,
+    outlierCount: valid.length - usable.length,
+    explanation: `最近 ${recentCount} 个样本均价较此前${labels[direction]} ${Math.abs(changePercent).toFixed(1)}%，共 ${valid.length} 个样本。`,
+  };
+}
+
+function shiftIsoDate(value: string, days: number): string {
+  const date = new Date(`${value}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+export function planBoundedSearch(intent: SearchIntent, maximumCombinations = 9): SearchPlan {
+  const boundedMaximum = Math.max(1, Math.min(15, Math.trunc(maximumCombinations)));
+  const dayOffsets = intent.flexibleDays === 0
+    ? [0]
+    : Array.from({ length: intent.flexibleDays * 2 + 1 }, (_, index) => index - intent.flexibleDays);
+  const origins = intent.includeNearbyAirports ? airportCodesForLocation(intent.origin) : [intent.origin.code];
+  const destinations = intent.includeNearbyAirports ? airportCodesForLocation(intent.destination) : [intent.destination.code];
+  const intents: SearchIntent[] = [];
+  outer: for (const offset of dayOffsets.sort((left, right) => Math.abs(left) - Math.abs(right) || left - right)) {
+    for (const origin of origins) {
+      for (const destination of destinations) {
+        if (intents.length >= boundedMaximum) break outer;
+        intents.push({
+          ...intent,
+          origin: { kind: "airport", code: origin },
+          destination: { kind: "airport", code: destination },
+          departureDate: shiftIsoDate(intent.departureDate, offset),
+          ...(intent.returnDate ? { returnDate: shiftIsoDate(intent.returnDate, offset) } : {}),
+          flexibleDays: 0,
+          includeNearbyAirports: false,
+        });
+      }
+    }
+  }
+  const possible = dayOffsets.length * origins.length * destinations.length;
+  const stoppedReason = intent.flexibleDays === 0 && !intent.includeNearbyAirports
+    ? "fixed_date_only"
+    : intents.length < possible
+      ? "combination_budget_reached"
+      : "complete";
+  return {
+    intents,
+    maximumCombinations: boundedMaximum,
+    exploredDates: [...new Set(intents.map((item) => item.departureDate))],
+    exploredOrigins: [...new Set(intents.map((item) => item.origin.code))],
+    exploredDestinations: [...new Set(intents.map((item) => item.destination.code))],
+    stoppedReason,
+    disclosure: `实际规划 ${intents.length}/${possible} 个日期与机场组合，硬上限 ${boundedMaximum} 个。`,
+  };
+}
 
 export function sumRequiredPriceComponents(offer: Offer): number {
   return offer.priceComponents.reduce((total, component) => {

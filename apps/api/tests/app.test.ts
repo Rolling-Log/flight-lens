@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { FlightConnector } from "@flight-lens/connectors";
-import type { Offer } from "@flight-lens/contracts";
+import type { Offer, PriceAlert } from "@flight-lens/contracts";
 import { buildApp } from "../src/app.js";
 import type { ApiConfig } from "../src/config.js";
+import type { V2Store } from "@flight-lens/database";
+import type { MonitorQueue } from "../src/monitor-queue.js";
 
 const config: ApiConfig = {
   nodeEnv: "test",
@@ -15,6 +17,9 @@ const config: ApiConfig = {
   openaiModel: "gpt-5.6-luna",
   connectorTimeoutMs: 500,
   auditTimeoutMs: 50,
+  monitorBatchMax: 5,
+  monitorExecutionTimeoutMs: 45_000,
+  ntfyBaseUrl: "https://ntfy.sh",
   connectors: {
     skyscannerBaseUrl: "https://partners.api.skyscanner.net",
     serpApiBaseUrl: "https://serpapi.com",
@@ -30,7 +35,7 @@ const validIntent = {
   origin: { kind: "airport", code: "PVG" },
   destination: { kind: "airport", code: "NRT" },
   departureDate: "2026-08-24",
-};
+} as const;
 const fixedNow = () => new Date("2026-07-30T00:00:00.000Z");
 
 function comparableOffer(overrides: Partial<Offer> = {}): Offer {
@@ -635,5 +640,241 @@ test("supports multiple adults while keeping the V1 search path to fixed dates",
   assert.equal(response.statusCode, 422);
   assert.equal(response.json().error.code, "V1_SCOPE_UNSUPPORTED");
   assert.deepEqual(response.json().error.fields, ["flexibleDays"]);
+  await app.close();
+});
+
+function v2StoreStub(overrides: Partial<V2Store> = {}): V2Store {
+  return {
+    history: async () => [],
+    createAlert: async () => { throw new Error("not implemented"); },
+    listAlerts: async () => [],
+    getAlert: async () => null,
+    getOwnedAlert: async () => null,
+    setAlertStatus: async () => false,
+    dueAlerts: async () => [],
+    claimAlertRun: async () => null,
+    finishAlertRun: async () => undefined,
+    savePreferences: async () => undefined,
+    getPreferences: async () => null,
+    clearPreferences: async () => undefined,
+    clearAlerts: async () => 0,
+    close: async () => undefined,
+    ...overrides,
+  };
+}
+
+test("returns separate V2 price trends without merging price semantics", async () => {
+  const history = [
+    { amount: 120_000, at: "2026-07-27T00:00:00.000Z" },
+    { amount: 110_000, at: "2026-07-28T00:00:00.000Z" },
+    { amount: 90_000, at: "2026-07-29T00:00:00.000Z" },
+  ].map(({ amount, at }, index) => ({
+    id: crypto.randomUUID(),
+    searchId: crypto.randomUUID(),
+    itineraryFingerprint: "MU5102:PEK:SHA:2026-08-24",
+    routeKey: "PEK-SHA",
+    departureDate: "2026-08-24",
+    returnDate: null,
+    cabin: "economy" as const,
+    connectorId: "verified-source",
+    inventoryFamily: "verified-family",
+    sellerId: "seller",
+    sellerName: "Seller",
+    observationKind: "verified_all_in" as const,
+    baseAmountMinor: amount - 5_000,
+    taxAmountMinor: 5_000,
+    fuelAmountMinor: null,
+    requiredServiceAmountMinor: null,
+    totalAmountMinor: amount,
+    currency: "CNY",
+    totalAmountCnyMinor: amount,
+    baggage: [],
+    priceVerificationStatus: "detail_verified" as const,
+    handoffPrecision: "exact_offer" as const,
+    evidenceRef: `evidence-${index}`,
+    observedAt: at,
+  }));
+  const app = await buildApp({
+    config,
+    connectors: [],
+    auditStore: null,
+    v2Store: v2StoreStub({ history: async () => history }),
+    now: fixedNow,
+  });
+  const response = await app.inject({
+    method: "GET",
+    url: "/v2/prices/history?origin=PEK&destination=SHA&departureDate=2026-08-24",
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().trends.verified_all_in.direction, "falling");
+  assert.equal(response.json().trends.listed_only.direction, "insufficient_data");
+  assert.equal(response.json().observations.length, 3);
+  await app.close();
+});
+
+test("plans bounded V2 exploration without spending provider quota", async () => {
+  const app = await buildApp({ config, connectors: [], auditStore: null, v2Store: null, now: fixedNow });
+  const response = await app.inject({
+    method: "POST",
+    url: "/v2/searches/plan",
+    payload: {
+      intent: { ...validIntent, origin: { kind: "city", code: "BJS" }, destination: { kind: "city", code: "SHA" }, flexibleDays: 3, includeNearbyAirports: true },
+      maximumCombinations: 4,
+    },
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().intents.length, 4);
+  assert.equal(response.json().stoppedReason, "combination_budget_reached");
+  await app.close();
+});
+
+test("protects monitor wake and respects the configured batch maximum", async () => {
+  const enqueued: string[] = [];
+  const queue: MonitorQueue = {
+    start: async () => undefined,
+    enqueue: async (alertId) => { enqueued.push(alertId); return alertId; },
+    stop: async () => undefined,
+  };
+  const due = Array.from({ length: 5 }, (_, index) => ({ id: `00000000-0000-4000-8000-00000000000${index}` }));
+  const app = await buildApp({
+    config: { ...config, monitorWakeSecret: "monitor-secret-value", monitorBatchMax: 2 },
+    connectors: [],
+    auditStore: null,
+    v2Store: v2StoreStub({ dueAlerts: async (limit) => due.slice(0, limit) as never }),
+    monitorQueue: queue,
+    now: fixedNow,
+  });
+  const denied = await app.inject({ method: "POST", url: "/internal/monitor/wake" });
+  assert.equal(denied.statusCode, 401);
+  const allowed = await app.inject({
+    method: "POST",
+    url: "/internal/monitor/wake",
+    headers: { authorization: "Bearer monitor-secret-value" },
+  });
+  assert.equal(allowed.statusCode, 200);
+  assert.deepEqual(allowed.json(), { due: 2, enqueued: 2, batchMaximum: 2 });
+  assert.equal(enqueued.length, 2);
+  await app.close();
+});
+
+function activeAlert(): PriceAlert {
+  return {
+    id: "00000000-0000-4000-8000-000000000001",
+    intent: { ...validIntent, adults: 1, cabin: "economy" as const, flexibleDays: 0, directOnly: false, maxStops: 1, avoidRedEye: false, minimumCheckedBaggageKg: 0, includeNearbyAirports: false, explicitFields: [], inferredFields: [], pendingQuestions: [] },
+    targetAmountCnyMinor: 210_000,
+    checkIntervalMinutes: 360,
+    ntfyTopic: "flight-lens-test",
+    status: "active" as const,
+    nextCheckAt: fixedNow().toISOString(),
+    lastCheckedAt: null,
+    lastTriggeredAt: null,
+    lastTriggeredAmountMinor: null,
+    lastErrorCode: null,
+    createdAt: fixedNow().toISOString(),
+    updatedAt: fixedNow().toISOString(),
+  };
+}
+
+test("queues an owned active alert for immediate verification", async () => {
+  const queued: string[] = [];
+  const queue: MonitorQueue = {
+    start: async () => undefined,
+    enqueue: async (alertId) => { queued.push(alertId); return "job-1"; },
+    stop: async () => undefined,
+  };
+  const alert = activeAlert();
+  const app = await buildApp({
+    config,
+    connectors: [],
+    auditStore: null,
+    v2Store: v2StoreStub({ getOwnedAlert: async (id, owner) => id === alert.id && owner === "owner-token-value" ? alert : null }),
+    monitorQueue: queue,
+    now: fixedNow,
+  });
+  const denied = await app.inject({ method: "POST", url: `/v2/alerts/${alert.id}/test` });
+  assert.equal(denied.statusCode, 401);
+  const accepted = await app.inject({
+    method: "POST",
+    url: `/v2/alerts/${alert.id}/test`,
+    headers: { "x-flight-lens-owner": "owner-token-value" },
+  });
+  assert.equal(accepted.statusCode, 202);
+  assert.deepEqual(queued, [alert.id]);
+  await app.close();
+});
+
+test("clears all alerts owned by an anonymous token", async () => {
+  const app = await buildApp({
+    config,
+    connectors: [],
+    auditStore: null,
+    v2Store: v2StoreStub({ clearAlerts: async (owner) => owner === "owner-token-value" ? 3 : 0 }),
+    now: fixedNow,
+  });
+  const response = await app.inject({
+    method: "DELETE",
+    url: "/v2/alerts",
+    headers: { "x-flight-lens-owner": "owner-token-value" },
+  });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), { deleted: 3 });
+  await app.close();
+});
+
+test("persists monitored history before a notification failure and records the retryable failure", async () => {
+  const alert = activeAlert();
+  const handlerRef: { current?: (alertId: string) => Promise<void> } = {};
+  const queue: MonitorQueue = {
+    start: async (value) => { handlerRef.current = value; },
+    enqueue: async () => "job-1",
+    stop: async () => undefined,
+  };
+  const persisted: unknown[] = [];
+  const finished: Array<{ notificationSent: boolean; errorCode: string | null; amountCnyMinor: number | null }> = [];
+  const connector: FlightConnector = {
+    ...readinessConnector("monitor-source", "purchase_handoff", "monitor-family"),
+    search: async () => ({ offers: [comparableOffer()] }),
+  };
+  const app = await buildApp({
+    config,
+    connectors: [connector],
+    auditStore: { persist: async (payload) => { persisted.push(payload); }, close: async () => undefined },
+    v2Store: v2StoreStub({
+      getAlert: async () => alert,
+      claimAlertRun: async () => "run-1",
+      finishAlertRun: async (input) => { finished.push({ notificationSent: input.notificationSent, errorCode: input.errorCode, amountCnyMinor: input.amountCnyMinor }); },
+    }),
+    monitorQueue: queue,
+    notifier: { send: async () => { throw new Error("ntfy unavailable"); } },
+    now: fixedNow,
+  });
+  assert.ok(handlerRef.current);
+  await handlerRef.current(alert.id);
+  assert.equal(persisted.length, 1);
+  assert.deepEqual(finished, [{ notificationSent: false, errorCode: "NOTIFICATION_FAILED", amountCnyMinor: 200_000 }]);
+  await app.close();
+});
+
+test("does not execute the same alert twice inside one idempotency bucket", async () => {
+  const alert = activeAlert();
+  const handlerRef: { current?: (alertId: string) => Promise<void> } = {};
+  let searches = 0;
+  const queue: MonitorQueue = { start: async (value) => { handlerRef.current = value; }, enqueue: async () => "job", stop: async () => undefined };
+  const connector: FlightConnector = {
+    ...readinessConnector("monitor-dedupe", "purchase_handoff", "monitor-dedupe"),
+    search: async () => { searches += 1; return { offers: [comparableOffer()] }; },
+  };
+  const app = await buildApp({
+    config,
+    connectors: [connector],
+    auditStore: null,
+    v2Store: v2StoreStub({ getAlert: async () => alert, claimAlertRun: async () => null }),
+    monitorQueue: queue,
+    now: fixedNow,
+  });
+  assert.ok(handlerRef.current);
+  await handlerRef.current(alert.id);
+  await handlerRef.current(alert.id);
+  assert.equal(searches, 0);
   await app.close();
 });

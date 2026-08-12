@@ -16,7 +16,8 @@
     "test": "node --import tsx --test tests/**/*.test.ts"
   },
   "dependencies": {
-    "@flight-lens/contracts": "workspace:*"
+    "@flight-lens/contracts": "workspace:*",
+    "simple-statistics": "^7.10.0"
   },
   "devDependencies": {
     "@types/node": "^22.19.19",

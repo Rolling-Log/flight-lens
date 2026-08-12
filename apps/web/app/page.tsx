@@ -22,6 +22,7 @@ import {
   isSingleSourceLiveResult,
   resultSourceStatus,
 } from "../src/result-source-status";
+import { V2Panel } from "../src/v2-panel";
 
 type Mode = "agent" | "form";
 type SortKey =
@@ -959,6 +960,8 @@ export default function Home() {
                     <p>{result.disclosure.statement}</p>
                   </div>
                 </div>
+
+                <V2Panel apiBase={apiBase()} intent={result.intent} />
 
                 <div className="result-toolbar">
                   <div className="sort-tabs">
