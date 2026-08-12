@@ -12,9 +12,18 @@ export function analyzePriceTrend(
   samples: readonly { amountMinor: number; observedAt: string }[],
   windowDays = 90,
 ): PriceTrend {
-  const valid = samples
+  const validSamples = samples
     .filter((sample) => Number.isSafeInteger(sample.amountMinor) && sample.amountMinor >= 0)
     .sort((left, right) => left.observedAt.localeCompare(right.observedAt));
+  const dailyMinimums = new Map<string, { amountMinor: number; observedAt: string }>();
+  for (const sample of validSamples) {
+    const date = sample.observedAt.slice(0, 10);
+    const current = dailyMinimums.get(date);
+    if (!current || sample.amountMinor < current.amountMinor) {
+      dailyMinimums.set(date, { amountMinor: sample.amountMinor, observedAt: date });
+    }
+  }
+  const valid = [...dailyMinimums.values()].sort((left, right) => left.observedAt.localeCompare(right.observedAt));
   if (valid.length < 3) {
     return {
       direction: "insufficient_data",
@@ -27,7 +36,7 @@ export function analyzePriceTrend(
       percentile: null,
       changePercent: null,
       outlierCount: 0,
-      explanation: `仅有 ${valid.length} 个样本，至少需要 3 个样本才能判断趋势。`,
+      explanation: `仅有 ${valid.length} 个观测日，至少需要 3 个观测日才能判断趋势。`,
     };
   }
 
@@ -60,7 +69,7 @@ export function analyzePriceTrend(
     percentile: Math.round(percentile * 10) / 10,
     changePercent: Math.round(changePercent * 10) / 10,
     outlierCount: valid.length - usable.length,
-    explanation: `最近 ${recentCount} 个样本均价较此前${labels[direction]} ${Math.abs(changePercent).toFixed(1)}%，共 ${valid.length} 个样本。`,
+    explanation: `最近 ${recentCount} 个观测日均价较此前${labels[direction]} ${Math.abs(changePercent).toFixed(1)}%，共 ${valid.length} 个观测日。`,
   };
 }
 

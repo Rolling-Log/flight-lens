@@ -194,13 +194,13 @@ h1 em { font-style: normal; color: var(--blue); }
 .v2-panel { margin-top: 14px; border: 1px solid var(--line); background: white; border-radius: 8px; overflow: hidden; }
 .v2-panel-head { min-height: 54px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); }
 .v2-panel-head > div:first-child { display: flex; align-items: center; gap: 8px; }
-.v2-panel-head > div:first-child > span { color: white; background: var(--blue); border-radius: 5px; padding: 4px 6px; font-size: 8px; font-weight: 900; }
 .v2-panel h3 { margin: 0; font-size: 13px; }
 .v2-tabs { display: flex; gap: 2px; background: #eef2f7; padding: 3px; border-radius: 7px; }
 .v2-tabs button { border: 0; background: transparent; color: var(--muted-strong); border-radius: 5px; padding: 6px 9px; font-size: 9px; }
 .v2-tabs button.selected { color: var(--blue); background: white; font-weight: 800; box-shadow: 0 1px 4px rgba(17,46,97,.12); }
 .history-workspace, .alert-workspace { padding: 14px; }
 .history-range { display: flex; justify-content: flex-end; gap: 3px; margin-bottom: 10px; }
+.history-scope { margin: -2px 0 10px; color: var(--muted-strong); font-size: 9px; }
 .history-range button { border: 1px solid var(--line); background: white; color: var(--muted-strong); border-radius: 5px; padding: 5px 8px; font-size: 8px; }
 .history-range button.selected { border-color: var(--blue); color: var(--blue); font-weight: 800; }
 .trend-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
@@ -217,6 +217,7 @@ h1 em { font-style: normal; color: var(--blue); }
 .alert-form > button { min-height: 34px; border: 0; border-radius: 6px; padding: 0 12px; color: white; background: var(--blue); font-size: 9px; font-weight: 800; }
 .alert-form > button:disabled { opacity: .45; }
 .alert-form > span { grid-column: 1 / -1; color: var(--green); font-size: 9px; }
+.alert-delivery-note { margin: 10px 0 0; color: var(--muted-strong); font-size: 9px; line-height: 1.55; }
 .alert-list { display: grid; gap: 6px; margin-top: 12px; }
 .alert-list > p { color: var(--muted-strong); font-size: 10px; }
 .alert-list article { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 6px; align-items: center; border-top: 1px solid var(--line); padding-top: 8px; }

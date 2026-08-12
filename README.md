@@ -62,6 +62,6 @@ docs                产品、架构与运行文档
 
 V2 的历史曲线继续把“最低可核验全价”“来源展示价”和“两张单程分开购买价”分别保存和分析，三者不会合并成一条价格趋势。提醒任务只依据人民币最低可核验全价触发；通知失败不会丢失本次查询和价格历史。
 
-详细范围见 [PRD](./PRD.md)，工程决策见 [ARCHITECTURE](./ARCHITECTURE.md)，部署步骤见 [DEPLOYMENT](./DEPLOYMENT.md)，V1 发布门禁见 [V1_ACCEPTANCE](./docs/V1_ACCEPTANCE.md)，四来源登录与验证步骤见 [PROVIDER_ONBOARDING](./docs/PROVIDER_ONBOARDING.md)。
+详细范围见 [PRD](./PRD.md)，工程决策见 [ARCHITECTURE](./ARCHITECTURE.md)，部署步骤见 [DEPLOYMENT](./DEPLOYMENT.md)，V1 发布门禁见 [V1_ACCEPTANCE](./docs/V1_ACCEPTANCE.md)，四来源登录与验证步骤见 [PROVIDER_ONBOARDING](./docs/PROVIDER_ONBOARDING.md)，V3 账号方案见 [V3_AUTH_OPTIONS](./docs/V3_AUTH_OPTIONS.md)。
 
 本地真实来源验收命令与 2026-08-11 的结果见 [V1_ACCEPTANCE_REPORT](./docs/V1_ACCEPTANCE_REPORT.md)。

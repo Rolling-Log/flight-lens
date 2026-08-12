@@ -387,6 +387,19 @@ test("reports insufficient trend data and filters a large outlier", () => {
   assert.equal(trend.currentAmountMinor, 94_000);
 });
 
+test("counts same-day offers as one daily price observation", () => {
+  const trend = analyzePriceTrend([
+    { amountMinor: 120_000, observedAt: "2026-08-01T09:00:00Z" },
+    { amountMinor: 115_000, observedAt: "2026-08-01T09:01:00Z" },
+    { amountMinor: 110_000, observedAt: "2026-08-02T09:00:00Z" },
+  ]);
+
+  assert.equal(trend.direction, "insufficient_data");
+  assert.equal(trend.sampleCount, 2);
+  assert.equal(trend.historicalLowAmountMinor, 110_000);
+  assert.match(trend.explanation, /2 个观测日/);
+});
+
 test("bounds flexible-date and nearby-airport exploration", () => {
   const plan = planBoundedSearch({
     schemaVersion: "1",

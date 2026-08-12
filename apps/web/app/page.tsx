@@ -662,7 +662,7 @@ export default function Home() {
           <a href="#principles">如何推荐</a>
         </nav>
         <button className="ghost-button" onClick={(event) => openCoverage(event.currentTarget)}>
-          覆盖透明度 <span className="live-dot" /> V1 接入中
+          覆盖透明度 <span className="live-dot" /> 接入中
         </button>
       </header>
 
@@ -904,7 +904,7 @@ export default function Home() {
         </div>
 
         <div className="trust-row">
-          <span>V1 原则</span>
+          <span>产品原则</span>
           <b>授权来源</b><b>统一全价</b><b>失败披露</b><b>证据可追溯</b>
           <button onClick={(event) => openCoverage(event.currentTarget)}>了解来源状态 +</button>
         </div>
@@ -1296,7 +1296,7 @@ export default function Home() {
       <footer>
         <div className="brand"><span className="brand-mark">航</span><span>航探 <small>Flight Lens</small></span></div>
         <p>只负责搜索与解释，不售票、不代收款。最终价格与规则以来源平台支付页为准。</p>
-        <span>V1 开发版 · 2026</span>
+        <span>开发版 · 2026</span>
       </footer>
 
       {showCoverage && (

@@ -42,6 +42,48 @@ function historyUrl(apiBase: string, intent: SearchIntent, days: number): string
   return `${apiBase}/v2/prices/history?${params}`;
 }
 
+type HistoryObservation = PriceHistoryResponse["observations"][number];
+type HistoryChartPoint = {
+  observedAt: string;
+  label: string;
+  [key: string]: string | number | null;
+};
+
+function dayKey(value: string | Date): string {
+  return (value instanceof Date ? value : new Date(value)).toISOString().slice(0, 10);
+}
+
+/** Keep the requested date window visible while leaving unobserved dates blank. */
+export function buildHistoryChartData(
+  observations: HistoryObservation[],
+  windowDays: number,
+  now = new Date(),
+): HistoryChartPoint[] {
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const start = new Date(end.getTime() - (Math.max(1, windowDays) - 1) * 86_400_000);
+  const points = new Map<string, HistoryChartPoint>();
+  for (let cursor = start.getTime(); cursor <= end.getTime(); cursor += 86_400_000) {
+    const date = new Date(cursor);
+    const key = dayKey(date);
+    points.set(key, {
+      observedAt: `${key}T00:00:00.000Z`,
+      label: key.slice(5).replace("-", "/"),
+    });
+  }
+
+  for (const item of observations) {
+    if (item.totalAmountCnyMinor === null) continue;
+    const key = dayKey(item.observedAt);
+    const point = points.get(key);
+    if (!point) continue;
+    const seriesKey = `${item.observationKind}::${item.sellerId}`;
+    const amount = item.totalAmountCnyMinor / 100;
+    const current = point[seriesKey];
+    point[seriesKey] = typeof current === "number" ? Math.min(current, amount) : amount;
+  }
+  return [...points.values()];
+}
+
 export function V2Panel({ apiBase, intent }: V2PanelProps) {
   const [view, setView] = useState<"history" | "alerts" | "preferences">("history");
   const [historyDays, setHistoryDays] = useState(90);
@@ -89,20 +131,24 @@ export function V2Panel({ apiBase, intent }: V2PanelProps) {
       .catch(() => undefined);
   }, [apiBase, view]);
 
-  const chartSeries = useMemo(() => [...new Map((history?.observations ?? [])
-    .filter((item) => item.totalAmountCnyMinor !== null)
-    .map((item) => [`${item.observationKind}::${item.sellerId}`, {
-      key: `${item.observationKind}::${item.sellerId}`,
-      kind: item.observationKind,
-      seller: item.sellerName,
-    }])).values()], [history]);
-  const chartData = useMemo(() => (history?.observations ?? [])
-    .filter((item) => item.totalAmountCnyMinor !== null)
-    .map((item) => ({
-      observedAt: item.observedAt,
-      label: new Date(item.observedAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }),
-      [`${item.observationKind}::${item.sellerId}`]: item.totalAmountCnyMinor! / 100,
-    })), [history]);
+  const chartData = useMemo(
+    () => buildHistoryChartData(history?.observations ?? [], historyDays),
+    [history, historyDays],
+  );
+  const chartSeries = useMemo(() => {
+    const keysWithValues = new Set(chartData.flatMap((point) => Object.keys(point).filter((key) => key.includes("::") && typeof point[key] === "number")));
+    return [...new Map((history?.observations ?? [])
+      .filter((item) => item.totalAmountCnyMinor !== null && keysWithValues.has(`${item.observationKind}::${item.sellerId}`))
+      .map((item) => [`${item.observationKind}::${item.sellerId}`, {
+        key: `${item.observationKind}::${item.sellerId}`,
+        kind: item.observationKind,
+        seller: item.sellerName,
+      }])).values()];
+  }, [chartData, history]);
+  const observedDays = useMemo(
+    () => new Set((history?.observations ?? []).filter((item) => item.totalAmountCnyMinor !== null).map((item) => dayKey(item.observedAt))).size,
+    [history],
+  );
 
   async function createAlert() {
     setMessage("");
@@ -189,7 +235,7 @@ export function V2Panel({ apiBase, intent }: V2PanelProps) {
   return (
     <section className="v2-panel" aria-label="价格历史与提醒">
       <div className="v2-panel-head">
-        <div><span>V2</span><h3>价格历史与提醒</h3></div>
+        <div><h3>价格历史与提醒</h3></div>
         <div className="v2-tabs" role="tablist" aria-label="价格工具">
           <button className={view === "history" ? "selected" : ""} onClick={() => setView("history")} role="tab" aria-selected={view === "history"}>价格历史</button>
           <button className={view === "alerts" ? "selected" : ""} onClick={() => setView("alerts")} role="tab" aria-selected={view === "alerts"}>价格提醒</button>
@@ -203,17 +249,18 @@ export function V2Panel({ apiBase, intent }: V2PanelProps) {
             {[30, 90, 180].map((days) => <button key={days} className={historyDays === days ? "selected" : ""} onClick={() => setHistoryDays(days)}>{days} 天</button>)}
             <button onClick={clearHistory}>清除当前路线历史</button>
           </div>
+          <div className="history-scope">过去 {historyDays} 天 · 已观察 {observedDays} 天 · 未观察日期不补点</div>
           <div className="trend-strip">
             {(Object.keys(kindLabels) as Array<keyof typeof kindLabels>).map((kind) => {
               const trend = history?.trends[kind];
               return <div key={kind}>
                 <span style={{ color: kindColors[kind] }}>{kindLabels[kind]}</span>
                 <b>{trend?.direction === "rising" ? "上涨" : trend?.direction === "falling" ? "下降" : trend?.direction === "stable" ? "稳定" : "样本不足"}</b>
-                <small>{trend ? `${trend.sampleCount} 个样本 · 当前 ${trend.currentAmountMinor === null ? "暂无" : `¥${Math.round(trend.currentAmountMinor / 100)}`} · 最低 ${trend.historicalLowAmountMinor === null ? "暂无" : `¥${Math.round(trend.historicalLowAmountMinor / 100)}`} · ${trend.explanation}` : "正在读取历史"}</small>
+                <small>{trend ? `${trend.sampleCount} 个观测日 · 最近日最低 ${trend.currentAmountMinor === null ? "暂无" : `¥${Math.round(trend.currentAmountMinor / 100)}`} · 历史最低 ${trend.historicalLowAmountMinor === null ? "暂无" : `¥${Math.round(trend.historicalLowAmountMinor / 100)}`} · ${trend.explanation}` : "正在读取历史"}</small>
               </div>;
             })}
           </div>
-          {chartData.length ? (
+          {chartSeries.length ? (
             <div className="history-chart" aria-label="价格历史曲线">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartData} margin={{ top: 12, right: 18, bottom: 4, left: 0 }}>
@@ -222,7 +269,7 @@ export function V2Panel({ apiBase, intent }: V2PanelProps) {
                   <YAxis tick={{ fontSize: 9 }} width={48} tickFormatter={(value) => `¥${value}`} />
                   <Tooltip formatter={(value) => [`¥${Number(value).toLocaleString("zh-CN")}`, "价格"]} />
                   {chartSeries.map((series, index) => (
-                    <Line key={series.key} dataKey={series.key} name={`${kindLabels[series.kind]} · ${series.seller}`} stroke={kindColors[series.kind]} strokeDasharray={index % 3 === 1 ? "5 3" : index % 3 === 2 ? "2 3" : undefined} connectNulls strokeWidth={2} dot={{ r: 3 }} isAnimationActive={false} />
+                    <Line key={series.key} dataKey={series.key} name={`${kindLabels[series.kind]} · ${series.seller}`} stroke={kindColors[series.kind]} strokeDasharray={index % 3 === 1 ? "5 3" : index % 3 === 2 ? "2 3" : undefined} connectNulls={false} strokeWidth={2} dot={{ r: 3 }} isAnimationActive={false} />
                   ))}
                 </LineChart>
               </ResponsiveContainer>
@@ -238,6 +285,7 @@ export function V2Panel({ apiBase, intent }: V2PanelProps) {
             <button onClick={createAlert} disabled={!topic || targetCny <= 0}>创建提醒</button>
             {message && <span role="status">{message}</span>}
           </div>
+          <p className="alert-delivery-note">提醒由服务端按频率核验，网页无需保持打开；达到目标的可核验全价后，会推送到你订阅的 ntfy Topic（App 或 Web）。</p>
           <div className="alert-list">
             {alerts.length === 0 && <p>当前查询没有提醒。</p>}
             {alerts.map((alert) => <article key={alert.id}>
