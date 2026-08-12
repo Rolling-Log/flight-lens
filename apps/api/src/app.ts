@@ -466,6 +466,16 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     return reply.send(priceHistoryResponseSchema.parse({ query: parsed.data, observations, trends }));
   });
 
+  app.delete("/v2/prices/history", async (request, reply) => {
+    if (!v2Store) return reply.status(503).send({ error: { code: "V2_STORE_UNCONFIGURED" } });
+    if (!ownerTokenFrom(request.headers)) {
+      return reply.status(401).send({ error: { code: "OWNER_TOKEN_REQUIRED" } });
+    }
+    const parsed = priceHistoryQuerySchema.safeParse(request.query);
+    if (!parsed.success) return reply.status(400).send({ error: { code: "INVALID_HISTORY_QUERY", message: "价格历史查询条件不合法。", issues: parsed.error.issues } });
+    return reply.send({ deleted: await v2Store.clearHistory(parsed.data) });
+  });
+
   app.post("/v2/searches/plan", async (request, reply) => {
     const body = request.body as { intent?: unknown; maximumCombinations?: unknown };
     const parsed = searchIntentSchema.safeParse(body?.intent);

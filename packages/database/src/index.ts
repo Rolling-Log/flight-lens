@@ -287,6 +287,20 @@ export function createV2Store(url: string) {
         .where(and(...filters)).orderBy(schema.priceObservations.observedAt).limit(2_000);
       return rows.map(mapObservation);
     },
+    async clearHistory(query: PriceHistoryQuery): Promise<number> {
+      const filters = [
+        eq(schema.priceObservations.routeKey, `${query.origin}-${query.destination}`),
+        eq(schema.priceObservations.departureDate, query.departureDate),
+        eq(schema.priceObservations.cabin, query.cabin),
+      ];
+      if (query.returnDate) filters.push(eq(schema.priceObservations.returnDate, query.returnDate));
+      if (query.sellerId) filters.push(eq(schema.priceObservations.sellerId, query.sellerId));
+      if (query.flight) filters.push(sql`${schema.priceObservations.flightNumbers} ? ${query.flight}`);
+      const deleted = await database.db.delete(schema.priceObservations)
+        .where(and(...filters))
+        .returning({ id: schema.priceObservations.id });
+      return deleted.length;
+    },
     async createAlert(input: CreatePriceAlert): Promise<PriceAlert> {
       const now = new Date();
       const id = crypto.randomUUID();

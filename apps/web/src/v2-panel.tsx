@@ -172,6 +172,20 @@ export function V2Panel({ apiBase, intent }: V2PanelProps) {
     }
   }
 
+  async function clearHistory() {
+    const token = ownerToken();
+    const response = await fetch(historyUrl(apiBase, intent, historyDays), {
+      method: "DELETE",
+      headers: { "x-flight-lens-owner": token },
+    });
+    if (response.ok) {
+      setHistory(null);
+      setMessage("当前路线的公共价格历史已清除。");
+    } else {
+      setMessage("价格历史清除失败");
+    }
+  }
+
   return (
     <section className="v2-panel" aria-label="价格历史与提醒">
       <div className="v2-panel-head">
@@ -187,6 +201,7 @@ export function V2Panel({ apiBase, intent }: V2PanelProps) {
         <div className="history-workspace">
           <div className="history-range" aria-label="价格历史时间范围">
             {[30, 90, 180].map((days) => <button key={days} className={historyDays === days ? "selected" : ""} onClick={() => setHistoryDays(days)}>{days} 天</button>)}
+            <button onClick={clearHistory}>清除当前路线历史</button>
           </div>
           <div className="trend-strip">
             {(Object.keys(kindLabels) as Array<keyof typeof kindLabels>).map((kind) => {

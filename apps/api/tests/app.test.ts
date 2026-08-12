@@ -646,6 +646,7 @@ test("supports multiple adults while keeping the V1 search path to fixed dates",
 function v2StoreStub(overrides: Partial<V2Store> = {}): V2Store {
   return {
     history: async () => [],
+    clearHistory: async () => 0,
     createAlert: async () => { throw new Error("not implemented"); },
     listAlerts: async () => [],
     getAlert: async () => null,
@@ -709,6 +710,29 @@ test("returns separate V2 price trends without merging price semantics", async (
   assert.equal(response.json().trends.verified_all_in.direction, "falling");
   assert.equal(response.json().trends.listed_only.direction, "insufficient_data");
   assert.equal(response.json().observations.length, 3);
+  await app.close();
+});
+
+test("clears route history only with an anonymous owner token", async () => {
+  const app = await buildApp({
+    config,
+    connectors: [],
+    auditStore: null,
+    v2Store: v2StoreStub({ clearHistory: async () => 7 }),
+    now: fixedNow,
+  });
+  const denied = await app.inject({
+    method: "DELETE",
+    url: "/v2/prices/history?origin=PEK&destination=SHA&departureDate=2026-08-24&cabin=economy",
+  });
+  assert.equal(denied.statusCode, 401);
+  const accepted = await app.inject({
+    method: "DELETE",
+    url: "/v2/prices/history?origin=PEK&destination=SHA&departureDate=2026-08-24&cabin=economy",
+    headers: { "x-flight-lens-owner": "owner-token-value" },
+  });
+  assert.equal(accepted.statusCode, 200);
+  assert.deepEqual(accepted.json(), { deleted: 7 });
   await app.close();
 });
 
