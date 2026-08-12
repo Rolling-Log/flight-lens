@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1785403361907,
+      "tag": "0000_foamy_firebird",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785419955314,
+      "tag": "0001_hot_nick_fury",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786418476625,
+      "tag": "0002_domestic_connector_states",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786420800000,
+      "tag": "0003_unsupported_query_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786522220147,
+      "tag": "0004_big_thing",
+      "breakpoints": true
+    }
+  ]
+}

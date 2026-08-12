@@ -1,0 +1,44 @@
+{
+  "name": "@flight-lens/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/app.ts",
+      "development": "./src/app.ts",
+      "default": "./dist/app.js"
+    }
+  },
+  "scripts": {
+    "dev": "tsx watch --conditions=development src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "preview": "node dist/index.js",
+    "smoke:live": "node --conditions=development --import tsx scripts/live-search.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests --max-warnings=0",
+    "test": "node --conditions=development --import tsx --test tests/**/*.test.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.1.0",
+    "@fastify/rate-limit": "^10.3.0",
+    "@flight-lens/connectors": "workspace:*",
+    "@flight-lens/contracts": "workspace:*",
+    "@flight-lens/database": "workspace:*",
+    "@flight-lens/domain": "workspace:*",
+    "dotenv": "^17.2.3",
+    "fastify": "^5.11.0",
+    "openai": "^6.7.0",
+    "pg-boss": "^12.27.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^22.19.19",
+    "eslint": "^9.39.4",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.2"
+  }
+}

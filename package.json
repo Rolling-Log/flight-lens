@@ -1,0 +1,28 @@
+{
+  "name": "flight-lens",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Transparent flight offer search for routes within, from, and to China.",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @flight-lens/web --filter @flight-lens/api dev",
+    "dev:web": "pnpm --filter @flight-lens/web dev",
+    "dev:api": "pnpm --filter @flight-lens/api dev",
+    "preview": "pnpm --parallel --filter @flight-lens/web --filter @flight-lens/api preview",
+    "build": "pnpm -r --if-present build",
+    "build:web": "pnpm --filter @flight-lens/web... build",
+    "build:api": "pnpm --filter @flight-lens/api... build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "pnpm -r --if-present lint",
+    "test": "pnpm -r --if-present test",
+    "test:e2e": "playwright test",
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.12.1",
+    "@playwright/test": "1.58.2"
+  }
+}

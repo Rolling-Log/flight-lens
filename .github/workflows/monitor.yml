@@ -1,0 +1,33 @@
+name: Wake price monitors
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flight-lens-monitor-wake
+  cancel-in-progress: false
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Wake bounded monitor batch
+        env:
+          API_URL: ${{ vars.FLIGHT_LENS_API_URL }}
+          WAKE_SECRET: ${{ secrets.FLIGHT_LENS_MONITOR_WAKE_SECRET }}
+        run: |
+          test -n "$API_URL"
+          test -n "$WAKE_SECRET"
+          curl --fail-with-body --silent --show-error \
+            --max-time 55 \
+            --retry 2 \
+            --retry-all-errors \
+            -X POST \
+            -H "Authorization: Bearer $WAKE_SECRET" \
+            "$API_URL/internal/monitor/wake"
