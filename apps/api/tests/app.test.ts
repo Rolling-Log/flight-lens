@@ -472,6 +472,46 @@ test("returns separate verifiable-all-in, recommendation, and split-ticket concl
   await app.close();
 });
 
+test("returns SerpApi market history and a same-semantics five-level judgment", async () => {
+  const history = [70, 80, 90, 100, 110, 120, 130, 140, 150, 160].map((amount, index) => ({
+    date: `2026-07-${String(index + 1).padStart(2, "0")}`,
+    amountMinor: amount * 1_000,
+  }));
+  const connector: FlightConnector = {
+    ...readinessConnector("serpapi-google-flights", "purchase_handoff", "google-flights"),
+    search: async () => ({
+      offers: [],
+      marketPriceInsights: [{
+        sourceId: "serpapi-google-flights",
+        sourceName: "Google Flights 市场洞察",
+        fetchedAt: fixedNow().toISOString(),
+        currency: "CNY",
+        originCode: "PVG",
+        destinationCode: "NRT",
+        departureDate: "2026-08-24",
+        returnDate: null,
+        tripType: "one_way",
+        cabin: "economy",
+        adults: 1,
+        priceBasis: "listed_only",
+        lowestPriceMinor: 70_000,
+        priceLevel: "low",
+        typicalPriceRangeMinor: [90_000, 130_000],
+        history,
+      }],
+    }),
+  };
+  const app = await buildApp({ config, connectors: [connector], auditStore: null, now: fixedNow });
+  const response = await app.inject({ method: "POST", url: "/v1/searches", payload: validIntent });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().marketPriceInsights[0].history.length, 10);
+  assert.equal(response.json().priceJudgment.level, "top");
+  assert.equal(response.json().priceJudgment.currentPriceBasis, "listed_only");
+  assert.equal(response.json().priceJudgment.basis, "external_history");
+  await app.close();
+});
+
 test("returns search results when audit persistence exceeds its runtime budget", async () => {
   const connector: FlightConnector = {
     metadata: {
@@ -677,6 +717,7 @@ test("returns separate V2 price trends without merging price semantics", async (
     departureDate: "2026-08-24",
     returnDate: null,
     cabin: "economy" as const,
+    adults: 1,
     connectorId: "verified-source",
     inventoryFamily: "verified-family",
     sellerId: "seller",
@@ -733,6 +774,40 @@ test("clears route history only with an anonymous owner token", async () => {
   });
   assert.equal(accepted.statusCode, 200);
   assert.deepEqual(accepted.json(), { deleted: 7 });
+  await app.close();
+});
+
+test("discloses alert delivery state and refuses alerts without a server scheduler", async () => {
+  let createCalls = 0;
+  const app = await buildApp({
+    config,
+    connectors: [],
+    auditStore: null,
+    v2Store: v2StoreStub({ createAlert: async () => { createCalls += 1; return activeAlert(); } }),
+    now: fixedNow,
+  });
+  const listed = await app.inject({
+    method: "GET",
+    url: "/v2/alerts",
+    headers: { "x-flight-lens-owner": "owner-token-value" },
+  });
+  assert.equal(listed.statusCode, 200);
+  assert.deepEqual(listed.json().delivery, { serverSchedulingConfigured: false, channel: "ntfy" });
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/v2/alerts",
+    payload: {
+      ownerToken: "owner-token-value",
+      intent: validIntent,
+      targetAmountCnyMinor: 100_000,
+      checkIntervalMinutes: 360,
+      ntfyTopic: "flight-lens-test",
+    },
+  });
+  assert.equal(created.statusCode, 503);
+  assert.equal(created.json().error.code, "MONITOR_UNCONFIGURED");
+  assert.equal(createCalls, 0);
   await app.close();
 });
 

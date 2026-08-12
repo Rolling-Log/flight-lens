@@ -23,6 +23,7 @@ import {
 import { createSearchAuditStore, createV2Store, type V2Store } from "@flight-lens/database";
 import {
   analyzePriceTrend,
+  assessPriceJudgment,
   applyIntentConstraints,
   applyAdversarialComparability,
   deduplicateOffers,
@@ -166,12 +167,48 @@ async function runSearch(
   const fewestStops = rankByFewestStops(reviewed);
   const bestBaggage = rankByBestBaggage(reviewed);
   const mostFlexible = rankByRefundFlexibility(reviewed);
+  const marketPriceInsights = executions.flatMap(
+    (execution) => execution.result.marketPriceInsights ?? [],
+  );
+  const primaryInsight = marketPriceInsights.find((insight) =>
+    insight.currency === "CNY" &&
+    insight.originCode === intent.origin.code &&
+    insight.destinationCode === intent.destination.code &&
+    insight.departureDate === intent.departureDate &&
+    insight.returnDate === (intent.returnDate ?? null) &&
+    insight.tripType === intent.tripType &&
+    insight.cabin === intent.cabin &&
+    insight.adults === intent.adults,
+  );
+  const lowestCurrent = cheapest[0];
+  const currentAmountMinor = primaryInsight?.lowestPriceMinor ??
+    lowestCurrent?.totalPriceCny?.amountMinor ??
+    (lowestCurrent?.totalPrice.currency === "CNY" ? lowestCurrent.totalPrice.amountMinor : null) ??
+    null;
+  const currentPriceBasis = primaryInsight?.lowestPriceMinor !== null && primaryInsight?.lowestPriceMinor !== undefined
+    ? "listed_only" as const
+    : lowestCurrent
+      ? lowestCurrent.purchaseMode === "split_ticket"
+        ? "split_ticket" as const
+        : lowestCurrent.priceVerificationStatus === "listed_only"
+          ? "listed_only" as const
+          : "verified_all_in" as const
+      : null;
+  const priceJudgment = assessPriceJudgment({
+    currentAmountMinor,
+    currentPriceBasis,
+    currency: currentAmountMinor === null ? null : "CNY",
+    intent,
+    ...(primaryInsight ? { marketInsight: primaryInsight } : {}),
+  });
 
   return {
     requestId,
     intent,
     offers: reviewed,
     connectorReports: reports,
+    marketPriceInsights,
+    priceJudgment,
     lowestComparableOfferId: cheapest[0]?.id ?? null,
     lowestSplitOfferId: splitCheapest[0]?.id ?? null,
     recommendedOfferId: recommended[0]?.id ?? null,
@@ -488,11 +525,18 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     if (!v2Store) return reply.status(503).send({ error: { code: "V2_STORE_UNCONFIGURED" } });
     const ownerToken = ownerTokenFrom(request.headers);
     if (!ownerToken) return reply.status(401).send({ error: { code: "OWNER_TOKEN_REQUIRED" } });
-    return reply.send({ alerts: await v2Store.listAlerts(ownerToken) });
+    return reply.send({
+      alerts: await v2Store.listAlerts(ownerToken),
+      delivery: {
+        serverSchedulingConfigured: Boolean(monitorQueue),
+        channel: "ntfy",
+      },
+    });
   });
 
   app.post("/v2/alerts", async (request, reply) => {
     if (!v2Store) return reply.status(503).send({ error: { code: "V2_STORE_UNCONFIGURED" } });
+    if (!monitorQueue) return reply.status(503).send({ error: { code: "MONITOR_UNCONFIGURED" } });
     const parsed = createPriceAlertSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ error: { code: "INVALID_ALERT", issues: parsed.error.issues } });
     return reply.status(201).send(await v2Store.createAlert(parsed.data));
@@ -676,6 +720,36 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         ? {}
         : { staleIfErrorMs: config.connectorStaleIfErrorMs }),
     });
+    if (
+      result.priceJudgment.status === "unavailable" &&
+      result.priceJudgment.currentAmountMinor !== null &&
+      result.priceJudgment.currentPriceBasis !== null &&
+      v2Store
+    ) {
+      try {
+        const observations = await v2Store.history({
+          origin: parsed.data.origin.code,
+          destination: parsed.data.destination.code,
+          departureDate: parsed.data.departureDate,
+          ...(parsed.data.returnDate ? { returnDate: parsed.data.returnDate } : {}),
+          cabin: parsed.data.cabin,
+          adults: parsed.data.adults,
+          days: 365,
+        }, now());
+        const observationKind = result.priceJudgment.currentPriceBasis;
+        result.priceJudgment = assessPriceJudgment({
+          currentAmountMinor: result.priceJudgment.currentAmountMinor,
+          currentPriceBasis: result.priceJudgment.currentPriceBasis,
+          currency: result.priceJudgment.currency,
+          intent: parsed.data,
+          siteSamples: observations
+            .filter((item) => item.observationKind === observationKind && item.totalAmountCnyMinor !== null)
+            .map((item) => ({ amountMinor: item.totalAmountCnyMinor!, observedAt: item.observedAt })),
+        });
+      } catch (historyError) {
+        request.log.warn({ historyError }, "Failed to load supplemental site price history");
+      }
+    }
     let audit: SearchResponse["audit"] = {
       configured: Boolean(auditStore),
       persisted: false,

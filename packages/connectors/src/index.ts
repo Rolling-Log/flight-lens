@@ -3,6 +3,7 @@ import {
   searchMarket,
   type CompanionPlatformResult,
   type ConnectorReport,
+  type MarketPriceInsight,
   type Offer,
   type SearchIntent,
 } from "@flight-lens/contracts";
@@ -111,6 +112,7 @@ export type ConnectorSearchContext = {
 
 export type ConnectorSearchResult = {
   offers: Offer[];
+  marketPriceInsights?: MarketPriceInsight[];
   providerRequestId?: string;
   notes?: string[];
 };
@@ -317,6 +319,9 @@ export async function executeConnector(
     if (successful.length === 0 && failed[0]?.status === "rejected") throw failed[0].reason;
     const result: ConnectorSearchResult = {
       offers: successful.flatMap((item) => item.offers),
+      ...(successful.some((item) => item.marketPriceInsights?.length)
+        ? { marketPriceInsights: successful.flatMap((item) => item.marketPriceInsights ?? []) }
+        : {}),
       ...(successful[0]?.providerRequestId
         ? { providerRequestId: successful[0].providerRequestId }
         : {}),
@@ -784,12 +789,21 @@ type SerpApiFlightChoice = {
   booking_token?: string;
 };
 
-type SerpApiSearchPayload = {
+export type SerpApiSearchPayload = {
   error?: string;
   search_metadata?: {
     id?: string;
     status?: string;
     google_flights_url?: string;
+  };
+  search_parameters?: {
+    currency?: string;
+  };
+  price_insights?: {
+    lowest_price?: unknown;
+    price_level?: unknown;
+    typical_price_range?: unknown;
+    price_history?: unknown;
   };
   best_flights?: SerpApiFlightChoice[];
   other_flights?: SerpApiFlightChoice[];
@@ -985,9 +999,11 @@ export class SerpApiGoogleFlightsConnector implements FlightConnector {
         )
       : [];
     const failedBookingAttempts = bookingAttempts.length - bookingPayloads.length;
+    const marketPriceInsight = mapSerpApiPriceInsights(initial, intent);
 
     return {
       offers: bookingOffers.length ? bookingOffers : fallbackOffers,
+      ...(marketPriceInsight ? { marketPriceInsights: [marketPriceInsight] } : {}),
       ...(
         originSelection.notes.length || failedBookingAttempts > 0 || fallbackOffers.length > 0
           ? {
@@ -1110,6 +1126,67 @@ export class SerpApiGoogleFlightsConnector implements FlightConnector {
     }
     return payload;
   }
+}
+
+function safeMinorAmount(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.round(value * 100)
+    : null;
+}
+
+export function mapSerpApiPriceInsights(
+  payload: SerpApiSearchPayload,
+  intent: SearchIntent,
+  fetchedAt = new Date().toISOString(),
+): MarketPriceInsight | undefined {
+  const raw = payload.price_insights;
+  if (!raw) return undefined;
+  const currency = payload.search_parameters?.currency?.toUpperCase();
+  if (currency !== "CNY") return undefined;
+
+  const range = Array.isArray(raw.typical_price_range) && raw.typical_price_range.length === 2
+    ? raw.typical_price_range.map(safeMinorAmount)
+    : [];
+  const rangeLow = range[0];
+  const rangeHigh = range[1];
+  const typicalPriceRangeMinor = typeof rangeLow === "number" && typeof rangeHigh === "number" && rangeLow <= rangeHigh
+    ? [rangeLow, rangeHigh] as [number, number]
+    : null;
+  const history = Array.isArray(raw.price_history)
+    ? raw.price_history.flatMap((point) => {
+        if (!Array.isArray(point) || point.length < 2) return [];
+        const timestamp = point[0];
+        const amountMinor = safeMinorAmount(point[1]);
+        if (typeof timestamp !== "number" || !Number.isFinite(timestamp) || amountMinor === null) return [];
+        const date = new Date(timestamp * 1000);
+        if (Number.isNaN(date.getTime())) return [];
+        return [{ date: date.toISOString().slice(0, 10), amountMinor }];
+      })
+    : [];
+  const priceLevel = raw.price_level === "low" || raw.price_level === "typical" || raw.price_level === "high"
+    ? raw.price_level
+    : "unknown";
+  const lowestPriceMinor = safeMinorAmount(raw.lowest_price);
+  if (lowestPriceMinor === null && typicalPriceRangeMinor === null && history.length === 0) return undefined;
+
+  return {
+    sourceId: "serpapi-google-flights",
+    sourceName: "Google Flights 市场洞察",
+    fetchedAt,
+    currency,
+    originCode: intent.origin.code,
+    destinationCode: intent.destination.code,
+    departureDate: intent.departureDate,
+    returnDate: intent.returnDate ?? null,
+    tripType: intent.tripType,
+    cabin: intent.cabin,
+    adults: intent.adults,
+    priceBasis: "listed_only",
+    lowestPriceMinor,
+    priceLevel,
+    typicalPriceRangeMinor,
+    history,
+  };
 }
 
 function flightChoices(payload: SerpApiSearchPayload): SerpApiFlightChoice[] {

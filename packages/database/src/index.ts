@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema.js";
@@ -86,6 +86,7 @@ export function buildPriceObservationRow(intent: SearchIntent, searchId: string,
     itineraryFingerprint,
     offer.seller.id,
     intent.cabin,
+    intent.adults,
     kind,
     fiveMinuteBucket,
   ].join("::");
@@ -98,6 +99,7 @@ export function buildPriceObservationRow(intent: SearchIntent, searchId: string,
     departureDate: intent.departureDate,
     returnDate: intent.returnDate ?? null,
     cabin: intent.cabin,
+    adults: intent.adults,
     flightNumbers: offer.segments.map((segment) => `${segment.marketingCarrier}${segment.flightNumber}`),
     connectorId: offer.connectorId,
     inventoryFamily: inventoryFamilyFor(offer.connectorId),
@@ -230,6 +232,7 @@ function mapObservation(row: typeof schema.priceObservations.$inferSelect): Pric
     departureDate: row.departureDate,
     returnDate: row.returnDate,
     cabin: row.cabin as PriceObservation["cabin"],
+    adults: row.adults,
     connectorId: row.connectorId,
     inventoryFamily: row.inventoryFamily,
     sellerId: row.sellerId,
@@ -277,10 +280,13 @@ export function createV2Store(url: string) {
         eq(schema.priceObservations.routeKey, `${query.origin}-${query.destination}`),
         eq(schema.priceObservations.departureDate, query.departureDate),
         eq(schema.priceObservations.cabin, query.cabin),
+        eq(schema.priceObservations.adults, query.adults),
         gte(schema.priceObservations.observedAt, since),
         lte(schema.priceObservations.observedAt, now),
       ];
-      if (query.returnDate) filters.push(eq(schema.priceObservations.returnDate, query.returnDate));
+      filters.push(query.returnDate
+        ? eq(schema.priceObservations.returnDate, query.returnDate)
+        : isNull(schema.priceObservations.returnDate));
       if (query.sellerId) filters.push(eq(schema.priceObservations.sellerId, query.sellerId));
       if (query.flight) filters.push(sql`${schema.priceObservations.flightNumbers} ? ${query.flight}`);
       const rows = await database.db.select().from(schema.priceObservations)
@@ -292,8 +298,11 @@ export function createV2Store(url: string) {
         eq(schema.priceObservations.routeKey, `${query.origin}-${query.destination}`),
         eq(schema.priceObservations.departureDate, query.departureDate),
         eq(schema.priceObservations.cabin, query.cabin),
+        eq(schema.priceObservations.adults, query.adults),
       ];
-      if (query.returnDate) filters.push(eq(schema.priceObservations.returnDate, query.returnDate));
+      filters.push(query.returnDate
+        ? eq(schema.priceObservations.returnDate, query.returnDate)
+        : isNull(schema.priceObservations.returnDate));
       if (query.sellerId) filters.push(eq(schema.priceObservations.sellerId, query.sellerId));
       if (query.flight) filters.push(sql`${schema.priceObservations.flightNumbers} ? ${query.flight}`);
       const deleted = await database.db.delete(schema.priceObservations)

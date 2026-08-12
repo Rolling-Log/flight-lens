@@ -21,6 +21,7 @@ import {
   mapDuffelOffer,
   mapFlightApiSearchPayload,
   mapSerpApiBookingPayload,
+  mapSerpApiPriceInsights,
   mapSerpApiSearchChoices,
   mapSkyscannerSearchResults,
   serpApiOriginSelection,
@@ -48,6 +49,44 @@ const intent: SearchIntent = {
   inferredFields: [],
   pendingQuestions: [],
 };
+
+test("maps SerpApi price insights without issuing a second search", () => {
+  const insight = mapSerpApiPriceInsights({
+    search_parameters: { currency: "CNY" },
+    price_insights: {
+      lowest_price: 880,
+      price_level: "low",
+      typical_price_range: [1_000, 1_400],
+      price_history: [
+        [1_780_704_000, 1_200],
+        [1_780_790_400, 1_100],
+      ],
+    },
+  }, intent, "2026-08-12T12:00:00.000Z");
+
+  assert.equal(insight?.lowestPriceMinor, 88_000);
+  assert.deepEqual(insight?.typicalPriceRangeMinor, [100_000, 140_000]);
+  assert.equal(insight?.history.length, 2);
+  assert.equal(insight?.currency, "CNY");
+  assert.equal(insight?.priceBasis, "listed_only");
+  assert.deepEqual({
+    origin: insight?.originCode,
+    destination: insight?.destinationCode,
+    departureDate: insight?.departureDate,
+    returnDate: insight?.returnDate,
+  }, { origin: "PVG", destination: "NRT", departureDate: "2026-08-24", returnDate: null });
+});
+
+test("rejects malformed or non-CNY SerpApi price insights", () => {
+  assert.equal(mapSerpApiPriceInsights({
+    search_parameters: { currency: "USD" },
+    price_insights: { lowest_price: 500 },
+  }, intent), undefined);
+  assert.equal(mapSerpApiPriceInsights({
+    search_parameters: { currency: "CNY" },
+    price_insights: { lowest_price: "500", typical_price_range: [1_000] },
+  }, intent), undefined);
+});
 
 const amadeusOffer = {
   id: "amadeus-offer-1",

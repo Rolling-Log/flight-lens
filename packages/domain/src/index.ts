@@ -1,12 +1,200 @@
 import {
   airportCodesForLocation,
   type ConnectorReport,
+  type MarketPriceInsight,
   type Offer,
+  type PriceJudgment,
   type PriceTrend,
   type SearchIntent,
   type SearchPlan,
 } from "@flight-lens/contracts";
 import { mean, median, quantileSorted } from "simple-statistics";
+
+type PriceJudgmentInput = {
+  currentAmountMinor: number | null;
+  currentPriceBasis: "verified_all_in" | "listed_only" | "split_ticket" | null;
+  currency: string | null;
+  intent: SearchIntent;
+  marketInsight?: MarketPriceInsight;
+  siteSamples?: readonly { amountMinor: number; observedAt: string }[];
+};
+
+function unavailablePriceJudgment(
+  explanation: string,
+  current?: Pick<PriceJudgment, "currentAmountMinor" | "currentPriceBasis" | "currency">,
+): PriceJudgment {
+  return {
+    status: "unavailable",
+    level: null,
+    currentAmountMinor: current?.currentAmountMinor ?? null,
+    currentPriceBasis: current?.currentPriceBasis ?? null,
+    currency: current?.currency ?? null,
+    percentile: null,
+    positionPercent: null,
+    quantilesMinor: null,
+    typicalPriceRangeMinor: null,
+    sampleCount: 0,
+    observedDayCount: 0,
+    confidence: "none",
+    basis: "none",
+    explanation,
+  };
+}
+
+function judgmentLevel(percentile: number): NonNullable<PriceJudgment["level"]> {
+  if (percentile <= 20) return "top";
+  if (percentile <= 40) return "excellent";
+  if (percentile <= 60) return "standard";
+  if (percentile <= 80) return "npc";
+  return "terrible";
+}
+
+function judgmentLevelForAmount(
+  amountMinor: number,
+  values: ReturnType<typeof quantiles>,
+): NonNullable<PriceJudgment["level"]> {
+  if (amountMinor <= values.p20) return "top";
+  if (amountMinor <= values.p40) return "excellent";
+  if (amountMinor <= values.p60) return "standard";
+  if (amountMinor <= values.p80) return "npc";
+  return "terrible";
+}
+
+function displayPosition(percentile: number): number {
+  return Math.max(2, Math.min(98, 100 - percentile));
+}
+
+function dailyMinimumAmounts(samples: readonly { amountMinor: number; observedAt: string }[]): number[] {
+  const daily = new Map<string, number>();
+  for (const sample of samples) {
+    if (!Number.isSafeInteger(sample.amountMinor) || sample.amountMinor < 0) continue;
+    const day = sample.observedAt.slice(0, 10);
+    const current = daily.get(day);
+    if (current === undefined || sample.amountMinor < current) daily.set(day, sample.amountMinor);
+  }
+  return [...daily.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([, amount]) => amount);
+}
+
+function quantiles(amounts: readonly number[]) {
+  const sorted = [...amounts].sort((left, right) => left - right);
+  return {
+    p20: Math.round(quantileSorted(sorted, 0.2)),
+    p40: Math.round(quantileSorted(sorted, 0.4)),
+    p50: Math.round(quantileSorted(sorted, 0.5)),
+    p60: Math.round(quantileSorted(sorted, 0.6)),
+    p80: Math.round(quantileSorted(sorted, 0.8)),
+  };
+}
+
+export function assessPriceJudgment(input: PriceJudgmentInput): PriceJudgment {
+  const { currentAmountMinor, currentPriceBasis, currency, intent, marketInsight } = input;
+  if (currentAmountMinor === null || currentPriceBasis === null || currency === null) {
+    return unavailablePriceJudgment("当前查询没有可用于判断的价格。");
+  }
+  if (currentPriceBasis === "split_ticket") {
+    return unavailablePriceJudgment("分开购买价不能与平台单张票历史直接比较。", {
+      currentAmountMinor, currentPriceBasis, currency,
+    });
+  }
+
+  const insightMatches = marketInsight &&
+    marketInsight.originCode === intent.origin.code &&
+    marketInsight.destinationCode === intent.destination.code &&
+    marketInsight.departureDate === intent.departureDate &&
+    marketInsight.returnDate === (intent.returnDate ?? null) &&
+    marketInsight.tripType === intent.tripType &&
+    marketInsight.cabin === intent.cabin &&
+    marketInsight.adults === intent.adults &&
+    marketInsight.currency === currency &&
+    marketInsight.priceBasis === currentPriceBasis;
+  const externalAmounts = insightMatches
+    ? dailyMinimumAmounts(marketInsight.history.map((point) => ({
+        amountMinor: point.amountMinor,
+        observedAt: `${point.date}T00:00:00.000Z`,
+      })))
+    : [];
+
+  if (insightMatches && externalAmounts.length >= 5) {
+    const values = quantiles(externalAmounts);
+    const percentile = Math.round(
+      externalAmounts.filter((amount) => amount <= currentAmountMinor).length /
+      externalAmounts.length * 1_000,
+    ) / 10;
+    return {
+      status: "available",
+      level: judgmentLevelForAmount(currentAmountMinor, values),
+      currentAmountMinor,
+      currentPriceBasis,
+      currency,
+      percentile,
+      positionPercent: displayPosition(percentile),
+      quantilesMinor: values,
+      typicalPriceRangeMinor: marketInsight.typicalPriceRangeMinor,
+      sampleCount: externalAmounts.length,
+      observedDayCount: externalAmounts.length,
+      confidence: externalAmounts.length >= 30 ? "high" : "medium",
+      basis: "external_history",
+      explanation: `基于 ${marketInsight.sourceName} 的 ${externalAmounts.length} 个历史日期，按价格分位数判断。`,
+    };
+  }
+
+  if (insightMatches && marketInsight.typicalPriceRangeMinor) {
+    const [low, high] = marketInsight.typicalPriceRangeMinor;
+    const width = Math.max(1, high - low);
+    const percentile = currentAmountMinor <= low - width * 0.5 ? 20
+      : currentAmountMinor < low ? 40
+        : currentAmountMinor <= high ? 60
+          : currentAmountMinor <= high + width * 0.5 ? 80 : 100;
+    return {
+      status: "available",
+      level: judgmentLevel(percentile),
+      currentAmountMinor,
+      currentPriceBasis,
+      currency,
+      percentile,
+      positionPercent: displayPosition(percentile),
+      quantilesMinor: null,
+      typicalPriceRangeMinor: marketInsight.typicalPriceRangeMinor,
+      sampleCount: externalAmounts.length,
+      observedDayCount: externalAmounts.length,
+      confidence: "low",
+      basis: "typical_range",
+      explanation: `历史样本不足，按 ${marketInsight.sourceName} 提供的典型价格区间降级判断。`,
+    };
+  }
+
+  const siteAmounts = dailyMinimumAmounts(input.siteSamples ?? []);
+  if (siteAmounts.length >= 5) {
+    const values = quantiles(siteAmounts);
+    const percentile = Math.round(
+      siteAmounts.filter((amount) => amount <= currentAmountMinor).length /
+      siteAmounts.length * 1_000,
+    ) / 10;
+    return {
+      status: "available",
+      level: judgmentLevelForAmount(currentAmountMinor, values),
+      currentAmountMinor,
+      currentPriceBasis,
+      currency,
+      percentile,
+      positionPercent: displayPosition(percentile),
+      quantilesMinor: values,
+      typicalPriceRangeMinor: [values.p20, values.p80],
+      sampleCount: siteAmounts.length,
+      observedDayCount: siteAmounts.length,
+      confidence: "low",
+      basis: "site_observations",
+      explanation: `外部历史不可用，暂按本站 ${siteAmounts.length} 个观测日的同口径价格判断。`,
+    };
+  }
+
+  return unavailablePriceJudgment(
+    marketInsight && !insightMatches
+      ? "当前价格与市场历史的行程或价格口径不同，暂不进行比较。"
+      : "暂无足够的同口径历史价格，暂无法判断贵不贵。",
+    { currentAmountMinor, currentPriceBasis, currency },
+  );
+}
 
 export function analyzePriceTrend(
   samples: readonly { amountMinor: number; observedAt: string }[],

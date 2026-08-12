@@ -62,6 +62,7 @@ test("stores component amounts without merging distinct price semantics", () => 
   assert.equal(row.requiredServiceAmountMinor, 5_000);
   assert.equal(row.totalAmountMinor, 100_000);
   assert.equal(row.inventoryFamily, "duffel-air-content");
+  assert.equal(row.adults, 1);
 });
 
 test("keeps only verified, explicitly listed, or split-ticket history", () => {
@@ -77,4 +78,7 @@ test("deduplicates equivalent observations inside one five-minute bucket", () =>
   const later = buildPriceObservationRow(intent, "search-3", offer({ fetchedAt: "2026-08-12T08:05:00.000Z" }));
   assert.equal(first.dedupeKey, second.dedupeKey);
   assert.notEqual(first.dedupeKey, later.dedupeKey);
+
+  const twoAdults = buildPriceObservationRow({ ...intent, adults: 2 }, "search-4", offer());
+  assert.notEqual(first.dedupeKey, twoAdults.dedupeKey);
 });

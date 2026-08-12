@@ -51,26 +51,32 @@ test("precise filters expose baggage allowance and custom red-eye controls", asy
   expect(body.redEyeWindow).toEqual({ start: "23:00", end: "07:00" });
 });
 
-test("V2 history, alert, and anonymous preference controls stay usable", async ({ page }) => {
+test("compact price judgment and its history and alert drawer stay usable", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("tab", { name: "精确筛选" }).click();
   await page.getByRole("button", { name: "开始检索" }).click();
   await expect(page.getByRole("heading", { name: "PVG → NRT" })).toBeVisible();
 
-  const panel = page.getByRole("region", { name: "价格历史与提醒" });
-  await expect(panel.getByRole("button", { name: "90 天" })).toHaveClass(/selected/);
-  await panel.getByRole("button", { name: "30 天" }).click();
-  await expect(panel.getByRole("button", { name: "30 天" })).toHaveClass(/selected/);
+  const card = page.getByRole("region", { name: "现在买贵不贵" });
+  await expect(card.locator(".price-level-summary > b")).toHaveText("夯");
+  await expect(card.getByText("典型区间 ¥2,700–¥3,300")).toBeVisible();
+  const detailTrigger = card.getByRole("button", { name: "查看详情" });
+  await detailTrigger.click();
+  const drawer = page.getByRole("dialog", { name: "价格历史与提醒" });
+  await expect(drawer.getByRole("button", { name: "90 天" })).toHaveClass(/selected/);
+  await drawer.getByRole("button", { name: "30 天" }).click();
+  await expect(drawer.getByRole("button", { name: "30 天" })).toHaveClass(/selected/);
+  await expect(drawer.getByText("外部市场历史", { exact: true })).toBeVisible();
+  await expect(drawer.getByText("本站观测", { exact: true })).toBeVisible();
 
-  await panel.getByRole("tab", { name: "价格提醒" }).click();
-  await expect(panel.getByLabel("目标全价（人民币）")).toBeVisible();
-  await expect(panel.getByLabel("ntfy Topic")).toBeVisible();
-
-  await panel.getByRole("tab", { name: "偏好" }).click();
-  await expect(panel.getByLabel("最低托运行李")).toHaveValue("0");
-  await expect(panel.getByLabel("红眼开始")).toHaveValue("00:00");
-  await expect(panel.getByRole("button", { name: "保存偏好" })).toBeVisible();
+  await drawer.getByRole("tab", { name: "价格提醒" }).click();
+  await expect(drawer.getByLabel("目标可核验全价（人民币）")).toBeVisible();
+  await expect(drawer.getByLabel("ntfy Topic")).toBeVisible();
+  await expect(drawer.getByText(/尚未配置服务端调度/)).toBeVisible();
   await expectNoBlockingAccessibilityViolations(page);
+  await page.keyboard.press("Escape");
+  await expect(drawer).toBeHidden();
+  await expect(detailTrigger).toBeFocused();
 });
 
 test("agent input becomes an editable search and exposes source limits", async ({

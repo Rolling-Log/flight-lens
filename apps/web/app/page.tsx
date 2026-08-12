@@ -22,7 +22,7 @@ import {
   isSingleSourceLiveResult,
   resultSourceStatus,
 } from "../src/result-source-status";
-import { V2Panel } from "../src/v2-panel";
+import { PriceTools } from "../src/v2-panel";
 
 type Mode = "agent" | "form";
 type SortKey =
@@ -961,8 +961,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                <V2Panel apiBase={apiBase()} intent={result.intent} />
-
                 <div className="result-toolbar">
                   <div className="sort-tabs">
                     {([
@@ -1252,6 +1250,13 @@ export default function Home() {
                 )}
               </div>
 
+              <div className="result-sidebar">
+                <PriceTools
+                  apiBase={apiBase()}
+                  intent={result.intent}
+                  marketPriceInsights={result.marketPriceInsights}
+                  priceJudgment={result.priceJudgment}
+                />
               <aside className="coverage-card" id="coverage">
                 <div className="aside-title"><div><span className="radar">◎</span><b>本次检索覆盖</b></div><strong>{result.disclosure.successfulSources}/{result.disclosure.plannedSources}</strong></div>
                 <div className="coverage-progress"><i style={{ width: `${result.disclosure.plannedSources ? (result.disclosure.successfulSources / result.disclosure.plannedSources) * 100 : 0}%` }} /></div>
@@ -1276,6 +1281,7 @@ export default function Home() {
                   <p>演示报价、总价构成错误、缺失汇率或没有购买落点的报价不会进入最低全价结论。</p>
                 </div>
               </aside>
+              </div>
             </div>
           )}
         </section>

@@ -72,6 +72,21 @@ try {
         verification: offer.priceVerificationStatus ?? "unverified",
       })),
       disclosure: result.disclosure,
+      marketPriceInsights: result.marketPriceInsights.map((insight) => ({
+        sourceId: insight.sourceId,
+        route: `${insight.originCode}-${insight.destinationCode}`,
+        departureDate: insight.departureDate,
+        returnDate: insight.returnDate,
+        priceBasis: insight.priceBasis,
+        priceLevel: insight.priceLevel,
+        lowestPriceCny: insight.lowestPriceMinor === null ? null : insight.lowestPriceMinor / 100,
+        typicalPriceRangeCny: insight.typicalPriceRangeMinor?.map((amount) => amount / 100) ?? null,
+        historyPoints: insight.history.length,
+        historyRange: insight.history.length === 0
+          ? null
+          : [insight.history[0]?.date, insight.history.at(-1)?.date],
+      })),
+      priceJudgment: result.priceJudgment,
     }, null, 2));
   }
 } finally {

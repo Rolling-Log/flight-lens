@@ -5,6 +5,7 @@ export const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 export const isoDateTimeSchema = z.string().datetime({ offset: true });
 export const localDateTimeSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/);
 export const currencySchema = z.string().length(3).transform((value) => value.toUpperCase());
+const iataCodeSchema = z.string().regex(/^[A-Za-z]{3}$/).transform((value) => value.toUpperCase());
 
 export const airportRefSchema = z.object({
   kind: z.enum(["airport", "city"]),
@@ -351,11 +352,77 @@ export const connectorReportSchema = z.object({
 
 export type ConnectorReport = z.infer<typeof connectorReportSchema>;
 
+export const marketPriceHistoryPointSchema = z.object({
+  date: isoDateSchema,
+  amountMinor: z.number().int().nonnegative(),
+});
+
+export const marketPriceInsightSchema = z.object({
+  sourceId: z.string().min(1),
+  sourceName: z.string().min(1),
+  fetchedAt: isoDateTimeSchema,
+  currency: currencySchema,
+  originCode: iataCodeSchema,
+  destinationCode: iataCodeSchema,
+  departureDate: isoDateSchema,
+  returnDate: isoDateSchema.nullable(),
+  tripType: z.enum(["one_way", "round_trip"]),
+  cabin: cabinClassSchema,
+  adults: z.number().int().min(1).max(9),
+  priceBasis: z.literal("listed_only"),
+  lowestPriceMinor: z.number().int().nonnegative().nullable(),
+  priceLevel: z.enum(["low", "typical", "high", "unknown"]),
+  typicalPriceRangeMinor: z.tuple([
+    z.number().int().nonnegative(),
+    z.number().int().nonnegative(),
+  ]).nullable(),
+  history: z.array(marketPriceHistoryPointSchema),
+});
+export type MarketPriceInsight = z.infer<typeof marketPriceInsightSchema>;
+
+export const priceJudgmentLevelSchema = z.enum([
+  "terrible",
+  "npc",
+  "standard",
+  "excellent",
+  "top",
+]);
+export type PriceJudgmentLevel = z.infer<typeof priceJudgmentLevelSchema>;
+
+export const priceJudgmentSchema = z.object({
+  status: z.enum(["available", "unavailable"]),
+  level: priceJudgmentLevelSchema.nullable(),
+  currentAmountMinor: z.number().int().nonnegative().nullable(),
+  currentPriceBasis: z.enum(["verified_all_in", "listed_only", "split_ticket"]).nullable(),
+  currency: currencySchema.nullable(),
+  percentile: z.number().min(0).max(100).nullable(),
+  positionPercent: z.number().min(0).max(100).nullable(),
+  quantilesMinor: z.object({
+    p20: z.number().int().nonnegative(),
+    p40: z.number().int().nonnegative(),
+    p50: z.number().int().nonnegative(),
+    p60: z.number().int().nonnegative(),
+    p80: z.number().int().nonnegative(),
+  }).nullable(),
+  typicalPriceRangeMinor: z.tuple([
+    z.number().int().nonnegative(),
+    z.number().int().nonnegative(),
+  ]).nullable(),
+  sampleCount: z.number().int().nonnegative(),
+  observedDayCount: z.number().int().nonnegative(),
+  confidence: z.enum(["high", "medium", "low", "none"]),
+  basis: z.enum(["external_history", "typical_range", "site_observations", "none"]),
+  explanation: z.string().min(1),
+});
+export type PriceJudgment = z.infer<typeof priceJudgmentSchema>;
+
 export const searchResponseSchema = z.object({
   requestId: z.string().uuid(),
   intent: searchIntentSchema,
   offers: z.array(offerSchema),
   connectorReports: z.array(connectorReportSchema),
+  marketPriceInsights: z.array(marketPriceInsightSchema).default([]),
+  priceJudgment: priceJudgmentSchema,
   lowestComparableOfferId: z.string().nullable(),
   lowestSplitOfferId: z.string().nullable(),
   recommendedOfferId: z.string().nullable(),
@@ -394,6 +461,7 @@ export const priceObservationSchema = z.object({
   departureDate: isoDateSchema,
   returnDate: isoDateSchema.nullable(),
   cabin: cabinClassSchema,
+  adults: z.number().int().min(1).max(9),
   connectorId: z.string().min(1),
   inventoryFamily: z.string().min(1),
   sellerId: z.string().min(1),
@@ -425,6 +493,7 @@ export const priceHistoryQuerySchema = z.object({
   departureDate: isoDateSchema,
   returnDate: isoDateSchema.optional(),
   cabin: cabinClassSchema.default("economy"),
+  adults: z.coerce.number().int().min(1).max(9).default(1),
   sellerId: z.string().min(1).optional(),
   flight: z.string().min(2).max(20).optional(),
   days: z.coerce.number().int().min(1).max(365).default(90),

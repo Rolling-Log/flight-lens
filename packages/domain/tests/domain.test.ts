@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Offer } from "@flight-lens/contracts";
+import type { MarketPriceInsight, Offer, SearchIntent } from "@flight-lens/contracts";
 import {
   analyzePriceTrend,
+  assessPriceJudgment,
   applyAdversarialComparability,
   applyIntentConstraints,
   deduplicateOffers,
@@ -18,6 +19,110 @@ import {
   validatePriceArithmetic,
   planBoundedSearch,
 } from "../src/index.js";
+
+const judgmentIntent: SearchIntent = {
+  schemaVersion: "1",
+  tripType: "one_way",
+  origin: { kind: "airport", code: "PVG" },
+  destination: { kind: "airport", code: "SZX" },
+  departureDate: "2026-09-11",
+  flexibleDays: 0,
+  adults: 1,
+  cabin: "economy",
+  directOnly: false,
+  maxStops: 1,
+  avoidRedEye: false,
+  minimumCheckedBaggageKg: 0,
+  includeNearbyAirports: false,
+  explicitFields: [],
+  inferredFields: [],
+  pendingQuestions: [],
+};
+
+function marketInsight(overrides: Partial<MarketPriceInsight> = {}): MarketPriceInsight {
+  return {
+    sourceId: "serpapi-google-flights",
+    sourceName: "Google Flights 市场洞察",
+    fetchedAt: "2026-08-12T12:00:00.000Z",
+    currency: "CNY",
+    originCode: "PVG",
+    destinationCode: "SZX",
+    departureDate: "2026-09-11",
+    returnDate: null,
+    tripType: "one_way",
+    cabin: "economy",
+    adults: 1,
+    priceBasis: "listed_only",
+    lowestPriceMinor: 70_000,
+    priceLevel: "low",
+    typicalPriceRangeMinor: [90_000, 130_000],
+    history: [70, 80, 90, 100, 110, 120, 130, 140, 150, 160].map((amount, index) => ({
+      date: `2026-08-${String(index + 1).padStart(2, "0")}`,
+      amountMinor: amount * 1_000,
+    })),
+    ...overrides,
+  };
+}
+
+test("assigns five price levels with boundary values entering the better level", () => {
+  const cases = [
+    [70_000, "top"],
+    [90_000, "excellent"],
+    [110_000, "standard"],
+    [130_000, "npc"],
+    [170_000, "terrible"],
+  ] as const;
+  for (const [currentAmountMinor, expected] of cases) {
+    const judgment = assessPriceJudgment({
+      currentAmountMinor,
+      currentPriceBasis: "listed_only",
+      currency: "CNY",
+      intent: judgmentIntent,
+      marketInsight: marketInsight(),
+    });
+    assert.equal(judgment.level, expected);
+  }
+});
+
+test("refuses mismatched price semantics and uses typical range only as low confidence fallback", () => {
+  const mismatch = assessPriceJudgment({
+    currentAmountMinor: 80_000,
+    currentPriceBasis: "verified_all_in",
+    currency: "CNY",
+    intent: judgmentIntent,
+    marketInsight: marketInsight(),
+  });
+  assert.equal(mismatch.status, "unavailable");
+
+  const routeMismatch = assessPriceJudgment({
+    currentAmountMinor: 80_000,
+    currentPriceBasis: "listed_only",
+    currency: "CNY",
+    intent: judgmentIntent,
+    marketInsight: marketInsight({ destinationCode: "CAN" }),
+  });
+  assert.equal(routeMismatch.status, "unavailable");
+
+  const fallback = assessPriceJudgment({
+    currentAmountMinor: 80_000,
+    currentPriceBasis: "listed_only",
+    currency: "CNY",
+    intent: judgmentIntent,
+    marketInsight: marketInsight({ history: [] }),
+  });
+  assert.equal(fallback.status, "available");
+  assert.equal(fallback.basis, "typical_range");
+  assert.equal(fallback.confidence, "low");
+
+  const split = assessPriceJudgment({
+    currentAmountMinor: 80_000,
+    currentPriceBasis: "split_ticket",
+    currency: "CNY",
+    intent: judgmentIntent,
+    marketInsight: marketInsight(),
+  });
+  assert.equal(split.status, "unavailable");
+});
 
 function offer(overrides: Partial<Offer> = {}): Offer {
   return {

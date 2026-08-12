@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { airportCodesForLocation, companionSearchRequestSchema, createPriceAlertSchema, exchangeRateSchema, locationOptions, priceHistoryQuerySchema, searchIntentSchema, searchLocations, searchMarket, userPreferencesSchema } from "../src/index.js";
+import { airportCodesForLocation, companionSearchRequestSchema, createPriceAlertSchema, exchangeRateSchema, locationOptions, marketPriceInsightSchema, priceHistoryQuerySchema, priceJudgmentSchema, searchIntentSchema, searchLocations, searchMarket, userPreferencesSchema } from "../src/index.js";
 
 test("finds canonical cities and airports by Chinese, pinyin, and IATA", () => {
   assert.equal(searchLocations("北京")[0]?.code, "BJS");
@@ -177,4 +177,44 @@ test("validates V2 history, alert, and anonymous preference inputs", () => {
   });
   assert.deepEqual(preferences.redEyeWindow, { start: "00:00", end: "06:00" });
   assert.equal(preferences.cabin, "economy");
+});
+
+test("validates market insight and five-level judgment contracts", () => {
+  const insight = marketPriceInsightSchema.parse({
+    sourceId: "serpapi-google-flights",
+    sourceName: "Google Flights 市场洞察",
+    fetchedAt: "2026-08-12T12:00:00.000Z",
+    currency: "cny",
+    originCode: "PVG",
+    destinationCode: "SZX",
+    departureDate: "2026-09-11",
+    returnDate: null,
+    tripType: "one_way",
+    cabin: "economy",
+    adults: 1,
+    priceBasis: "listed_only",
+    lowestPriceMinor: 80_000,
+    priceLevel: "low",
+    typicalPriceRangeMinor: [90_000, 130_000],
+    history: [{ date: "2026-08-01", amountMinor: 100_000 }],
+  });
+  assert.equal(insight.currency, "CNY");
+
+  const judgment = priceJudgmentSchema.parse({
+    status: "available",
+    level: "top",
+    currentAmountMinor: 80_000,
+    currentPriceBasis: "listed_only",
+    currency: "CNY",
+    percentile: 10,
+    positionPercent: 90,
+    quantilesMinor: { p20: 90_000, p40: 100_000, p50: 110_000, p60: 120_000, p80: 130_000 },
+    typicalPriceRangeMinor: [90_000, 130_000],
+    sampleCount: 30,
+    observedDayCount: 30,
+    confidence: "high",
+    basis: "external_history",
+    explanation: "基于外部历史价格判断。",
+  });
+  assert.equal(judgment.level, "top");
 });
