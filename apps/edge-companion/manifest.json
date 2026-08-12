@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "航探 Edge Companion",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "在用户自己的 Edge 会话中核验携程、去哪儿、同程和飞猪公开机票价格。",
   "permissions": ["tabs", "scripting", "storage"],
   "host_permissions": [
@@ -10,6 +10,7 @@
     "https://*.ly.com/*",
     "https://*.fliggy.com/*",
     "https://*.taobao.com/*",
+    "https://flight-lens-staging.netlify.app/*",
     "http://127.0.0.1/*",
     "http://localhost/*"
   ],
@@ -24,7 +25,11 @@
       "world": "MAIN"
     },
     {
-      "matches": ["http://127.0.0.1/*", "http://localhost/*"],
+      "matches": [
+        "https://flight-lens-staging.netlify.app/*",
+        "http://127.0.0.1/*",
+        "http://localhost/*"
+      ],
       "js": ["page-bridge.js"],
       "run_at": "document_start"
     },

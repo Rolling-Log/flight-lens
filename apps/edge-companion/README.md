@@ -1,7 +1,8 @@
 # Flight Lens Edge Companion
 
 This unpacked MV3 extension runs domestic OTA page collection in the user's own Edge session.
-It communicates only with the local Flight Lens pages on ports `3000` and `3100`.
+It communicates only with the local Flight Lens pages on ports `3000` and `3100`, plus the
+explicitly allowlisted staging site at `https://flight-lens-staging.netlify.app`.
 
 The web app owns search intent, normalization, price comparison, recommendations, disclosures,
 and purchase handoff. Edge Companion is not a standalone metasearch product: it only collects
@@ -14,7 +15,8 @@ is the final tax-inclusive price when the source does not provide a complete pri
 1. Open `edge://extensions`.
 2. Enable developer mode.
 3. Choose **Load unpacked** and select this directory.
-4. Keep the extension enabled, then search from `http://127.0.0.1:3000`.
+4. Keep the extension enabled, then search from `http://127.0.0.1:3000` or the allowlisted
+   Netlify staging site.
 
 After changing any extension source file, return to `edge://extensions` and click **Reload**
 on Flight Lens Edge Companion before running another acceptance search. Refreshing the website

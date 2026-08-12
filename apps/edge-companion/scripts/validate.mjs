@@ -24,4 +24,13 @@ for (const domain of ["ctrip.com", "qunar.com", "ly.com", "fliggy.com"]) {
   }
 }
 
+const deployedWebOrigin = "https://flight-lens-staging.netlify.app/*";
+if (!manifest.host_permissions.includes(deployedWebOrigin)) {
+  throw new Error(`Missing deployed web origin permission: ${deployedWebOrigin}`);
+}
+const bridgeEntry = manifest.content_scripts.find((entry) => entry.js.includes("page-bridge.js"));
+if (!bridgeEntry?.matches.includes(deployedWebOrigin)) {
+  throw new Error(`Page bridge is not registered for: ${deployedWebOrigin}`);
+}
+
 console.log(`Validated Edge Companion ${manifest.version}: ${referencedFiles.length} files.`);

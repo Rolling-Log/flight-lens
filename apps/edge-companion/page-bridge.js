@@ -1,5 +1,6 @@
 const CHANNEL = "flight-lens-edge-companion";
 const ALLOWED_ORIGINS = new Set([
+  "https://flight-lens-staging.netlify.app",
   "http://127.0.0.1:3000",
   "http://localhost:3000",
   "http://127.0.0.1:3100",

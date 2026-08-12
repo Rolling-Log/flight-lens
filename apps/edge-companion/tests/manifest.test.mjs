@@ -6,14 +6,22 @@ import vm from "node:vm";
 const root = new URL("../", import.meta.url);
 const manifest = JSON.parse(await readFile(new URL("manifest.json", root), "utf8"));
 
-test("uses a local-only MV3 bridge without remote code", async () => {
+test("uses an exact-origin MV3 bridge without remote code", async () => {
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.background.service_worker, "background.js");
   assert.equal(manifest.content_security_policy, undefined);
   const bridge = await readFile(new URL("page-bridge.js", root), "utf8");
   assert.match(bridge, /127\.0\.0\.1:3000/);
   assert.match(bridge, /localhost:3000/);
-  assert.doesNotMatch(bridge, /https:\/\//);
+  assert.match(bridge, /https:\/\/flight-lens-staging\.netlify\.app/);
+  assert.doesNotMatch(bridge, /\*\.netlify\.app/);
+
+  const bridgeMatches = manifest.content_scripts
+    .find((entry) => entry.js.includes("page-bridge.js"))
+    ?.matches ?? [];
+  assert.ok(bridgeMatches.includes("https://flight-lens-staging.netlify.app/*"));
+  assert.ok(manifest.host_permissions.includes("https://flight-lens-staging.netlify.app/*"));
+  assert.equal(bridgeMatches.some((match) => match.includes("*.netlify.app")), false);
 });
 
 test("declares exactly the four domestic OTA task runners", async () => {
