@@ -14,7 +14,7 @@ V1 的核心门槛已经达到：用户可用中文、拼音、机场名或 IATA
 | 来源 | 修改前 | 当前实现与实测 | 受控 Offer 成功率 |
 | --- | --- | --- | ---: |
 | 飞猪 FlyAI | 匿名额度耗尽，`auth_error` | 正式 Key + 官方 CLI；兼容当前 `ticketPrice` 与纯数字分钟字段；`PEK → SHA` 10 个、`XIY ⇄ NNG` 8 个、`PVG → NRT` 10 个 | 3/3 |
-| 携程 | 服务端 WhaleGuard / `page_changed` | Edge 0.1.1 优先监听 `batchSearch` 结构化响应，DOM 为后备；正常结果页已确认 7 张卡，等待重载后的最终 Companion 复测 | 0/1（旧扩展） |
+| 携程 | 服务端 WhaleGuard / `page_changed` | Edge 0.1.1 优先监听 `batchSearch` 结构化响应，DOM 为后备；重载并刷新本地桥接页面后返回 30 个 Offer，标记为 `provider_response_verified` | 1/1 |
 | 去哪儿 | 匿名服务端页面无卡、往返不可用 | 登录后的 Edge 会话单程返回 20 个卡；往返按两次单程生成 `split_ticket`，不冒充原生往返 | 1/1 |
 | 同程 | 单程可用、往返不可用 | Edge/服务端单程 30 个；往返组合 10 个，保留两段价格、链接和抓取时间 | 2/2 |
 | SerpApi / Google Flights | 单来源可用，Booking Options 部分失败边界不清 | 保留成功 Booking Options，区分初始列表与二次核价；PEK 7 个、PVG 6 个，XIY 本次合法空结果 | 2/3 |
@@ -34,7 +34,7 @@ Companion 只有在返回可用航班证据时才替换同库存族的服务端 
 ## 价格证据等级
 
 - `listed_only`：FlyAI 和国内 OTA 页面展示价，必须回来源页重新选择并复核；
-- `provider_response_verified`：携程 `batchSearch` 结构化响应中的成人基础价与税费，0.1.1 已实现，等待真实扩展复测；
+- `provider_response_verified`：携程 `batchSearch` 结构化响应中的成人基础价与税费；本次 Edge 重载后实测返回 30 个，页面显示“来源接口核验价”；
 - `detail_verified`：SerpApi Booking Options 返回的具体售卖方报价，本次 `PVG → NRT` 有 6 个；
 - `split_ticket`：去哪儿/同程两次独立单程查询的组合，分别保留去返程金额、URL 和时间。
 
@@ -68,5 +68,5 @@ Companion 只有在返回可用航班证据时才替换同库存族的服务端 
 
 - FlyAI 正式 Key 已在被 Git 忽略的本地 `apps/api/.env` 配置并验证；不写入源码、文档或提交。由于 Key 曾出现在聊天记录，验收后应在控制台轮换；
 - 去哪儿当前 Edge 登录态可用；携程公开结果页当前无需登录即可看到卡片；验证码或登录只由用户处理；
-- 尚待完成：Edge Companion 0.1.1 重载后的携程最终复测、所有来源支付页终价核验、长期成功率与限流监控；
+- 尚待完成：所有来源支付页终价核验、长期成功率与限流监控；Edge Companion 0.1.1 携程最终复测已完成；
 - 云端部署和 Neon 实库不在本轮范围内。

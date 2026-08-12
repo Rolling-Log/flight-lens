@@ -26,7 +26,7 @@
 3. Sandbox、测试 token、缓存样本和只有代码没有凭据的 Connector 都不计入 production 数量；
 4. 每个来源登记 `inventoryFamily`，用于披露库存依赖，避免把同一上游的多个包装 API 夸大为独立证据。
 
-当前本地进度为：飞猪 FlyAI、去哪儿 Edge、同程 Edge/实时页面与 SerpApi Google Flights 已形成真实成功路径；`PEK → SHA` 同次查询已达到至少 3 个独立来源。携程正常结果页可见真实航班卡，Edge Companion 0.1.1 已补充 `batchSearch` 结构化响应优先和 DOM 后备解析，等待扩展重载后的最终受控验收。上线许可与长期稳定性仍需单独验收。
+当前本地进度为：飞猪 FlyAI、携程 Edge、去哪儿 Edge、同程 Edge/实时页面与 SerpApi Google Flights 已形成真实成功路径；`PEK → SHA` 重载后的同次查询五个来源全部成功。携程优先使用 `batchSearch` 结构化响应并标记 `provider_response_verified`，其余页面证据按 `listed_only` 或 `detail_verified` 披露。上线许可与长期稳定性仍需单独验收。
 
 ## 进入最低价比较的硬门槛
 
@@ -52,9 +52,9 @@
 | SerpApi Google Flights | 已完成首个生产受控验证；仅允许 `$0` Free 计划 | 已实现单程/往返选择、booking options、实际售卖方、GET 精确落点与官方 Google Flights 条件结果页降级；POST 请求不会被违规改写。官方 Free 计划当前为每月 250 次、无需信用卡，不是限时试用；运行时会在搜索前拒绝付费账号或不足额度，并禁止自动灵活日期扩搜。实时查询使用默认快速模式而非更慢的 `deep_search`，为用户等待时间和上游超时留出边界。附近机场使用官方支持的逗号分隔多出发机场参数，只展开 V1 已登记机场组并在来源报告披露 | 绝不自动升级；再验证国内和入境路线、往返链路、价格新鲜度和落点重选提示 |
 | 同程实时页面 | 本地实时购买交接已验证 | 使用隔离浏览器会话读取公开结果页；返回价格标记为 `listed_only`，必须在同程结果页重新核验，不绕过登录或验证码 | 继续观察页面稳定性，复核展示许可与落地价 |
 | 飞猪 FlyAI | 官方实时购买交接已验证 | 正式 Key 鉴权成功；已兼容当前 `ticketPrice` 和纯数字时长字段；三条验收航线均返回 Offer | 密钥仅存本地 `.env`；继续观察额度、字段与价格新鲜度 |
-| 携程实时页面 | 服务端受阻，用户 Edge 路径待最终复测 | 服务端隔离浏览器仍可能遇到 `page_changed`；用户 Edge 正常页已确认 7 张真实卡，0.1.1 增加 `batchSearch` 响应监听和 DOM 后备 | 重载 0.1.1 后执行最终受控查询；不绕过登录、验证码或 WhaleGuard |
+| 携程实时页面 | 服务端受阻，用户 Edge 已验证 | 用户 Edge 重载 0.1.1 后返回 30 个结构化 `batchSearch` Offer，页面显示来源接口核验价；服务端隔离浏览器仍可能遇到 `page_changed` | 继续观察页面稳定性；不绕过登录、验证码或 WhaleGuard |
 | 去哪儿实时页面 | Edge 实时购买交接已验证 | 登录后的用户 Edge 会话在 `PEK → SHA` 返回 20 个真实卡；往返按两张单程组合并明确标记 `split_ticket` | 继续观察页面稳定性；机场级查询按可见机场反解 IATA 并排除机场冲突 |
-| Edge Companion | 已安装并完成部分真实验收 | 去哪儿、同程已在用户 Edge 会话成功；Cookie 不回传 API，登录/验证码由用户处理；失败的 Companion 不再覆盖已成功的官方 API Connector | 重载 0.1.1 后补携程最终证据并执行三航线验收 |
+| Edge Companion | 已安装并完成本地真实验收 | 重载并刷新本地桥接页面后，携程、去哪儿、同程均在用户 Edge 会话成功；Cookie 不回传 API，登录/验证码由用户处理；失败的 Companion 不再覆盖已成功的官方 API Connector | 继续观察页面稳定性与长期成功率 |
 | Wego Affiliate Flights | 暂不接入 | 生产 API 当前要求年费，测试 Key 最长两周；V1 尚未证明足以承担该固定成本的用户价值，已移除 Connector 和申请材料 | 只有在授权允许多源比较、用户价值已验证且预算获批后重审 |
 | Travelpayouts / Aviasales Search API | 拒绝接入 | 2025-11-01 起的新 Search API 要求已有 50,000 MAU，且官方使用规则禁止与其他航班元搜索 API 合并；与本产品核心冲突 | 不接入；Data API 也不能伪装成实时可购买价格 |
 | Kiwi.com Tequila | 暂不接入 | 2024 年起新合作改为邀请制，只面向与其战略匹配的选定合作方 | 仅在取得明确邀请与允许多源比较的合同后重审 |
@@ -98,7 +98,7 @@
 
 ### 国内多来源本地验证（2026-08-11）
 
-- `PEK → SHA` 单程固定日期：最新同次 UI 查询中 FlyAI 10 个、去哪儿 Edge 20 个、同程 Edge 30 个、SerpApi 6 个真实 Offer，4/5 来源成功；FlyAI 耗时 0.933 秒、最低观察价 ¥460。聚合与严格机场过滤后展示 36 个平台报价，另有 30 个机场不匹配或不符合条件的报价退出可比结论；
+- `PEK → SHA` 单程固定日期：Edge 重载并刷新桥接后的最新同次 UI 查询中 FlyAI 10 个、携程 Edge 30 个、去哪儿 Edge 20 个、同程 Edge 30 个、SerpApi 2 个真实 Offer，5/5 来源成功、0 超时、0 失败；最低观察价仍为 FlyAI ¥460。聚合与严格机场过滤后展示 45 个平台报价，另有 47 个机场不匹配或不符合条件的报价退出可比结论；
 - `XIY ⇄ NNG`：FlyAI 返回 8 个原生往返票，耗时 1.575 秒，最低可比价 ¥1,120；同程返回 10 个拆票组合，样例 ¥500 + ¥450，保留两段 URL 和抓取时间；
 - `PVG → NRT`：FlyAI 返回 10 个、SerpApi 返回 6 个 Offer；最低观察价 ¥990，6 个 SerpApi Booking Options 标记为 `detail_verified`；
 - FlyAI 正式 Key 已通过鉴权，当前字段 `ticketPrice` 与纯数字分钟数已纳入兼容映射；
