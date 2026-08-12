@@ -13,7 +13,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test tests/**/*.test.ts"
+    "test": "node --conditions=development --import tsx --test tests/**/*.test.ts"
   },
   "dependencies": {
     "@flight-lens/contracts": "workspace:*",
