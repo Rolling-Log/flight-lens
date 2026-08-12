@@ -120,9 +120,13 @@ h1 em { font-style: normal; color: var(--blue); }
 .primary-button span:last-child { margin-left: 12px; }
 .spinner { display: inline-block; width: 13px; height: 13px; border: 2px solid rgba(255,255,255,.45); border-top-color: white; border-radius: 50%; animation: spin .75s linear infinite; vertical-align: -2px; margin-right: 7px !important; }
 .search-progress { padding: 10px 20px; background: #edf4ff; border-top: 1px solid #d8e5fb; color: #526b91; font-size: 10px; line-height: 1.5; }
-.searching-sources { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.searching-sources span { display: inline-flex; gap: 7px; align-items: center; border: 1px solid #cad9f1; background: white; border-radius: 5px; padding: 4px 7px; }
-.searching-sources b { color: var(--blue); font-size: 8px; }
+.search-progress-note { margin: 3px 0 8px 20px; color: var(--muted-strong); font-size: 9px; }
+.searching-sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px; margin-top: 8px; }
+.searching-sources span { display: grid; grid-template-columns: 7px minmax(0, 1fr) auto; grid-template-rows: auto auto; column-gap: 6px; align-items: center; border: 1px solid #cad9f1; background: white; border-radius: 5px; padding: 6px 7px; }
+.searching-sources i { grid-row: 1 / span 2; width: 7px; height: 7px; border-radius: 50%; background: var(--blue); box-shadow: 0 0 0 3px var(--blue-pale); }
+.searching-sources b { color: var(--ink); font-size: 9px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.searching-sources small { color: var(--muted-strong); font-size: 8px; }
+.searching-sources em { grid-column: 3; grid-row: 1 / span 2; color: var(--blue); font-size: 8px; font-style: normal; font-weight: 800; }
 .dark-spinner { border-color: #b6c9ea; border-top-color: var(--blue); }
 @keyframes spin { to { transform: rotate(360deg); } }
 

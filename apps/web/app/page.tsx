@@ -6,6 +6,7 @@ import type {
   SearchIntent,
   SearchResponse,
 } from "@flight-lens/contracts";
+import { searchMarket } from "@flight-lens/contracts";
 import Image from "next/image";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
@@ -33,6 +34,14 @@ type SortKey =
 type BusyState = "idle" | "parsing" | "searching";
 type StopsFilter = "all" | "direct" | "one_or_less";
 type ConnectorMeta = { id: string; name: string };
+type SearchProgressSource = ConnectorMeta & { access: "本机 Edge" | "云端 API" };
+
+const edgeCompanionSources: SearchProgressSource[] = [
+  { id: "ctrip-edge-companion", name: "携程", access: "本机 Edge" },
+  { id: "qunar-edge-companion", name: "去哪儿", access: "本机 Edge" },
+  { id: "tongcheng-edge-companion", name: "同程", access: "本机 Edge" },
+  { id: "fliggy-edge-companion", name: "飞猪", access: "本机 Edge" },
+];
 
 const cabinLabels: Record<SearchIntent["cabin"], string> = {
   economy: "经济舱",
@@ -46,6 +55,16 @@ function apiBase(): string {
     process.env.NEXT_PUBLIC_API_BASE_URL,
     typeof window === "undefined" ? "" : window.location.hostname,
   );
+}
+
+function plannedProgressSources(intent: SearchIntent, connectorMeta: ConnectorMeta[]): SearchProgressSource[] {
+  const companionSources = searchMarket(intent.origin, intent.destination) === "domestic_cn"
+    ? edgeCompanionSources
+    : edgeCompanionSources.slice(0, 1);
+  return [
+    ...companionSources,
+    ...connectorMeta.map((connector) => ({ ...connector, access: "云端 API" as const })),
+  ];
 }
 
 function dateFromToday(days: number): string {
@@ -627,6 +646,7 @@ export default function Home() {
   const singleSourceLiveResult = result
     ? isSingleSourceLiveResult(result.offers)
     : false;
+  const progressSources = plannedProgressSources(intent, connectorMeta);
 
   return (
     <main>
@@ -866,14 +886,18 @@ export default function Home() {
           </div>
           {busy === "searching" && (
             <div className="search-progress" role="status" aria-live="polite">
-              <div><span className="spinner dark-spinner" />已并行提交所有已配置来源</div>
-              {connectorMeta.length > 0 && (
-                <div className="searching-sources">
-                  {connectorMeta.map((connector) => (
-                    <span key={connector.id}>{connector.name}<b>检索中</b></span>
-                  ))}
-                </div>
-              )}
+              <div><span className="spinner dark-spinner" />正在并行核验本次计划来源</div>
+              <div className="search-progress-note">Edge Companion 使用你当前 Edge 登录会话；云端 API 仅显示已配置来源。</div>
+              <div className="searching-sources">
+                {progressSources.map((source) => (
+                  <span key={source.id}>
+                    <i aria-hidden="true" />
+                    <b>{source.name}</b>
+                    <small>{source.access}</small>
+                    <em>检索中</em>
+                  </span>
+                ))}
+              </div>
             </div>
           )}
         </div>
