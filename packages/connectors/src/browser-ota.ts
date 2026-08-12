@@ -1,6 +1,12 @@
 import { access } from "node:fs/promises";
 import { chromium, type Browser, type Page } from "playwright";
-import type { Offer, SearchIntent } from "@flight-lens/contracts";
+import {
+  locationOptions,
+  CompanionJourneyResult,
+  CompanionPlatformResult,
+  Offer,
+  SearchIntent,
+} from "@flight-lens/contracts";
 import { ConnectorError } from "./errors.js";
 import type {
   ConnectorHealth,
@@ -10,7 +16,7 @@ import type {
   FlightConnector,
 } from "./index.js";
 
-export type BrowserOtaPlatform = "ctrip" | "qunar" | "tongcheng";
+export type BrowserOtaPlatform = "ctrip" | "qunar" | "tongcheng" | "fliggy";
 
 export type BrowserOtaConfig = {
   platform: BrowserOtaPlatform;
@@ -37,7 +43,7 @@ type PlatformDefinition = {
   };
 };
 
-type RawDomCard = {
+export type RawDomCard = {
   cardText: string;
   flightNumberText: string;
   airlineName: string;
@@ -46,6 +52,7 @@ type RawDomCard = {
   departureAirport: string;
   arrivalAirport: string;
   priceText: string;
+  evidenceKind?: "structured_response" | "dom" | undefined;
 };
 
 type JsonObject = Record<string, unknown>;
@@ -93,11 +100,16 @@ const DEFINITIONS: Record<BrowserOtaPlatform, PlatformDefinition> = {
       supportsFlexibleDateProbe: false,
       capabilities: {
         tripTypes: ["one_way", "round_trip"],
+        markets: ["domestic_cn", "international"],
         locationKinds: ["airport"],
         cabins: ["economy", "premium_economy", "business", "first"],
         maxAdults: 9,
         roundTripMode: "native",
         priceEvidence: ["listed", "provider_response"],
+        dataAccess: ["structured_response", "dom"],
+        credentialRequirement: "browser_session",
+        humanInteraction: "login_or_verification_possible",
+        executionLocation: "server",
       },
     },
     buildUrl(intent) {
@@ -141,11 +153,16 @@ const DEFINITIONS: Record<BrowserOtaPlatform, PlatformDefinition> = {
       supportsFlexibleDateProbe: false,
       capabilities: {
         tripTypes: ["one_way", "round_trip"],
+        markets: ["domestic_cn"],
         locationKinds: ["airport"],
         cabins: ["economy"],
         maxAdults: 9,
         roundTripMode: "split_ticket",
         priceEvidence: ["listed"],
+        dataAccess: ["dom"],
+        credentialRequirement: "browser_session",
+        humanInteraction: "login_or_verification_possible",
+        executionLocation: "server",
       },
     },
     buildUrl(intent) {
@@ -186,11 +203,16 @@ const DEFINITIONS: Record<BrowserOtaPlatform, PlatformDefinition> = {
       supportsFlexibleDateProbe: false,
       capabilities: {
         tripTypes: ["one_way", "round_trip"],
+        markets: ["domestic_cn"],
         locationKinds: ["airport"],
         cabins: ["economy"],
         maxAdults: 9,
         roundTripMode: "split_ticket",
         priceEvidence: ["listed"],
+        dataAccess: ["dom"],
+        credentialRequirement: "browser_session",
+        humanInteraction: "login_or_verification_possible",
+        executionLocation: "server",
       },
     },
     buildUrl(intent) {
@@ -207,6 +229,56 @@ const DEFINITIONS: Record<BrowserOtaPlatform, PlatformDefinition> = {
       departureAirport: [".f-startTime em"],
       arrivalAirport: [".f-endTime em"],
       price: [".head-prices strong em", ".head-prices strong", ".price-show"],
+    },
+  },
+  fliggy: {
+    metadata: {
+      id: "fliggy-browser",
+      name: "飞猪实时页面",
+      kind: "ota",
+      environment: "production",
+      authorization: "browser_session",
+      resultRole: "purchase_handoff",
+      handoff: "deep_link",
+      inventoryFamily: "fliggy",
+      configured: true,
+      supportsFlexibleDateProbe: false,
+      capabilities: {
+        tripTypes: ["one_way", "round_trip"],
+        markets: ["domestic_cn"],
+        locationKinds: ["airport"],
+        cabins: ["economy"],
+        maxAdults: 9,
+        roundTripMode: "split_ticket",
+        priceEvidence: ["listed"],
+        dataAccess: ["dom"],
+        credentialRequirement: "browser_session",
+        humanInteraction: "login_or_verification_possible",
+        executionLocation: "server",
+      },
+    },
+    buildUrl(intent) {
+      const params = new URLSearchParams({
+        tripType: "0",
+        depCity: intent.origin.code,
+        arrCity: intent.destination.code,
+        depDate: intent.departureDate,
+        depCityName: cityName(intent.origin),
+        arrCityName: cityName(intent.destination),
+      });
+      return `https://sjipiao.fliggy.com/flight_search_result.htm?${params.toString()}`;
+    },
+    responsePatterns: [/flight/i, /search/i],
+    selectors: {
+      resultContainer: [".flight-list-box", ".flight-list.J_FlightList", ".flight-list-wrap"],
+      flightCard: [".flight-list-item.J_FlightItem", ".flight-item-card"],
+      flightNumber: [".flight-line .J_line", ".flight-line .airline-name", ".flight-no"],
+      airlineName: [".flight-line .airline-name", ".airline-name"],
+      departureTime: [".flight-time-deptime", ".dep-time"],
+      arrivalTime: [".flight-time .s-time", ".arr-time"],
+      departureAirport: [".flight-port .port-dep", ".dep-airport"],
+      arrivalAirport: [".flight-port .port-arr", ".arr-airport"],
+      price: [".flight-price .J_FlightListPrice", ".flight-price .pi-price", ".price-num"],
     },
   },
 };
@@ -269,6 +341,29 @@ function inferredMinutes(departureAt: string, arrivalAt: string): number {
   let arrival = new Date(`${arrivalAt}+08:00`).getTime();
   if (arrival <= departure) arrival += 86_400_000;
   return Math.max(1, Math.round((arrival - departure) / 60_000));
+}
+
+function airportSearchKey(value: string): string {
+  return value.normalize("NFKC").toLocaleLowerCase("zh-CN")
+    .replace(/国际|机场|航站楼|terminal|\bt\d+\b|[\s()（）'’-]+/g, "");
+}
+
+function airportRefFromText(
+  value: string,
+  fallback: SearchIntent["origin"],
+): Offer["segments"][number]["origin"] {
+  const haystack = airportSearchKey(value);
+  const match = locationOptions.find((location) => {
+    if (location.kind !== "airport") return false;
+    const candidates = [location.airportNameZh, location.airportNameEn, ...location.aliases]
+      .filter((candidate): candidate is string => Boolean(candidate))
+      .map(airportSearchKey)
+      .filter((candidate) => candidate.length >= 2);
+    return candidates.some((candidate) => haystack.includes(candidate));
+  });
+  return match
+    ? { kind: "airport", code: match.code, name: value }
+    : { kind: fallback.kind, code: fallback.code, name: value };
 }
 
 function filterReasons(
@@ -458,15 +553,15 @@ function domDateTime(date: string, time: string, nextDay: boolean): string | und
   return `${value.toISOString().slice(0, 10)}T${match[1]!.padStart(2, "0")}:${match[2]}:00`;
 }
 
-function mapDomCards(
+export function mapDomCards(
   cards: RawDomCard[],
   platform: BrowserOtaPlatform,
   intent: SearchIntent,
   requestId: string,
   bookingUrl: string,
+  fetchedAt = new Date().toISOString(),
 ): Offer[] {
   const definition = DEFINITIONS[platform];
-  const fetchedAt = new Date().toISOString();
   return cards.slice(0, 30).flatMap((card, index) => {
     const parts = flightParts(card.flightNumberText || card.cardText);
     const perAdultMinor = priceMinor(card.priceText);
@@ -487,7 +582,18 @@ function mapDomCards(
     const legId = `${platform}:${requestId}:${index}:leg`;
     const totalMinor = perAdultMinor * intent.adults;
     const stops = /中转|转机|转\d+次/.test(card.cardText) ? 1 : 0;
-    const reasons = filterReasons(intent, departureAt, stops, card.cardText);
+    const origin = airportRefFromText(card.departureAirport, intent.origin);
+    const destination = airportRefFromText(card.arrivalAirport, intent.destination);
+    const reasons = [
+      ...filterReasons(intent, departureAt, stops, card.cardText),
+      ...(intent.origin.kind === "airport" && origin.code !== intent.origin.code
+        ? ["ORIGIN_AIRPORT_CONFLICT"]
+        : []),
+      ...(intent.destination.kind === "airport" && destination.code !== intent.destination.code
+        ? ["DESTINATION_AIRPORT_CONFLICT"]
+        : []),
+    ];
+    const providerResponseVerified = card.evidenceKind === "structured_response";
     return [{
       schemaVersion: "1" as const,
       id: `${platform}:${requestId}:${index}`,
@@ -496,7 +602,13 @@ function mapDomCards(
       environment: "production" as const,
       seller: {
         id: platform,
-        name: platform === "ctrip" ? "携程" : platform === "qunar" ? "去哪儿" : "同程旅行",
+        name: platform === "ctrip"
+          ? "携程"
+          : platform === "qunar"
+            ? "去哪儿"
+            : platform === "tongcheng"
+              ? "同程旅行"
+              : "飞猪",
         kind: "ota" as const,
         deepLink: bookingUrl,
         handoffPrecision: "search_results" as const,
@@ -504,12 +616,8 @@ function mapDomCards(
       legs: [{
         id: legId,
         segmentIds: [segmentId],
-        origin: { kind: "city" as const, code: intent.origin.code, name: card.departureAirport },
-        destination: {
-          kind: "city" as const,
-          code: intent.destination.code,
-          name: card.arrivalAirport,
-        },
+        origin,
+        destination,
         departureAt,
         arrivalAt,
         durationMinutes: inferredMinutes(departureAt, arrivalAt),
@@ -520,19 +628,17 @@ function mapDomCards(
         legIndex: 0,
         marketingCarrier: parts.carrier,
         flightNumber: parts.number,
-        origin: { kind: "city" as const, code: intent.origin.code, name: card.departureAirport },
-        destination: {
-          kind: "city" as const,
-          code: intent.destination.code,
-          name: card.arrivalAirport,
-        },
+        origin,
+        destination,
         departureAt,
         arrivalAt,
         durationMinutes: inferredMinutes(departureAt, arrivalAt),
       }],
       priceComponents: [{
         kind: "required_service" as const,
-        label: intent.adults === 1 ? "来源列表展示价" : `来源列表展示价 × ${intent.adults}`,
+        label: providerResponseVerified
+          ? (intent.adults === 1 ? "来源结构化响应价" : `来源结构化响应价 × ${intent.adults}`)
+          : (intent.adults === 1 ? "来源列表展示价" : `来源列表展示价 × ${intent.adults}`),
         amountMinor: totalMinor,
         currency: "CNY",
         required: true,
@@ -540,7 +646,10 @@ function mapDomCards(
       totalPrice: { amountMinor: totalMinor, currency: "CNY" },
       totalPriceCny: { amountMinor: totalMinor, currency: "CNY" },
       listedPrice: { amountMinor: totalMinor, currency: "CNY" },
-      priceVerificationStatus: "listed_only" as const,
+      priceVerificationStatus: providerResponseVerified
+        ? "provider_response_verified" as const
+        : "listed_only" as const,
+      ...(providerResponseVerified ? { priceVerifiedAt: fetchedAt } : {}),
       baggage: [],
       refundable: null,
       changeable: null,
@@ -551,7 +660,9 @@ function mapDomCards(
       evidenceRef: bookingUrl,
       comparable: reasons.length === 0,
       incomparabilityReasons: reasons,
-      qualityScore: reasons.length === 0 ? 76 : 52,
+      qualityScore: providerResponseVerified
+        ? (reasons.length === 0 ? 88 : 61)
+        : (reasons.length === 0 ? 76 : 52),
     }];
   });
 }
@@ -683,6 +794,138 @@ async function closeBrowser(browser: Browser | undefined): Promise<void> {
     browser.close().catch(() => undefined),
     new Promise<void>((resolve) => setTimeout(resolve, 2_000)),
   ]);
+}
+
+const COMPANION_STATE_DETAILS: Record<
+  Exclude<CompanionJourneyResult["state"], "success" | "empty">,
+  { state: "login_required" | "captcha_required" | "page_changed" | "unavailable" | "timeout"; retryable: boolean }
+> = {
+  login_required: { state: "login_required", retryable: false },
+  captcha_required: { state: "captcha_required", retryable: false },
+  page_changed: { state: "page_changed", retryable: false },
+  unavailable: { state: "unavailable", retryable: true },
+  timeout: { state: "timeout", retryable: true },
+};
+
+function throwForCompanionJourney(
+  platform: BrowserOtaPlatform,
+  journey: CompanionJourneyResult,
+): void {
+  if (journey.state === "success" || journey.state === "empty") return;
+  const detail = COMPANION_STATE_DETAILS[journey.state];
+  throw new ConnectorError(
+    `${platform} Edge companion reported ${journey.state}.`,
+    journey.errorCode ?? `${platform.toUpperCase()}_COMPANION_${journey.state.toUpperCase()}`,
+    detail.state,
+    detail.retryable,
+  );
+}
+
+export class CompanionOtaConnector implements FlightConnector {
+  readonly metadata: ConnectorMetadata;
+
+  constructor(
+    private readonly platform: BrowserOtaPlatform,
+    private readonly result: CompanionPlatformResult,
+  ) {
+    const base = DEFINITIONS[platform].metadata;
+    this.metadata = {
+      ...base,
+      id: `${platform}-edge-companion`,
+      name: `${base.name.replace("实时页面", "")} · Edge`,
+      supportsFlexibleDateProbe: false,
+      capabilities: {
+        ...base.capabilities!,
+        tripTypes: ["one_way", "round_trip"],
+        locationKinds: ["airport", "city"],
+        roundTripMode: "split_ticket",
+        dataAccess: this.platform === "ctrip" ? ["structured_response", "dom"] : ["dom"],
+        credentialRequirement: "browser_session",
+        humanInteraction: "login_or_verification_possible",
+        executionLocation: "user_browser",
+      },
+    };
+  }
+
+  async health(): Promise<ConnectorHealth> {
+    return {
+      state: "healthy",
+      checkedAt: new Date().toISOString(),
+      detail: "Search evidence was collected in the user's Edge session.",
+    };
+  }
+
+  async search(
+    intent: SearchIntent,
+    context: ConnectorSearchContext,
+  ): Promise<ConnectorSearchResult> {
+    const outbound = this.result.journeys.find((journey) => journey.direction === "outbound");
+    if (!outbound) {
+      throw new ConnectorError(
+        `${this.platform} companion omitted the outbound journey.`,
+        `${this.platform.toUpperCase()}_COMPANION_INVALID_RESPONSE`,
+        "invalid_response",
+        false,
+      );
+    }
+    throwForCompanionJourney(this.platform, outbound);
+    const outboundOffers = this.mapJourney(outbound, intent, `${context.requestId}:outbound`);
+    if (intent.tripType === "one_way") {
+      return {
+        offers: outboundOffers,
+        providerRequestId: context.requestId,
+        notes: [`${this.platform.toUpperCase()}_EDGE_COMPANION_SESSION`],
+      };
+    }
+
+    const inbound = this.result.journeys.find((journey) => journey.direction === "inbound");
+    if (!inbound) {
+      throw new ConnectorError(
+        `${this.platform} companion omitted the inbound journey.`,
+        `${this.platform.toUpperCase()}_COMPANION_INVALID_RESPONSE`,
+        "invalid_response",
+        false,
+      );
+    }
+    throwForCompanionJourney(this.platform, inbound);
+    const inboundIntent: SearchIntent = {
+      ...intent,
+      tripType: "one_way",
+      origin: intent.destination,
+      destination: intent.origin,
+      departureDate: intent.returnDate!,
+      returnDate: undefined,
+    };
+    const inboundOffers = this.mapJourney(inbound, inboundIntent, `${context.requestId}:inbound`);
+    return {
+      offers: combineSplitTicketOffers(
+        outboundOffers,
+        inboundOffers,
+        this.platform,
+        context.requestId,
+      ).map((offer) => ({ ...offer, connectorId: this.metadata.id })),
+      providerRequestId: context.requestId,
+      notes: [
+        `${this.platform.toUpperCase()}_EDGE_COMPANION_SESSION`,
+        `${this.platform.toUpperCase()}_ROUND_TRIP_SPLIT_TICKET`,
+      ],
+    };
+  }
+
+  private mapJourney(
+    journey: CompanionJourneyResult,
+    intent: SearchIntent,
+    requestId: string,
+  ): Offer[] {
+    return mapDomCards(
+      journey.cards,
+      this.platform,
+      intent,
+      requestId,
+      journey.bookingUrl,
+      journey.fetchedAt,
+    ).map((offer) => ({ ...offer, connectorId: this.metadata.id }));
+  }
 }
 
 export class BrowserOtaConnector implements FlightConnector {

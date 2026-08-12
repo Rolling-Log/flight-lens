@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "航探 Edge Companion",
+  "version": "0.1.1",
+  "description": "在用户自己的 Edge 会话中核验携程、去哪儿、同程和飞猪公开机票价格。",
+  "permissions": ["tabs", "scripting", "storage"],
+  "host_permissions": [
+    "https://*.ctrip.com/*",
+    "https://*.qunar.com/*",
+    "https://*.ly.com/*",
+    "https://*.fliggy.com/*",
+    "https://*.taobao.com/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.ctrip.com/online/*"],
+      "js": ["ctrip-response.js", "ctrip-network-tap.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["http://127.0.0.1/*", "http://localhost/*"],
+      "js": ["page-bridge.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://*.ctrip.com/*",
+        "https://*.qunar.com/*",
+        "https://*.ly.com/*",
+        "https://*.fliggy.com/*",
+        "https://*.taobao.com/*"
+      ],
+      "js": ["platform-content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "航探 Edge Companion",
+    "default_popup": "popup.html"
+  }
+}

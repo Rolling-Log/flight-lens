@@ -36,6 +36,36 @@ const CITIES: CityDefinition[] = [
   { cityCode: "SYX", cityNameZh: "三亚", cityNameEn: "Sanya", pinyin: "sanya", airportCodes: ["SYX"], aliases: [], airports: [{ code: "SYX", nameZh: "凤凰国际机场", nameEn: "Sanya Phoenix" }] },
   { cityCode: "HAK", cityNameZh: "海口", cityNameEn: "Haikou", pinyin: "haikou", airportCodes: ["HAK"], aliases: [], airports: [{ code: "HAK", nameZh: "美兰国际机场", nameEn: "Haikou Meilan" }] },
   { cityCode: "URC", cityNameZh: "乌鲁木齐", cityNameEn: "Urumqi", pinyin: "wulumuqi urumqi", airportCodes: ["URC"], aliases: [], airports: [{ code: "URC", nameZh: "天山国际机场", nameEn: "Urumqi Tianshan" }] },
+  { cityCode: "DLC", cityNameZh: "大连", cityNameEn: "Dalian", pinyin: "dalian", airportCodes: ["DLC"], aliases: [], airports: [{ code: "DLC", nameZh: "周水子国际机场", nameEn: "Dalian Zhoushuizi" }] },
+  { cityCode: "SHE", cityNameZh: "沈阳", cityNameEn: "Shenyang", pinyin: "shenyang", airportCodes: ["SHE"], aliases: [], airports: [{ code: "SHE", nameZh: "桃仙国际机场", nameEn: "Shenyang Taoxian" }] },
+  { cityCode: "HRB", cityNameZh: "哈尔滨", cityNameEn: "Harbin", pinyin: "haerbin harbin", airportCodes: ["HRB"], aliases: [], airports: [{ code: "HRB", nameZh: "太平国际机场", nameEn: "Harbin Taiping" }] },
+  { cityCode: "CGQ", cityNameZh: "长春", cityNameEn: "Changchun", pinyin: "changchun", airportCodes: ["CGQ"], aliases: [], airports: [{ code: "CGQ", nameZh: "龙嘉国际机场", nameEn: "Changchun Longjia" }] },
+  { cityCode: "TNA", cityNameZh: "济南", cityNameEn: "Jinan", pinyin: "jinan", airportCodes: ["TNA"], aliases: [], airports: [{ code: "TNA", nameZh: "遥墙国际机场", nameEn: "Jinan Yaoqiang" }] },
+  { cityCode: "FOC", cityNameZh: "福州", cityNameEn: "Fuzhou", pinyin: "fuzhou", airportCodes: ["FOC"], aliases: [], airports: [{ code: "FOC", nameZh: "长乐国际机场", nameEn: "Fuzhou Changle" }] },
+  { cityCode: "WNZ", cityNameZh: "温州", cityNameEn: "Wenzhou", pinyin: "wenzhou", airportCodes: ["WNZ"], aliases: [], airports: [{ code: "WNZ", nameZh: "龙湾国际机场", nameEn: "Wenzhou Longwan" }] },
+  { cityCode: "NGB", cityNameZh: "宁波", cityNameEn: "Ningbo", pinyin: "ningbo", airportCodes: ["NGB"], aliases: [], airports: [{ code: "NGB", nameZh: "栎社国际机场", nameEn: "Ningbo Lishe" }] },
+  { cityCode: "HFE", cityNameZh: "合肥", cityNameEn: "Hefei", pinyin: "hefei", airportCodes: ["HFE"], aliases: [], airports: [{ code: "HFE", nameZh: "新桥国际机场", nameEn: "Hefei Xinqiao" }] },
+  { cityCode: "KHN", cityNameZh: "南昌", cityNameEn: "Nanchang", pinyin: "nanchang", airportCodes: ["KHN"], aliases: [], airports: [{ code: "KHN", nameZh: "昌北国际机场", nameEn: "Nanchang Changbei" }] },
+  { cityCode: "TYN", cityNameZh: "太原", cityNameEn: "Taiyuan", pinyin: "taiyuan", airportCodes: ["TYN"], aliases: [], airports: [{ code: "TYN", nameZh: "武宿国际机场", nameEn: "Taiyuan Wusu" }] },
+  { cityCode: "SJW", cityNameZh: "石家庄", cityNameEn: "Shijiazhuang", pinyin: "shijiazhuang", airportCodes: ["SJW"], aliases: [], airports: [{ code: "SJW", nameZh: "正定国际机场", nameEn: "Shijiazhuang Zhengding" }] },
+  { cityCode: "KWE", cityNameZh: "贵阳", cityNameEn: "Guiyang", pinyin: "guiyang", airportCodes: ["KWE"], aliases: [], airports: [{ code: "KWE", nameZh: "龙洞堡国际机场", nameEn: "Guiyang Longdongbao" }] },
+  { cityCode: "LHW", cityNameZh: "兰州", cityNameEn: "Lanzhou", pinyin: "lanzhou", airportCodes: ["LHW"], aliases: [], airports: [{ code: "LHW", nameZh: "中川国际机场", nameEn: "Lanzhou Zhongchuan" }] },
+  { cityCode: "XNN", cityNameZh: "西宁", cityNameEn: "Xining", pinyin: "xining", airportCodes: ["XNN"], aliases: [], airports: [{ code: "XNN", nameZh: "曹家堡国际机场", nameEn: "Xining Caojiapu" }] },
+  { cityCode: "INC", cityNameZh: "银川", cityNameEn: "Yinchuan", pinyin: "yinchuan", airportCodes: ["INC"], aliases: [], airports: [{ code: "INC", nameZh: "河东国际机场", nameEn: "Yinchuan Hedong" }] },
+  { cityCode: "HET", cityNameZh: "呼和浩特", cityNameEn: "Hohhot", pinyin: "huhehaote hohhot", airportCodes: ["HET"], aliases: [], airports: [{ code: "HET", nameZh: "白塔国际机场", nameEn: "Hohhot Baita" }] },
+  { cityCode: "LXA", cityNameZh: "拉萨", cityNameEn: "Lhasa", pinyin: "lasa lhasa", airportCodes: ["LXA"], aliases: [], airports: [{ code: "LXA", nameZh: "贡嘎国际机场", nameEn: "Lhasa Gonggar" }] },
+  { cityCode: "KWL", cityNameZh: "桂林", cityNameEn: "Guilin", pinyin: "guilin", airportCodes: ["KWL"], aliases: [], airports: [{ code: "KWL", nameZh: "两江国际机场", nameEn: "Guilin Liangjiang" }] },
+  { cityCode: "ZUH", cityNameZh: "珠海", cityNameEn: "Zhuhai", pinyin: "zhuhai", airportCodes: ["ZUH"], aliases: [], airports: [{ code: "ZUH", nameZh: "金湾机场", nameEn: "Zhuhai Jinwan" }] },
+  { cityCode: "WUX", cityNameZh: "无锡", cityNameEn: "Wuxi", pinyin: "wuxi", airportCodes: ["WUX"], aliases: ["苏南"], airports: [{ code: "WUX", nameZh: "硕放机场", nameEn: "Sunan Shuofang" }] },
+  { cityCode: "YNT", cityNameZh: "烟台", cityNameEn: "Yantai", pinyin: "yantai", airportCodes: ["YNT"], aliases: [], airports: [{ code: "YNT", nameZh: "蓬莱国际机场", nameEn: "Yantai Penglai" }] },
+  { cityCode: "JJN", cityNameZh: "泉州", cityNameEn: "Quanzhou", pinyin: "quanzhou", airportCodes: ["JJN"], aliases: ["晋江"], airports: [{ code: "JJN", nameZh: "晋江国际机场", nameEn: "Quanzhou Jinjiang" }] },
+  { cityCode: "BHY", cityNameZh: "北海", cityNameEn: "Beihai", pinyin: "beihai", airportCodes: ["BHY"], aliases: [], airports: [{ code: "BHY", nameZh: "福成机场", nameEn: "Beihai Fucheng" }] },
+  { cityCode: "DYG", cityNameZh: "张家界", cityNameEn: "Zhangjiajie", pinyin: "zhangjiajie", airportCodes: ["DYG"], aliases: [], airports: [{ code: "DYG", nameZh: "荷花国际机场", nameEn: "Zhangjiajie Hehua" }] },
+  { cityCode: "KHG", cityNameZh: "喀什", cityNameEn: "Kashgar", pinyin: "kashi kashgar", airportCodes: ["KHG"], aliases: [], airports: [{ code: "KHG", nameZh: "徕宁国际机场", nameEn: "Kashgar Laining" }] },
+  { cityCode: "JHG", cityNameZh: "西双版纳", cityNameEn: "Xishuangbanna", pinyin: "xishuangbanna", airportCodes: ["JHG"], aliases: ["景洪"], airports: [{ code: "JHG", nameZh: "嘎洒国际机场", nameEn: "Xishuangbanna Gasa" }] },
+  { cityCode: "LJG", cityNameZh: "丽江", cityNameEn: "Lijiang", pinyin: "lijiang", airportCodes: ["LJG"], aliases: [], airports: [{ code: "LJG", nameZh: "三义国际机场", nameEn: "Lijiang Sanyi" }] },
+  { cityCode: "MFM", cityNameZh: "澳门", cityNameEn: "Macau", pinyin: "aomen macau", airportCodes: ["MFM"], aliases: [], airports: [{ code: "MFM", nameZh: "澳门国际机场", nameEn: "Macau International" }] },
+  { cityCode: "TPE", cityNameZh: "台北", cityNameEn: "Taipei", pinyin: "taibei taipei", airportCodes: ["TPE", "TSA"], aliases: [], airports: [{ code: "TPE", nameZh: "桃园国际机场", nameEn: "Taiwan Taoyuan" }, { code: "TSA", nameZh: "松山机场", nameEn: "Taipei Songshan" }] },
   { cityCode: "HKG", cityNameZh: "香港", cityNameEn: "Hong Kong", pinyin: "xianggang hongkong", airportCodes: ["HKG"], aliases: [], airports: [{ code: "HKG", nameZh: "香港国际机场", nameEn: "Hong Kong International" }] },
   { cityCode: "TYO", cityNameZh: "东京", cityNameEn: "Tokyo", pinyin: "dongjing tokyo", airportCodes: ["HND", "NRT"], aliases: [], airports: [{ code: "HND", nameZh: "羽田机场", nameEn: "Tokyo Haneda" }, { code: "NRT", nameZh: "成田国际机场", nameEn: "Tokyo Narita" }] },
   { cityCode: "OSA", cityNameZh: "大阪", cityNameEn: "Osaka", pinyin: "daban osaka", airportCodes: ["KIX", "ITM"], aliases: [], airports: [{ code: "KIX", nameZh: "关西国际机场", nameEn: "Kansai International" }, { code: "ITM", nameZh: "伊丹机场", nameEn: "Osaka Itami" }] },
@@ -49,6 +79,14 @@ const CITIES: CityDefinition[] = [
 export const locationOptions: LocationOption[] = CITIES.flatMap((city) => [
   { kind: "city", code: city.cityCode, cityCode: city.cityCode, cityNameZh: city.cityNameZh, cityNameEn: city.cityNameEn, pinyin: city.pinyin, airportCodes: city.airportCodes, aliases: city.aliases },
   ...city.airports.map((airport) => ({ kind: "airport" as const, code: airport.code, cityCode: city.cityCode, cityNameZh: city.cityNameZh, cityNameEn: city.cityNameEn, pinyin: city.pinyin, airportNameZh: airport.nameZh, airportNameEn: airport.nameEn, airportCodes: [airport.code], aliases: [...city.aliases, ...(airport.aliases ?? [])] })),
+]);
+
+const MAINLAND_CHINA_CITY_CODES = new Set([
+  "BJS", "SHA", "CTU", "CAN", "SZX", "XIY", "NNG", "CKG", "HGH", "NKG",
+  "WUH", "CSX", "KMG", "XMN", "TAO", "TSN", "CGO", "SYX", "HAK", "URC",
+  "DLC", "SHE", "HRB", "CGQ", "TNA", "FOC", "WNZ", "NGB", "HFE", "KHN",
+  "TYN", "SJW", "KWE", "LHW", "XNN", "INC", "HET", "LXA", "KWL", "ZUH",
+  "WUX", "YNT", "JJN", "BHY", "DYG", "KHG", "JHG", "LJG",
 ]);
 
 function normalized(value: string): string {
@@ -66,11 +104,26 @@ export function searchLocations(query: string, limit = 8): LocationOption[] {
   if (!needle) return locationOptions.filter((item) => item.kind === "city").slice(0, limit);
   return locationOptions
     .map((item) => {
-      const fields = [item.code, item.cityCode, item.cityNameZh, item.cityNameEn, item.pinyin, item.airportNameZh, item.airportNameEn, ...item.aliases].filter(Boolean).map((value) => normalized(String(value)));
+      const fields = [
+        item.code,
+        item.cityCode,
+        item.cityNameZh,
+        item.cityNameEn,
+        item.pinyin,
+        item.airportNameZh,
+        item.airportNameZh?.replace("国际", ""),
+        item.airportNameEn,
+        ...item.aliases,
+      ].filter(Boolean).map((value) => normalized(String(value)));
       const exactCode = normalized(item.code) === needle;
       const starts = fields.some((field) => field.startsWith(needle));
       const includes = fields.some((field) => field.includes(needle));
-      return { item, score: exactCode ? 0 : starts ? 1 : includes ? 2 : 99 };
+      return {
+        item,
+        score: exactCode
+          ? item.kind === "airport" ? 0 : 1
+          : starts ? 2 : includes ? 3 : 99,
+      };
     })
     .filter((entry) => entry.score < 99)
     .sort((left, right) => left.score - right.score || Number(right.item.kind === "city") - Number(left.item.kind === "city"))
@@ -84,4 +137,17 @@ export function resolveLocation(kind: "city" | "airport", code: string): Locatio
 
 export function airportCodesForLocation(location: { kind: "city" | "airport"; code: string }): string[] {
   return resolveLocation(location.kind, location.code)?.airportCodes ?? (location.kind === "airport" ? [location.code] : []);
+}
+
+export function searchMarket(
+  origin: { kind: "city" | "airport"; code: string },
+  destination: { kind: "city" | "airport"; code: string },
+): "domestic_cn" | "international" | "unknown" {
+  const originLocation = resolveLocation(origin.kind, origin.code);
+  const destinationLocation = resolveLocation(destination.kind, destination.code);
+  if (!originLocation || !destinationLocation) return "unknown";
+  return MAINLAND_CHINA_CITY_CODES.has(originLocation.cityCode) &&
+    MAINLAND_CHINA_CITY_CODES.has(destinationLocation.cityCode)
+    ? "domestic_cn"
+    : "international";
 }

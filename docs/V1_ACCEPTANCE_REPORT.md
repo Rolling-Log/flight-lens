@@ -5,74 +5,68 @@
 
 ## 结论
 
-V1 本地多来源真实查询链路通过：一次 `PEK → SHA` 查询中，同程返回 30 个实时页面 Offer，SerpApi / Google Flights 返回 4 个实时 Offer。`XIY ⇄ NNG` 往返中，同程返回 10 个明确标记的分开购买组合，SerpApi 返回 2 个原生往返 Offer。系统没有用 Mock 或缓存价格填补失败来源。
+V1 的核心门槛已经达到：用户可用中文、拼音、机场名或 IATA 形成同一规范化搜索；`PEK → SHA` 已有至少 3 个独立真实来源；`XIY ⇄ NNG` 已有 FlyAI 原生往返和同程拆票两个来源；`PVG → NRT` 已获得 `detail_verified` 二次核价。运行时没有用 Mock、录制价格或缓存样本填补失败来源。
 
-四个国内 Connector 均已接入统一 Registry：
+## 五来源前后状态
 
-| 来源 | 实测状态 | Offer | 当前边界 |
+下表“成功率”只表示 2026-08-11 的受控验收样本中返回 Offer 的比例，不代表长期 SLO。
+
+| 来源 | 修改前 | 当前实现与实测 | 受控 Offer 成功率 |
+| --- | --- | --- | ---: |
+| 飞猪 FlyAI | 匿名额度耗尽，`auth_error` | 正式 Key + 官方 CLI；兼容当前 `ticketPrice` 与纯数字分钟字段；`PEK → SHA` 10 个、`XIY ⇄ NNG` 8 个、`PVG → NRT` 10 个 | 3/3 |
+| 携程 | 服务端 WhaleGuard / `page_changed` | Edge 0.1.1 优先监听 `batchSearch` 结构化响应，DOM 为后备；正常结果页已确认 7 张卡，等待重载后的最终 Companion 复测 | 0/1（旧扩展） |
+| 去哪儿 | 匿名服务端页面无卡、往返不可用 | 登录后的 Edge 会话单程返回 20 个卡；往返按两次单程生成 `split_ticket`，不冒充原生往返 | 1/1 |
+| 同程 | 单程可用、往返不可用 | Edge/服务端单程 30 个；往返组合 10 个，保留两段价格、链接和抓取时间 | 2/2 |
+| SerpApi / Google Flights | 单来源可用，Booking Options 部分失败边界不清 | 保留成功 Booking Options，区分初始列表与二次核价；PEK 7 个、PVG 6 个，XIY 本次合法空结果 | 2/3 |
+
+Companion 只有在返回可用航班证据时才替换同库存族的服务端 Connector。飞猪页面失败不会再覆盖已成功的官方 FlyAI。
+
+## 三航线实测
+
+| 航线 | 来源与 Offer 数 | 最低观察价 | 来源耗时与边界 |
 | --- | --- | ---: | --- |
-| 同程 | `success` | 单程 30 / 往返组合 10 | 页面展示价，`listed_only`；往返由两次真实单程查询组合，不冒充原生往返价 |
-| 飞猪 FlyAI | `auth_error` | 0 | 官方匿名额度耗尽，需要正式 `FLYAI_API_KEY` |
-| 携程 | `page_changed` | 0 | 实测为 WhaleGuard 阻断页，不生成虚假结果 |
-| 去哪儿 | `page_changed` | 0 | 匿名页面仅返回日期价格带，未返回可验证航班卡，不把日历起价冒充航班 Offer |
-| SerpApi / Google Flights | `success` | 4 | Booking Options 二次核价为 `detail_verified`；结果页落点仍需重新选择并在支付页复核 |
+| `PEK → SHA` 2026-09-10 | 最新同次 UI 查询：FlyAI 10 + 去哪儿 20 + 同程 30 + SerpApi 6；聚合后展示 36 个平台报价 | ¥460，FlyAI | FlyAI 0.933 秒；SerpApi 30.188 秒；30 个机场不匹配或不符合条件的报价已退出可比结论 |
+| `XIY ⇄ NNG` 2026-09-11 / 09-19 | FlyAI 原生往返 8 + 同程拆票组合 10 | FlyAI 可比最低 ¥1,120；同程拆票样例 ¥950 | FlyAI 1.575 秒；同程约 24.849 秒；拆票为 ¥500 + ¥450 |
+| `PVG → NRT` 2026-09-10 | FlyAI 10 + SerpApi 6 | ¥990，Jetstar | FlyAI 0.864 秒；SerpApi 12.614 秒；6 个为 `detail_verified` |
 
-## 三航线稳定性
+价格是对应测试时刻的观察值，不保证持续存在，最终金额与规则以来源支付页为准。
 
-| 航线 | 日期 | 来源 | Offer 数 | 样例最低展示价 |
-| --- | --- | --- | ---: | ---: |
-| PEK → SHA | 2026-09-10 | 同程 | 30 | ¥350 |
-| SHA → CAN | 2026-09-12 | 同程 | 30 | ¥350 |
-| CAN → CTU | 2026-09-15 | 同程 | 30 | ¥369 |
-| PVG → NRT | 2026-09-10 | SerpApi / Google Flights | 9 | ¥1065（`detail_verified`） |
-| XIY ⇄ NNG | 2026-09-11 / 2026-09-19 | 同程分开购买 + SerpApi | 10 + 2 | 同程 ¥950（¥500 + ¥450，`listed_only`） |
+## 价格证据等级
 
-价格是对应测试时刻观察值，不保证持续存在。
+- `listed_only`：FlyAI 和国内 OTA 页面展示价，必须回来源页重新选择并复核；
+- `provider_response_verified`：携程 `batchSearch` 结构化响应中的成人基础价与税费，0.1.1 已实现，等待真实扩展复测；
+- `detail_verified`：SerpApi Booking Options 返回的具体售卖方报价，本次 `PVG → NRT` 有 6 个；
+- `split_ticket`：去哪儿/同程两次独立单程查询的组合，分别保留去返程金额、URL 和时间。
 
-## 可复现命令
+## 中文地点能力
 
-```bash
-pnpm --filter @flight-lens/connectors smoke:domestic -- PEK SHA 2026-09-10
-pnpm --filter @flight-lens/api smoke:live -- PEK SHA 2026-09-10
-```
-
-本地 API 的 `.env` 需启用：
-
-```dotenv
-FLYAI_ENABLED=true
-DOMESTIC_BROWSER_CONNECTORS_ENABLED=true
-BROWSER_EXECUTABLE_PATH=/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge
-BROWSER_HEADLESS=true
-BROWSER_PROXY_SERVER=http://127.0.0.1:7890
-```
-
-## 验收功能
-
-- 自然语言与表单输入共享 SearchIntent；
-- 精确筛选支持中文、拼音、英文与 IATA 的城市/机场组合框；北京、上海、成都等城市会在搜索规划中展开机场组合；
-- 支持单程/往返、成人数、四档舱位、预算、时间、中转和行李条件；
-- 来源并行执行，硬超时，失败互不拖累；
-- Offer 统一字段、成人总价、来源、时间、航段、跳转与价格核验等级；
-- 同航班跨平台聚合；按价格、耗时、中转排序；按航司和中转过滤；
-- SerpApi Booking Options 完成卖方级二次核价，并与初始列表展示价分级；
-- Connector 公开结构化能力声明；不适用当前查询的来源不进入覆盖率分母；
-- 同程与去哪儿往返使用两次独立单程检索，保留两段价格、链接和抓取时间，并明确标记 `split_ticket`；
-- 搜索中显示已配置来源，结束后逐项显示成功、空、超时、限流、需登录、验证码、页面变化或来源异常；
-- Mock 仅存在于自动测试，不作为运行时降级。
+- 本地结构化索引覆盖 58 个常用城市、69 个机场，不依赖 AI 猜代码；
+- 支持中文城市、机场名、拼音、英文和 IATA，支持模糊匹配及键盘选择；
+- “西安”/`xian`/`XIY`/“咸阳机场”均归一到 XIY；“南宁”/`nanning`/“吴圩机场”均归一到 NNG；
+- 北京展开 PEK/PKX，上海展开 PVG/SHA，成都展开 CTU/TFU；展开由 Search Planner 完成；
+- 页面返回的首都、大兴、虹桥、浦东等机场名会反解为真实 IATA；与用户指定机场冲突的报价不进入可比结论。
 
 ## 工程验证
 
-- 6 个 workspace 的类型检查通过；API / Web lint 通过；
-- 87 个包级单元与集成测试通过；
-- Edge 桌面与移动视口共 10 个 E2E 流程通过；
+- 7 个 workspace 的类型检查通过，API/Web lint 通过；
+- 102 个包级单元与集成测试通过；
+- 桌面与移动 Chromium 共 10 个 E2E 流程通过；
 - API 与 Next.js 生产构建通过；
-- 真实结果页在 `1440 × 900` 和 `390 × 844` 下无横向溢出或控件重叠，浏览器控制台无 warning / error。
+- E2E 覆盖中文/拼音组合框、键盘选择、自然语言到表单、来源披露、可访问性和响应式页面。
 
-## 尚未完成
+## 本地验收
 
-- FlyAI 正式 Key；
-- 携程与去哪儿的稳定生产成功路径；
-- `PEK → SHA` 仍只有 2 个独立成功来源，尚未达到 Goal 要求的 3 个；FlyAI Key 或用户侧真实浏览器 Connector 是当前补足路径；
-- 同程价格的详情/支付页二次核验，以及所有来源的最终支付页复核；
-- 云端部署、Neon 实库迁移与线上浏览器运行环境；
-- 长期 SLO、限流和页面变化监控。
+地址：<http://127.0.0.1:3000/#search>
+
+1. 在“精确筛选”分别输入“西安”、`xian`、“咸阳机场”和 `XIY`，检查建议项与规范代码；
+2. 搜索 `PEK → SHA`，检查至少 3 个成功来源、同航班平台报价和机场冲突过滤；
+3. 搜索 `XIY ⇄ NNG`，展开价格构成，检查 FlyAI 原生往返与同程/去哪儿“分开购买”；
+4. 搜索 `PVG → NRT`，检查 `detail_verified` 二次核验报价；
+5. 打开“本次检索覆盖”，确认每个失败、空结果、超时或不适用来源都有独立状态且没有 Mock。
+
+## 凭据与剩余边界
+
+- FlyAI 正式 Key 已在被 Git 忽略的本地 `apps/api/.env` 配置并验证；不写入源码、文档或提交。由于 Key 曾出现在聊天记录，验收后应在控制台轮换；
+- 去哪儿当前 Edge 登录态可用；携程公开结果页当前无需登录即可看到卡片；验证码或登录只由用户处理；
+- 尚待完成：Edge Companion 0.1.1 重载后的携程最终复测、所有来源支付页终价核验、长期成功率与限流监控；
+- 云端部署和 Neon 实库不在本轮范围内。

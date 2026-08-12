@@ -110,6 +110,61 @@ export const searchIntentSchema = z
 
 export type SearchIntent = z.infer<typeof searchIntentSchema>;
 
+export const companionPlatformSchema = z.enum(["ctrip", "qunar", "tongcheng", "fliggy"]);
+export type CompanionPlatform = z.infer<typeof companionPlatformSchema>;
+
+export const companionCardSchema = z.object({
+  cardText: z.string().max(20_000),
+  flightNumberText: z.string().max(500),
+  airlineName: z.string().max(500),
+  departureTime: z.string().max(100),
+  arrivalTime: z.string().max(100),
+  departureAirport: z.string().max(500),
+  arrivalAirport: z.string().max(500),
+  priceText: z.string().max(500),
+  evidenceKind: z.enum(["structured_response", "dom"]).optional(),
+});
+export type CompanionCard = z.infer<typeof companionCardSchema>;
+
+export const companionJourneyStateSchema = z.enum([
+  "success",
+  "empty",
+  "login_required",
+  "captcha_required",
+  "page_changed",
+  "unavailable",
+  "timeout",
+]);
+
+export const companionJourneyResultSchema = z.object({
+  direction: z.enum(["outbound", "inbound"]),
+  state: companionJourneyStateSchema,
+  bookingUrl: z.string().url(),
+  fetchedAt: isoDateTimeSchema,
+  cards: z.array(companionCardSchema).max(50).default([]),
+  errorCode: z.string().max(100).optional(),
+});
+export type CompanionJourneyResult = z.infer<typeof companionJourneyResultSchema>;
+
+export const companionPlatformResultSchema = z.object({
+  platform: companionPlatformSchema,
+  journeys: z.array(companionJourneyResultSchema).min(1).max(2),
+});
+export type CompanionPlatformResult = z.infer<typeof companionPlatformResultSchema>;
+
+export const companionSearchResultSchema = z.object({
+  protocolVersion: z.literal("1"),
+  extensionVersion: z.string().min(1).max(30),
+  results: z.array(companionPlatformResultSchema).max(4),
+});
+export type CompanionSearchResult = z.infer<typeof companionSearchResultSchema>;
+
+export const companionSearchRequestSchema = z.object({
+  intent: searchIntentSchema,
+  companion: companionSearchResultSchema,
+});
+export type CompanionSearchRequest = z.infer<typeof companionSearchRequestSchema>;
+
 export const searchIntentDraftSchema = z.object({
   tripType: z.enum(["one_way", "round_trip"]),
   originCode: z.string().length(3).nullable(),

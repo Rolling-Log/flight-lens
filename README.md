@@ -26,6 +26,10 @@ pnpm dev
 - API：<http://localhost:4000>
 - 健康检查：<http://localhost:4000/health>
 
+国内 OTA 的本地浏览器增强能力位于 `apps/edge-companion`。在 Edge 的
+`edge://extensions` 开启开发人员模式，选择“加载解压缩的扩展”并选中该目录，
+然后刷新航探页面。平台要求登录或验证码时，扩展会保留并置前对应标签页。
+
 生产构建后的本地预览：
 
 ```bash
@@ -46,6 +50,7 @@ pnpm test:e2e
 ```text
 apps/web            Netlify Web
 apps/api            Railway Fastify API
+apps/edge-companion 本地 Edge MV3 页面核验扩展
 packages/contracts  API 与领域契约
 packages/domain     确定性搜索、全价、去重与排序
 packages/connectors 数据源适配器

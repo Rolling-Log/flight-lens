@@ -157,6 +157,8 @@ export function applyIntentConstraints(
 ): Offer[] {
   return offers.map((offer) => {
     const departureTime = firstDepartureTime(offer);
+    const outbound = offer.legs[0];
+    const inbound = intent.tripType === "round_trip" ? offer.legs[1] : undefined;
     const priceCny = offer.totalPriceCny?.amountMinor ??
       (offer.totalPrice.currency === "CNY" ? offer.totalPrice.amountMinor : undefined);
     const reasons = [
@@ -175,6 +177,22 @@ export function applyIntentConstraints(
         : []),
       ...(offer.legs.some((leg) => leg.stopCount > (intent.directOnly ? 0 : intent.maxStops))
         ? ["STOP_LIMIT_CONFLICT"]
+        : []),
+      ...(!intent.includeNearbyAirports && intent.origin.kind === "airport" &&
+      outbound?.origin.code !== intent.origin.code
+        ? ["ORIGIN_AIRPORT_CONFLICT"]
+        : []),
+      ...(!intent.includeNearbyAirports && intent.destination.kind === "airport" &&
+      outbound?.destination.code !== intent.destination.code
+        ? ["DESTINATION_AIRPORT_CONFLICT"]
+        : []),
+      ...(!intent.includeNearbyAirports && inbound && intent.destination.kind === "airport" &&
+      inbound.origin.code !== intent.destination.code
+        ? ["RETURN_ORIGIN_AIRPORT_CONFLICT"]
+        : []),
+      ...(!intent.includeNearbyAirports && inbound && intent.origin.kind === "airport" &&
+      inbound.destination.code !== intent.origin.code
+        ? ["RETURN_DESTINATION_AIRPORT_CONFLICT"]
         : []),
       ...(intent.avoidRedEye && isRedEye(departureTime) ? ["RED_EYE_CONFLICT"] : []),
       ...(hasRequiredCheckedBaggage(offer, intent.minimumCheckedBaggageKg)

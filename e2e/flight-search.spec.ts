@@ -164,4 +164,11 @@ test("location combobox supports Chinese and pinyin with keyboard selection", as
   const body = (await searchRequest).postDataJSON();
   expect(body.origin).toMatchObject({ kind: "city", code: "BJS" });
   expect(body.destination).toMatchObject({ kind: "city", code: "CTU" });
+
+  await origin.fill("咸阳机场");
+  await origin.press("Enter");
+  await expect(origin).toHaveValue(/咸阳国际机场.*XIY/);
+  await destination.fill("吴圩机场");
+  await destination.press("Enter");
+  await expect(destination).toHaveValue(/吴圩国际机场.*NNG/);
 });

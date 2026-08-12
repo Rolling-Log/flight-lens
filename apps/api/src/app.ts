@@ -4,10 +4,12 @@ import {
   createConnectorRegistry,
   connectorApplicability,
   executeConnector,
+  withCompanionConnectors,
   type ConnectorExecutionPolicy,
   type FlightConnector,
 } from "@flight-lens/connectors";
 import {
+  companionSearchRequestSchema,
   searchIntentSchema,
   searchResponseSchema,
   type ConnectorReport,
@@ -171,7 +173,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const app = Fastify({
     logger: config.nodeEnv === "test" ? false : { level: config.logLevel },
     trustProxy: true,
-    bodyLimit: 64 * 1024,
+    bodyLimit: 512 * 1024,
     requestIdHeader: false,
     genReqId: () => crypto.randomUUID(),
   });
@@ -338,7 +340,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       },
     },
   }, async (request, reply) => {
-    const parsed = searchIntentSchema.safeParse(request.body);
+    const companionRequest = companionSearchRequestSchema.safeParse(request.body);
+    const parsed = searchIntentSchema.safeParse(
+      companionRequest.success ? companionRequest.data.intent : request.body,
+    );
     if (!parsed.success) {
       return reply.status(400).send({
         error: {
@@ -372,7 +377,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       });
     }
 
-    if (connectors.length === 0) {
+    const searchConnectors = companionRequest.success
+      ? withCompanionConnectors(
+          connectors,
+          companionRequest.data.companion.results,
+          parsed.data,
+        )
+      : connectors;
+
+    if (searchConnectors.length === 0) {
       return reply.status(503).send({
         error: {
           code: "NO_LIVE_CONNECTORS",
@@ -381,7 +394,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       });
     }
 
-    const result = await runSearch(parsed.data, connectors, config.connectorTimeoutMs, {
+    const result = await runSearch(parsed.data, searchConnectors, config.connectorTimeoutMs, {
       ...(config.connectorMaxRetries === undefined
         ? {}
         : { maxRetries: config.connectorMaxRetries }),

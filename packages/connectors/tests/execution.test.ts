@@ -6,6 +6,8 @@ import {
   amadeusEnvironment,
   clearConnectorExecutionCache,
   combineSplitTicketOffers,
+  CompanionOtaConnector,
+  connectorApplicability,
   createConnectorRegistry,
   ConnectorError,
   DuffelConnector,
@@ -13,6 +15,7 @@ import {
   executeConnector,
   FlightApiConnector,
   mapCtripBatchSearchPayload,
+  mapDomCards,
   mapFlyAiFlightPayload,
   mapAmadeusOffer,
   mapDuffelOffer,
@@ -24,6 +27,7 @@ import {
   serpApiRequiredCredits,
   SerpApiGoogleFlightsConnector,
   type FlightConnector,
+  withCompanionConnectors,
 } from "../src/index.js";
 
 const intent: SearchIntent = {
@@ -145,10 +149,10 @@ test("maps FlyAI flight items into a real Fliggy handoff with adult total price"
     status: 0,
     data: {
       itemList: [{
-        adultPrice: "¥400.0",
+        ticketPrice: "¥400.0",
         jumpUrl: "https://market.m.taobao.com/app/trip/flight/index.html",
         journeys: [{
-          totalDuration: "140分钟",
+          totalDuration: "140",
           segments: [{
             depStationCode: "PEK",
             depStationName: "北京首都",
@@ -156,7 +160,7 @@ test("maps FlyAI flight items into a real Fliggy handoff with adult total price"
             arrStationCode: "SHA",
             arrStationName: "上海虹桥",
             arrDateTime: "2026-09-10 10:20:00",
-            duration: "140分钟",
+            duration: "140",
             marketingTransportNo: "CA1883",
             seatClassName: "经济舱",
           }],
@@ -170,6 +174,33 @@ test("maps FlyAI flight items into a real Fliggy handoff with adult total price"
   assert.equal(offers[0]?.totalPrice.amountMinor, 80_000);
   assert.equal(offers[0]?.priceVerificationStatus, "listed_only");
   assert.equal(offers[0]?.segments[0]?.flightNumber, "1883");
+});
+
+test("maps visible airport names to canonical IATA and rejects an airport mismatch", () => {
+  const offers = mapDomCards([{
+    cardText: "东方航空 MU5231 22:00 北京大兴机场 00:05 浦东机场 T1 ¥350",
+    flightNumberText: "MU5231",
+    airlineName: "东方航空",
+    departureTime: "22:00",
+    arrivalTime: "00:05",
+    departureAirport: "北京大兴机场",
+    arrivalAirport: "浦东机场 T1",
+    priceText: "¥350",
+    evidenceKind: "dom",
+  }], "qunar", {
+    ...intent,
+    origin: { kind: "airport", code: "PEK" },
+    destination: { kind: "airport", code: "SHA" },
+    departureDate: "2026-09-10",
+  }, "airport-mismatch", "https://flight.qunar.com/site/oneway_list.htm");
+
+  assert.equal(offers[0]?.segments[0]?.origin.code, "PKX");
+  assert.equal(offers[0]?.segments[0]?.destination.code, "PVG");
+  assert.equal(offers[0]?.comparable, false);
+  assert.deepEqual(
+    offers[0]?.incomparabilityReasons.filter((reason) => reason.endsWith("AIRPORT_CONFLICT")),
+    ["ORIGIN_AIRPORT_CONFLICT", "DESTINATION_AIRPORT_CONFLICT"],
+  );
 });
 
 test("combines two independently priced one-way results as a disclosed split ticket", () => {
@@ -244,6 +275,16 @@ test("registers the four V1 domestic real-source connectors without credentials 
     registry.map((connector) => connector.metadata.id),
     ["fliggy-flyai", "ctrip-browser", "qunar-browser", "tongcheng-browser"],
   );
+});
+
+test("excludes domestic-only browser connectors from international searches", () => {
+  const registry = createConnectorRegistry({ browserOtaEnabled: true });
+  const qunar = registry.find((connector) => connector.metadata.id === "qunar-browser")!;
+  const tongcheng = registry.find((connector) => connector.metadata.id === "tongcheng-browser")!;
+  const ctrip = registry.find((connector) => connector.metadata.id === "ctrip-browser")!;
+  assert.deepEqual(connectorApplicability(qunar, intent), { applicable: false, reason: "MARKET_UNSUPPORTED" });
+  assert.deepEqual(connectorApplicability(tongcheng, intent), { applicable: false, reason: "MARKET_UNSUPPORTED" });
+  assert.deepEqual(connectorApplicability(ctrip, intent), { applicable: true });
 });
 
 test("bounds FlightAPI calls per process and never probes credits in health", async (t) => {
@@ -1303,4 +1344,135 @@ test("keeps Skyscanner multi-ticket handoffs out of comparable results", () => {
     offers[0]?.incomparabilityReasons.includes("MULTIPLE_PURCHASE_HANDOFFS"),
     true,
   );
+});
+
+test("maps Edge companion round-trip cards into truthful split-ticket offers", async () => {
+  const roundTripIntent: SearchIntent = {
+    ...intent,
+    tripType: "round_trip",
+    origin: { kind: "airport", code: "XIY" },
+    destination: { kind: "airport", code: "NNG" },
+    departureDate: "2026-09-11",
+    returnDate: "2026-09-19",
+  };
+  const connector = new CompanionOtaConnector("tongcheng", {
+    platform: "tongcheng",
+    journeys: [
+      {
+        direction: "outbound",
+        state: "success",
+        bookingUrl: "https://www.ly.com/flights/outbound",
+        fetchedAt: "2026-08-11T08:00:00.000Z",
+        cards: [{
+          cardText: "中国南方航空 CZ3275 直飞",
+          flightNumberText: "中国南方航空 CZ3275",
+          airlineName: "中国南方航空",
+          departureTime: "08:10",
+          arrivalTime: "10:45",
+          departureAirport: "咸阳国际机场 T3",
+          arrivalAirport: "吴圩国际机场 T2",
+          priceText: "¥520",
+        }],
+      },
+      {
+        direction: "inbound",
+        state: "success",
+        bookingUrl: "https://www.ly.com/flights/inbound",
+        fetchedAt: "2026-08-11T08:00:02.000Z",
+        cards: [{
+          cardText: "厦门航空 MF8292 直飞",
+          flightNumberText: "厦门航空 MF8292",
+          airlineName: "厦门航空",
+          departureTime: "12:00",
+          arrivalTime: "14:35",
+          departureAirport: "吴圩国际机场 T2",
+          arrivalAirport: "咸阳国际机场 T3",
+          priceText: "¥480",
+        }],
+      },
+    ],
+  });
+
+  const result = await connector.search(roundTripIntent, {
+    requestId: "edge-round-trip",
+    signal: AbortSignal.timeout(1_000),
+  });
+  assert.equal(result.offers.length, 1);
+  assert.equal(result.offers[0]?.connectorId, "tongcheng-edge-companion");
+  assert.equal(result.offers[0]?.purchaseMode, "split_ticket");
+  assert.equal(result.offers[0]?.purchaseParts?.length, 2);
+  assert.equal(result.offers[0]?.totalPrice.amountMinor, 100_000);
+  assert.equal(result.offers[0]?.comparable, false);
+});
+
+test("replaces duplicate inventory families with Edge companion connectors", () => {
+  const serverConnector: FlightConnector = {
+    metadata: {
+      id: "server-fliggy",
+      name: "Server Fliggy",
+      kind: "ota",
+      environment: "production",
+      authorization: "browser_session",
+      resultRole: "purchase_handoff",
+      handoff: "deep_link",
+      inventoryFamily: "fliggy",
+      configured: true,
+    },
+    health: async () => ({ state: "healthy", checkedAt: new Date().toISOString() }),
+    search: async () => ({ offers: [] }),
+  };
+  const merged = withCompanionConnectors([serverConnector], [{
+    platform: "fliggy",
+    journeys: [{
+      direction: "outbound",
+      state: "success",
+      bookingUrl: "https://sjipiao.fliggy.com/flight_search_result.htm",
+      fetchedAt: "2026-08-11T08:00:00.000Z",
+      cards: [{
+        cardText: "东方航空 MU1234 08:00 10:00 咸阳机场 吴圩机场 ¥500",
+        flightNumberText: "MU1234",
+        airlineName: "东方航空",
+        departureTime: "08:00",
+        arrivalTime: "10:00",
+        departureAirport: "咸阳机场",
+        arrivalAirport: "吴圩机场",
+        priceText: "¥500",
+      }],
+    }],
+  }], { ...intent, origin: { kind: "airport", code: "XIY" }, destination: { kind: "airport", code: "NNG" } });
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0]?.metadata.id, "fliggy-edge-companion");
+  assert.equal(merged[0]?.metadata.capabilities?.executionLocation, "user_browser");
+});
+
+test("retains a working server connector when Edge companion evidence failed", () => {
+  const serverConnector: FlightConnector = {
+    metadata: {
+      id: "fliggy-flyai",
+      name: "FlyAI",
+      kind: "ota",
+      environment: "production",
+      authorization: "self_service_api",
+      resultRole: "purchase_handoff",
+      handoff: "deep_link",
+      inventoryFamily: "fliggy",
+      configured: true,
+    },
+    health: async () => ({ state: "healthy", checkedAt: new Date().toISOString() }),
+    search: async () => ({ offers: [] }),
+  };
+  const merged = withCompanionConnectors([serverConnector], [{
+    platform: "fliggy",
+    journeys: [{
+      direction: "outbound",
+      state: "page_changed",
+      bookingUrl: "https://sjipiao.fliggy.com/flight_search_result.htm",
+      fetchedAt: "2026-08-11T08:00:00.000Z",
+      cards: [],
+      errorCode: "FLIGGY_COMPANION_PAGE_CHANGED",
+    }],
+  }], intent);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0]?.metadata.id, "fliggy-flyai");
+  assert.equal(merged[0]?.metadata.capabilities?.executionLocation, undefined);
 });

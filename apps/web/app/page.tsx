@@ -15,6 +15,7 @@ import {
   useState,
 } from "react";
 import { resolveApiBase } from "../src/api-base";
+import { searchWithEdgeCompanion } from "../src/edge-companion";
 import { LocationCombobox } from "../src/location-combobox";
 import {
   isSingleSourceLiveResult,
@@ -255,13 +256,24 @@ function reportNote(note: string): string {
     return `页面诊断码：${note.slice("BROWSER_DIAGNOSTIC:".length)}`;
   }
   if (note.startsWith("UNSUPPORTED_QUERY:")) {
-    return `不适用当前条件：${note.split(":").at(-1)}`;
+    const reason = note.split(":").at(-1) ?? "UNKNOWN";
+    const labels: Record<string, string> = {
+      TRIP_TYPE_UNSUPPORTED: "不支持当前行程类型",
+      MARKET_UNSUPPORTED: "不覆盖当前国内/国际市场",
+      LOCATION_KIND_UNSUPPORTED: "不支持当前地点类型",
+      CABIN_UNSUPPORTED: "不支持当前舱位",
+      PASSENGER_COUNT_UNSUPPORTED: "超出支持的乘客人数",
+    };
+    return labels[reason] ?? `不适用当前条件：${reason}`;
   }
   if (note.startsWith("CITY_AIRPORT_EXPANSION:")) {
     return `已在搜索规划中展开 ${note.split(":").at(-1)} 个机场组合`;
   }
   if (note.endsWith("_ROUND_TRIP_SPLIT_TICKET")) {
     return "去程与返程分别实时检索，按两张单程票组合";
+  }
+  if (note.endsWith("_EDGE_COMPANION_SESSION")) {
+    return "由本机 Edge 登录会话实时核验";
   }
   return note;
 }
@@ -535,7 +547,11 @@ export default function Home() {
     setError("");
     setResult(null);
     try {
-      const response = await apiRequest<SearchResponse>("/v1/searches", searchIntent);
+      const companion = await searchWithEdgeCompanion(searchIntent);
+      const response = await apiRequest<SearchResponse>(
+        "/v1/searches",
+        companion ? { intent: searchIntent, companion } : searchIntent,
+      );
       setResult(response);
       window.setTimeout(() => {
         document.getElementById("results")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1137,7 +1153,8 @@ export default function Home() {
               <div><b>SerpApi</b><span>Google Flights 与实际售卖方报价；跳转精度单独披露</span><em>首个生产查询已验证</em></div>
               <div><b>FlightAPI / Skyscanner</b><span>航司 / OTA 当前价格与跳转；同属一个库存族</span><em>本地实验待复核授权</em></div>
               <div><b>PKFARE / Duffel</b><span>中国航信、GDS、航司直连等发现与交叉核验</span><em>等待生产权限</em></div>
-              <div><b>航司 / OTA</b><span>按开放平台与商务授权逐步接入</span><em>禁止未授权绕过</em></div>
+              <div><b>Edge Companion</b><span>在用户自己的浏览器会话中打开携程、去哪儿、同程和飞猪并读取公开结果</span><em>本地运行 · 登录与验证由用户完成</em></div>
+              <div><b>航司 / OTA</b><span>按开放平台与商务授权逐步接入</span><em>访问失败会逐项披露</em></div>
               <div><b>Mock 数据</b><span>只用于自动测试</span><em>生产强制禁用</em></div>
             </div>
             <div className="modal-warning"><b>重要边界</b><p>公开网页不等于允许稳定、合法地批量抓取。每个 Connector 都必须有授权依据、限流策略和退出方案。</p></div>

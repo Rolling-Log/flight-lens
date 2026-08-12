@@ -209,6 +209,36 @@ test("exposes deterministic duration, stops, baggage, and flexibility rankings",
   assert.equal(rankByRefundFlexibility([shortest, baggage])[0]?.id, "baggage");
 });
 
+test("blocks offers whose actual airport conflicts with an airport-specific search", () => {
+  const mismatched = offer({
+    legs: [{
+      ...offer().legs[0]!,
+      destination: { kind: "airport", code: "PVG" },
+    }],
+  });
+  const constrained = applyIntentConstraints([mismatched], {
+    schemaVersion: "1",
+    tripType: "one_way",
+    origin: { kind: "airport", code: "PVG" },
+    destination: { kind: "airport", code: "NRT" },
+    departureDate: "2026-08-24",
+    flexibleDays: 0,
+    adults: 1,
+    cabin: "economy",
+    directOnly: false,
+    maxStops: 1,
+    avoidRedEye: false,
+    minimumCheckedBaggageKg: 0,
+    includeNearbyAirports: false,
+    explicitFields: [],
+    inferredFields: [],
+    pendingQuestions: [],
+  })[0]!;
+
+  assert.equal(constrained.comparable, false);
+  assert.equal(constrained.incomparabilityReasons.includes("DESTINATION_AIRPORT_CONFLICT"), true);
+});
+
 test("does not invent baggage or flexibility winners without positive evidence", () => {
   const unknown = offer({ id: "unknown" });
   const restrictive = offer({

@@ -38,6 +38,7 @@ type FlyAiJourney = {
 
 type FlyAiItem = {
   adultPrice?: unknown;
+  ticketPrice?: unknown;
   journeys?: unknown;
   jumpUrl?: unknown;
   totalDuration?: unknown;
@@ -61,7 +62,9 @@ function text(value: unknown): string | undefined {
 }
 
 function minutes(value: unknown): number | undefined {
-  const match = text(value)?.match(/(\d+(?:\.\d+)?)\s*(?:分钟|min)/i);
+  const normalized = text(value);
+  const match = normalized?.match(/^(\d+(?:\.\d+)?)$/) ??
+    normalized?.match(/(\d+(?:\.\d+)?)\s*(?:分钟|min)/i);
   if (!match) return undefined;
   const parsed = Math.round(Number(match[1]));
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
@@ -110,7 +113,7 @@ function mapFlyAiItem(
   requestId: string,
   itemIndex: number,
 ): Offer | undefined {
-  const perAdultMinor = cnyMinor(raw.adultPrice);
+  const perAdultMinor = cnyMinor(raw.ticketPrice ?? raw.adultPrice);
   const jumpUrl = safeHttpsUrl(raw.jumpUrl);
   if (!perAdultMinor || !jumpUrl) return undefined;
 
@@ -354,11 +357,16 @@ export class FlyAiConnector implements FlightConnector {
     supportsFlexibleDateProbe: false,
     capabilities: {
       tripTypes: ["one_way", "round_trip"],
+      markets: ["domestic_cn", "international"],
       locationKinds: ["airport"],
       cabins: ["economy", "premium_economy", "business", "first"],
       maxAdults: 9,
       roundTripMode: "native",
       priceEvidence: ["listed"],
+      dataAccess: ["official_cli"],
+      credentialRequirement: "api_key",
+      humanInteraction: "none",
+      executionLocation: "server",
     },
   };
   private readonly cliPath: string;
