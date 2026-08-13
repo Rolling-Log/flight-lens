@@ -4,11 +4,16 @@ import postgres from "postgres";
 import * as schema from "./schema.js";
 import type {
   Offer,
+  AccountPreferences,
+  AccountPriceAlertInput,
+  AnonymousMigrationInput,
   CreatePriceAlert,
+  NotificationSettings,
   PriceAlert,
   PriceHistoryQuery,
   PriceObservation,
   SearchIntent,
+  SavedItineraryInput,
   UserPreferences,
 } from "@flight-lens/contracts";
 import { offerFingerprint } from "@flight-lens/domain";
@@ -135,6 +140,8 @@ export function createDatabase(url: string) {
   });
   return { db: drizzle(client, { schema }), close: () => client.end() };
 }
+
+export type FlightLensDatabase = ReturnType<typeof createDatabase>;
 
 export function createSearchAuditStore(url: string) {
   const database = createDatabase(url);
@@ -440,6 +447,276 @@ export function createV2Store(url: string) {
 }
 
 export type V2Store = ReturnType<typeof createV2Store>;
+
+function accountOwnerHash(userId: string): Promise<string> {
+  return hashOwnerToken(`flight-lens-account:${userId}`);
+}
+
+function alertSemanticKey(input: {
+  intent: unknown;
+  targetAmountCnyMinor: number;
+  checkIntervalMinutes: number;
+  ntfyTopic: string;
+}): string {
+  return JSON.stringify({
+    intent: input.intent,
+    targetAmountCnyMinor: input.targetAmountCnyMinor,
+    checkIntervalMinutes: input.checkIntervalMinutes,
+    ntfyTopic: input.ntfyTopic,
+  });
+}
+
+export function createAccountStoreWithDatabase(database: FlightLensDatabase) {
+  return {
+    async createAlert(userId: string, input: AccountPriceAlertInput): Promise<PriceAlert> {
+      const now = new Date();
+      const id = crypto.randomUUID();
+      await database.db.insert(schema.priceAlerts).values({
+        id,
+        userId,
+        ownerTokenHash: await accountOwnerHash(userId),
+        intent: input.intent,
+        targetAmountCnyMinor: input.targetAmountCnyMinor,
+        checkIntervalMinutes: input.checkIntervalMinutes,
+        ntfyTopic: input.ntfyTopic,
+        status: "active",
+        nextCheckAt: now,
+      });
+      return mapAlert({
+        id,
+        userId,
+        ownerTokenHash: await accountOwnerHash(userId),
+        intent: input.intent,
+        targetAmountCnyMinor: input.targetAmountCnyMinor,
+        checkIntervalMinutes: input.checkIntervalMinutes,
+        ntfyTopic: input.ntfyTopic,
+        status: "active",
+        nextCheckAt: now,
+        lastCheckedAt: null,
+        lastTriggeredAt: null,
+        lastTriggeredAmountMinor: null,
+        lastErrorCode: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+    },
+    async listAlerts(userId: string): Promise<PriceAlert[]> {
+      const rows = await database.db.select().from(schema.priceAlerts)
+        .where(and(eq(schema.priceAlerts.userId, userId), or(
+          eq(schema.priceAlerts.status, "active"),
+          eq(schema.priceAlerts.status, "paused"),
+        )))
+        .orderBy(desc(schema.priceAlerts.updatedAt));
+      return rows.map(mapAlert);
+    },
+    async getAlert(userId: string, alertId: string): Promise<PriceAlert | null> {
+      const [row] = await database.db.select().from(schema.priceAlerts)
+        .where(and(eq(schema.priceAlerts.id, alertId), eq(schema.priceAlerts.userId, userId))).limit(1);
+      return row ? mapAlert(row) : null;
+    },
+    async setAlertStatus(userId: string, alertId: string, status: "active" | "paused" | "deleted"): Promise<boolean> {
+      const rows = await database.db.update(schema.priceAlerts).set({
+        status,
+        updatedAt: new Date(),
+        ...(status === "active" ? { nextCheckAt: new Date() } : {}),
+      }).where(and(eq(schema.priceAlerts.id, alertId), eq(schema.priceAlerts.userId, userId)))
+        .returning({ id: schema.priceAlerts.id });
+      return rows.length === 1;
+    },
+    async clearAlerts(userId: string): Promise<number> {
+      const rows = await database.db.update(schema.priceAlerts).set({ status: "deleted", updatedAt: new Date() })
+        .where(and(eq(schema.priceAlerts.userId, userId), or(
+          eq(schema.priceAlerts.status, "active"), eq(schema.priceAlerts.status, "paused"),
+        ))).returning({ id: schema.priceAlerts.id });
+      return rows.length;
+    },
+    async savePreferences(userId: string, preferences: AccountPreferences): Promise<void> {
+      const [existing] = await database.db.select({ ownerTokenHash: schema.userPreferences.ownerTokenHash })
+        .from(schema.userPreferences).where(eq(schema.userPreferences.userId, userId)).limit(1);
+      if (existing) {
+        await database.db.update(schema.userPreferences).set({ preferences, updatedAt: new Date() })
+          .where(and(eq(schema.userPreferences.ownerTokenHash, existing.ownerTokenHash), eq(schema.userPreferences.userId, userId)));
+        return;
+      }
+      const ownerTokenHash = await accountOwnerHash(userId);
+      await database.db.insert(schema.userPreferences).values({ ownerTokenHash, userId, preferences, updatedAt: new Date() })
+        .onConflictDoUpdate({
+          target: schema.userPreferences.ownerTokenHash,
+          set: { userId, preferences, updatedAt: new Date() },
+        });
+    },
+    async getPreferences(userId: string): Promise<AccountPreferences | null> {
+      const [row] = await database.db.select({ preferences: schema.userPreferences.preferences })
+        .from(schema.userPreferences).where(eq(schema.userPreferences.userId, userId)).limit(1);
+      return row?.preferences as AccountPreferences | null;
+    },
+    async clearPreferences(userId: string): Promise<void> {
+      await database.db.delete(schema.userPreferences).where(eq(schema.userPreferences.userId, userId));
+    },
+    async recordSearch(userId: string, searchId: string, intent: SearchIntent): Promise<void> {
+      await database.db.insert(schema.personalSearchHistory).values({
+        id: crypto.randomUUID(), userId, searchId, intent,
+      }).onConflictDoNothing({ target: [schema.personalSearchHistory.userId, schema.personalSearchHistory.searchId] });
+    },
+    async listSearches(userId: string) {
+      return database.db.select({
+        id: schema.personalSearchHistory.id,
+        searchId: schema.personalSearchHistory.searchId,
+        intent: schema.personalSearchHistory.intent,
+        createdAt: schema.personalSearchHistory.createdAt,
+      }).from(schema.personalSearchHistory).where(eq(schema.personalSearchHistory.userId, userId))
+        .orderBy(desc(schema.personalSearchHistory.createdAt)).limit(200);
+    },
+    async clearSearches(userId: string): Promise<number> {
+      const rows = await database.db.delete(schema.personalSearchHistory)
+        .where(eq(schema.personalSearchHistory.userId, userId)).returning({ id: schema.personalSearchHistory.id });
+      return rows.length;
+    },
+    async saveItinerary(userId: string, input: SavedItineraryInput) {
+      const contentKey = await hashOwnerToken(JSON.stringify(input.offer));
+      const now = new Date();
+      const [row] = await database.db.insert(schema.savedItineraries).values({
+        id: crypto.randomUUID(), userId, contentKey, name: input.name, itinerary: input.offer,
+      }).onConflictDoUpdate({
+        target: [schema.savedItineraries.userId, schema.savedItineraries.contentKey],
+        set: { name: input.name, itinerary: input.offer, updatedAt: now },
+      }).returning();
+      return row!;
+    },
+    async listItineraries(userId: string) {
+      return database.db.select().from(schema.savedItineraries)
+        .where(eq(schema.savedItineraries.userId, userId)).orderBy(desc(schema.savedItineraries.updatedAt)).limit(200);
+    },
+    async deleteItinerary(userId: string, id: string): Promise<boolean> {
+      const rows = await database.db.delete(schema.savedItineraries)
+        .where(and(eq(schema.savedItineraries.id, id), eq(schema.savedItineraries.userId, userId)))
+        .returning({ id: schema.savedItineraries.id });
+      return rows.length === 1;
+    },
+    async saveNotifications(userId: string, settings: NotificationSettings): Promise<void> {
+      await database.db.insert(schema.notificationSettings).values({ userId, ...settings, updatedAt: new Date() })
+        .onConflictDoUpdate({ target: schema.notificationSettings.userId, set: { ...settings, updatedAt: new Date() } });
+    },
+    async getNotifications(userId: string): Promise<NotificationSettings> {
+      const [row] = await database.db.select().from(schema.notificationSettings)
+        .where(eq(schema.notificationSettings.userId, userId)).limit(1);
+      return row ? { emailEnabled: row.emailEnabled, pushEnabled: row.pushEnabled, ntfyTopic: row.ntfyTopic } : {
+        emailEnabled: true, pushEnabled: false, ntfyTopic: null,
+      };
+    },
+    async migrateAnonymous(userId: string, input: AnonymousMigrationInput) {
+      const ownerTokenHash = await hashOwnerToken(input.ownerToken);
+      return database.db.transaction(async (transaction) => {
+        const [inserted] = await transaction.insert(schema.anonymousMigrations).values({
+          id: crypto.randomUUID(), userId, ownerTokenHash, idempotencyKey: input.idempotencyKey,
+        }).onConflictDoNothing().returning();
+        const [migration] = inserted ? [inserted] : await transaction.select().from(schema.anonymousMigrations)
+          .where(eq(schema.anonymousMigrations.ownerTokenHash, ownerTokenHash)).limit(1);
+        if (!migration || migration.userId !== userId) throw new Error("ANONYMOUS_TOKEN_ALREADY_CLAIMED");
+        if (migration.status !== "pending" && migration.status !== "failed") return migration;
+
+        let preferences = 0;
+        let alerts = 0;
+        let duplicates = 0;
+        if (input.decision === "migrate") {
+          const [anonymousPreference] = await transaction.select().from(schema.userPreferences)
+            .where(and(eq(schema.userPreferences.ownerTokenHash, ownerTokenHash), isNull(schema.userPreferences.userId))).limit(1);
+          const [accountPreference] = await transaction.select().from(schema.userPreferences)
+            .where(eq(schema.userPreferences.userId, userId)).limit(1);
+          if (anonymousPreference && (!accountPreference || anonymousPreference.updatedAt > accountPreference.updatedAt)) {
+            if (accountPreference) await transaction.delete(schema.userPreferences)
+              .where(eq(schema.userPreferences.ownerTokenHash, accountPreference.ownerTokenHash));
+            await transaction.update(schema.userPreferences).set({ userId })
+              .where(eq(schema.userPreferences.ownerTokenHash, ownerTokenHash));
+            preferences = 1;
+          } else if (anonymousPreference && accountPreference) {
+            await transaction.delete(schema.userPreferences)
+              .where(eq(schema.userPreferences.ownerTokenHash, ownerTokenHash));
+          }
+          const legacyAlerts = await transaction.select().from(schema.priceAlerts)
+            .where(and(eq(schema.priceAlerts.ownerTokenHash, ownerTokenHash), isNull(schema.priceAlerts.userId)));
+          const accountAlerts = await transaction.select().from(schema.priceAlerts)
+            .where(eq(schema.priceAlerts.userId, userId));
+          const existingKeys = new Set(accountAlerts.filter((item) => item.status !== "deleted").map(alertSemanticKey));
+          for (const alert of legacyAlerts) {
+            const key = alertSemanticKey(alert);
+            if (alert.status !== "deleted" && existingKeys.has(key)) {
+              const newerAccountAlert = accountAlerts
+                .filter((item) => item.status !== "deleted" && alertSemanticKey(item) === key)
+                .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())[0];
+              if (newerAccountAlert && alert.updatedAt > newerAccountAlert.updatedAt) {
+                const legacyTriggerIsNewer = Boolean(
+                  alert.lastTriggeredAt
+                  && (!newerAccountAlert.lastTriggeredAt || alert.lastTriggeredAt > newerAccountAlert.lastTriggeredAt),
+                );
+                await transaction.update(schema.priceAlerts).set({
+                  status: alert.status,
+                  nextCheckAt: alert.nextCheckAt > newerAccountAlert.nextCheckAt
+                    ? alert.nextCheckAt
+                    : newerAccountAlert.nextCheckAt,
+                  lastCheckedAt: !newerAccountAlert.lastCheckedAt
+                    || (alert.lastCheckedAt && alert.lastCheckedAt > newerAccountAlert.lastCheckedAt)
+                    ? alert.lastCheckedAt
+                    : newerAccountAlert.lastCheckedAt,
+                  lastTriggeredAt: legacyTriggerIsNewer
+                    ? alert.lastTriggeredAt
+                    : newerAccountAlert.lastTriggeredAt,
+                  lastTriggeredAmountMinor: legacyTriggerIsNewer
+                    ? alert.lastTriggeredAmountMinor
+                    : newerAccountAlert.lastTriggeredAmountMinor,
+                  lastErrorCode: alert.lastErrorCode,
+                  updatedAt: alert.updatedAt,
+                }).where(and(
+                  eq(schema.priceAlerts.id, newerAccountAlert.id),
+                  eq(schema.priceAlerts.userId, userId),
+                ));
+              }
+              await transaction.update(schema.priceAlerts).set({ userId, status: "deleted", updatedAt: new Date() })
+                .where(eq(schema.priceAlerts.id, alert.id));
+              duplicates += 1;
+            } else {
+              await transaction.update(schema.priceAlerts).set({ userId, updatedAt: new Date() })
+                .where(eq(schema.priceAlerts.id, alert.id));
+              existingKeys.add(key);
+              alerts += 1;
+            }
+          }
+        } else if (input.decision === "delete") {
+          const removedPreferences = await transaction.delete(schema.userPreferences)
+            .where(and(eq(schema.userPreferences.ownerTokenHash, ownerTokenHash), isNull(schema.userPreferences.userId)))
+            .returning({ ownerTokenHash: schema.userPreferences.ownerTokenHash });
+          preferences = removedPreferences.length;
+          const removedAlerts = await transaction.delete(schema.priceAlerts)
+            .where(and(eq(schema.priceAlerts.ownerTokenHash, ownerTokenHash), isNull(schema.priceAlerts.userId)))
+            .returning({ id: schema.priceAlerts.id });
+          alerts = removedAlerts.length;
+        }
+        const status = input.decision === "migrate" ? "completed" : input.decision === "skip" ? "skipped" : "deleted";
+        const [completed] = await transaction.update(schema.anonymousMigrations).set({
+          status, result: { preferences, alerts, duplicates }, updatedAt: new Date(), completedAt: new Date(),
+        }).where(eq(schema.anonymousMigrations.id, migration.id)).returning();
+        return completed!;
+      });
+    },
+    async exportData(userId: string) {
+      const [preferences, alerts, searches, itineraries, notifications] = await Promise.all([
+        this.getPreferences(userId), this.listAlerts(userId), this.listSearches(userId),
+        this.listItineraries(userId), this.getNotifications(userId),
+      ]);
+      return { exportedAt: new Date().toISOString(), preferences, alerts, searches, itineraries, notifications };
+    },
+    async audit(userId: string | null, eventType: string, context: Record<string, string | number | boolean | null> = {}) {
+      await database.db.insert(schema.securityAuditEvents).values({ id: crypto.randomUUID(), userId, eventType, context });
+    },
+    close: database.close,
+  };
+}
+
+export function createAccountStore(url: string) {
+  return createAccountStoreWithDatabase(createDatabase(url));
+}
+
+export type AccountStore = ReturnType<typeof createAccountStoreWithDatabase>;
 
 export type PriceVerificationOutcome = "observed" | "sold_out" | "landing_unavailable";
 

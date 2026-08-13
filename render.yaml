@@ -29,6 +29,14 @@ services:
         sync: false
       - key: DATABASE_URL
         sync: false
+      - key: AUTH_SECRET
+        sync: false
+      - key: AUTH_BASE_URL
+        sync: false
+      - key: AUTH_EMAIL_FROM
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
       - key: MONITOR_WAKE_SECRET
         sync: false
       - key: SERPAPI_API_KEY

@@ -27,6 +27,7 @@
     "@flight-lens/contracts": "workspace:*",
     "@flight-lens/database": "workspace:*",
     "@flight-lens/domain": "workspace:*",
+    "better-auth": "1.6.27",
     "dotenv": "^17.2.3",
     "fastify": "^5.11.0",
     "openai": "^6.7.0",
@@ -34,8 +35,10 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.3.14",
     "@eslint/js": "^9.39.4",
     "@types/node": "^22.19.19",
+    "drizzle-orm": "0.45.2",
     "eslint": "^9.39.4",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",

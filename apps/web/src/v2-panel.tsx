@@ -9,6 +9,7 @@ import type {
 } from "@flight-lens/contracts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Line, LineChart, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { accountFetch } from "./account-api";
 
 type PriceToolsProps = {
   apiBase: string;
@@ -36,15 +37,6 @@ const levelDetails = [
   { id: "excellent", label: "顶级", compact: "顶级", color: "#176b50", description: "价格较低" },
   { id: "top", label: "夯", compact: "夯", color: "#087f8c", description: "处于历史低位" },
 ] as const;
-
-function ownerToken(): string {
-  const key = "flight-lens-owner-token";
-  const existing = window.localStorage.getItem(key);
-  if (existing) return existing;
-  const created = crypto.randomUUID().replaceAll("-", "");
-  window.localStorage.setItem(key, created);
-  return created;
-}
 
 function historyUrl(apiBase: string, intent: SearchIntent, days: number): string {
   const params = new URLSearchParams({
@@ -195,7 +187,7 @@ export function PriceTools({ apiBase, intent, marketPriceInsights, priceJudgment
 
   useEffect(() => {
     if (!open || view !== "alerts") return;
-    fetch(`${apiBase}/v2/alerts`, { headers: { "x-flight-lens-owner": ownerToken() } })
+    accountFetch("/v2/alerts")
       .then((response) => response.ok ? response.json() : Promise.reject(new Error("alerts unavailable")))
       .then((payload: { alerts: PriceAlert[]; delivery?: { serverSchedulingConfigured?: boolean } }) => {
         setAlerts(payload.alerts);
@@ -250,10 +242,10 @@ export function PriceTools({ apiBase, intent, marketPriceInsights, priceJudgment
 
   async function createAlert() {
     setMessage("");
-    const response = await fetch(`${apiBase}/v2/alerts`, {
+    const response = await accountFetch("/v2/alerts", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ownerToken: ownerToken(), intent, targetAmountCnyMinor: Math.round(targetCny * 100), checkIntervalMinutes: intervalMinutes, ntfyTopic: topic }),
+      body: JSON.stringify({ intent, targetAmountCnyMinor: Math.round(targetCny * 100), checkIntervalMinutes: intervalMinutes, ntfyTopic: topic }),
     });
     const payload = await response.json() as PriceAlert & { error?: { code?: string } };
     if (!response.ok) { setMessage(payload.error?.code ?? "提醒创建失败"); return; }
@@ -262,9 +254,9 @@ export function PriceTools({ apiBase, intent, marketPriceInsights, priceJudgment
   }
 
   async function changeAlert(alert: PriceAlert, action: "active" | "paused" | "deleted") {
-    const response = await fetch(`${apiBase}/v2/alerts/${alert.id}`, {
+    const response = await accountFetch(`/v2/alerts/${alert.id}`, {
       method: action === "deleted" ? "DELETE" : "PATCH",
-      headers: { "content-type": "application/json", "x-flight-lens-owner": ownerToken() },
+      headers: { "content-type": "application/json" },
       ...(action === "deleted" ? {} : { body: JSON.stringify({ status: action }) }),
     });
     if (!response.ok) return;
@@ -273,7 +265,7 @@ export function PriceTools({ apiBase, intent, marketPriceInsights, priceJudgment
 
   async function testAlert(alert: PriceAlert) {
     setMessage("");
-    const response = await fetch(`${apiBase}/v2/alerts/${alert.id}/test`, { method: "POST", headers: { "x-flight-lens-owner": ownerToken() } });
+    const response = await accountFetch(`/v2/alerts/${alert.id}/test`, { method: "POST" });
     setMessage(response.ok ? "已安排立即核验；达到目标后才会推送。" : "立即核验安排失败，可稍后重试。");
   }
 

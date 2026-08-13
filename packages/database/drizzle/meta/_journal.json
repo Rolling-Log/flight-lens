@@ -43,6 +43,13 @@
       "when": 1786546857685,
       "tag": "0005_outgoing_valeria_richards",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786587681711,
+      "tag": "0006_solid_daimon_hellstrom",
+      "breakpoints": true
     }
   ]
 }

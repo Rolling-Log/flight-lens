@@ -7,10 +7,10 @@ test("uses the separately hosted API during local development", () => {
   assert.equal(resolveApiBase(undefined, "127.0.0.1"), "http://127.0.0.1:4000");
 });
 
-test("requires the Railway API URL for public deployments", () => {
+test("requires the Render API URL for public deployments", () => {
   assert.throws(
     () => resolveApiBase(undefined, "v1-candidate.example.netlify.app"),
-    /Railway API/,
+    /Render API/,
   );
 });
 

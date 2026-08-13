@@ -31,6 +31,46 @@ test("initial, result, and coverage dialog states have no blocking accessibility
   await expect(coverageTrigger).toBeFocused();
 });
 
+test("account entry supports auth recovery and cross-device personal data without overflow", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "登录", exact: true }).click();
+  const anonymousDialog = page.getByRole("dialog", { name: "登录航探" });
+  await expect(anonymousDialog.getByLabel("邮箱")).toBeVisible();
+  await anonymousDialog.getByRole("button", { name: "注册", exact: true }).click();
+  await expect(anonymousDialog.getByLabel("显示名称")).toBeVisible();
+  await anonymousDialog.getByRole("button", { name: "找回密码", exact: true }).click();
+  await expect(anonymousDialog.getByRole("button", { name: "发送重置邮件" })).toBeVisible();
+  await expectNoBlockingAccessibilityViolations(page);
+  await anonymousDialog.getByRole("button", { name: "关闭" }).click();
+
+  await page.route("**/api/auth/get-session", async (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      session: { id: "session-user-a", token: "redacted-in-ui", expiresAt: "2026-08-20T00:00:00.000Z", userId: "user-a", createdAt: "2026-08-13T00:00:00.000Z", updatedAt: "2026-08-13T00:00:00.000Z" },
+      user: { id: "user-a", name: "跨设备用户", email: "user@example.test", emailVerified: true, createdAt: "2026-08-13T00:00:00.000Z", updatedAt: "2026-08-13T00:00:00.000Z" },
+    }),
+  }));
+  await page.route("**/api/auth/list-sessions", async (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([{ token: "session-redacted", userAgent: "Chrome on test device", ipAddress: "198.51.100.10", createdAt: "2026-08-13T00:00:00.000Z", expiresAt: "2026-08-20T00:00:00.000Z" }]) }));
+  await page.route("**/v3/me/notifications", async (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ notifications: { emailEnabled: true, pushEnabled: false, ntfyTopic: null } }) }));
+  await page.route("**/v3/me/searches", async (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ searches: [{ id: "history-1", intent: { origin: { code: "PVG" }, destination: { code: "NRT" }, departureDate: "2026-09-01" }, createdAt: "2026-08-13T00:00:00.000Z" }] }) }));
+  await page.route("**/v3/me/itineraries", async (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ itineraries: [{ id: "saved-1", name: "MU 521 · 示例航旅", itinerary: { seller: { name: "示例航旅" } }, updatedAt: "2026-08-13T00:00:00.000Z" }] }) }));
+  await page.route("**/v2/preferences", async (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ preferences: { preferredAirlines: ["MU"], preferredAirports: ["PVG"] } }) }));
+  await page.reload();
+  await page.getByRole("button", { name: "跨设备用户" }).click();
+  const accountDialog = page.getByRole("dialog", { name: "跨设备用户" });
+  await expect(accountDialog.getByText("user@example.test · 邮箱已验证")).toBeVisible();
+  await expect(accountDialog.getByText("PVG → NRT")).toBeVisible();
+  await expect(accountDialog.getByText("MU 521 · 示例航旅")).toBeVisible();
+  await expect(accountDialog.getByText("Chrome on test device")).toBeVisible();
+  await expect(accountDialog.getByLabel("常用航司")).toHaveValue("MU");
+  const box = await accountDialog.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual((await page.viewportSize())!.width);
+  await expectNoBlockingAccessibilityViolations(page);
+});
+
 test("precise filters expose baggage allowance and custom red-eye controls", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("tab", { name: "精确筛选" }).click();

@@ -23,6 +23,8 @@ import {
   resultSourceStatus,
 } from "../src/result-source-status";
 import { PriceTools } from "../src/v2-panel";
+import { AccountPanel } from "../src/account-panel";
+import { accountFetch } from "../src/account-api";
 
 type Mode = "agent" | "form";
 type SortKey =
@@ -629,6 +631,23 @@ export default function Home() {
     }
   }
 
+  async function saveOffer(offer: Offer) {
+    const response = await accountFetch("/v3/me/itineraries", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: `${offer.segments[0]?.marketingCarrier ?? "航班"} ${offer.segments[0]?.flightNumber ?? "方案"} · ${offer.seller.name}`,
+        offer,
+      }),
+    });
+    if (!response.ok) {
+      setError(response.status === 401 ? "登录后可跨设备收藏方案。" : "收藏失败，请稍后重试。");
+      return;
+    }
+    window.dispatchEvent(new Event("flight-lens-personal-data"));
+    setError("方案已收藏到账号。");
+  }
+
   const lowest = result?.offers.find((offer) => offer.id === result.lowestComparableOfferId) ?? null;
   const lowestSplit = result?.offers.find((offer) => offer.id === result.lowestSplitOfferId) ?? null;
   const recommended = result?.offers.find((offer) => offer.id === result.recommendedOfferId) ?? null;
@@ -661,6 +680,7 @@ export default function Home() {
           <a href="#coverage">数据覆盖</a>
           <a href="#principles">如何推荐</a>
         </nav>
+        <AccountPanel />
         <button className="ghost-button" onClick={(event) => openCoverage(event.currentTarget)}>
           覆盖透明度 <span className="live-dot" /> 接入中
         </button>
@@ -1172,6 +1192,7 @@ export default function Home() {
                             <button onClick={() => setExpanded(expanded === offer.id ? null : offer.id)} aria-expanded={expanded === offer.id}>
                               {expanded === offer.id ? "收起价格构成" : "查看价格构成"} <span>⌄</span>
                             </button>
+                            <button onClick={() => saveOffer(offer)}>收藏方案</button>
                           </div>
                           {group.offers.length > 1 && (
                             <div className="platform-quotes" aria-label="同航班平台报价">

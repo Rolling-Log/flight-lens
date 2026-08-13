@@ -562,6 +562,32 @@ export const userPreferencesSchema = z.object({
 });
 export type UserPreferences = z.infer<typeof userPreferencesSchema>;
 
+export const accountPreferencesSchema = userPreferencesSchema.omit({ ownerToken: true });
+export type AccountPreferences = z.infer<typeof accountPreferencesSchema>;
+
+export const accountPriceAlertInputSchema = createPriceAlertSchema.omit({ ownerToken: true });
+export type AccountPriceAlertInput = z.infer<typeof accountPriceAlertInputSchema>;
+
+export const savedItineraryInputSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  offer: offerSchema,
+});
+export type SavedItineraryInput = z.infer<typeof savedItineraryInputSchema>;
+
+export const notificationSettingsSchema = z.object({
+  emailEnabled: z.boolean().default(true),
+  pushEnabled: z.boolean().default(false),
+  ntfyTopic: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).nullable().default(null),
+});
+export type NotificationSettings = z.infer<typeof notificationSettingsSchema>;
+
+export const anonymousMigrationInputSchema = z.object({
+  ownerToken: z.string().min(16).max(128),
+  idempotencyKey: z.string().uuid(),
+  decision: z.enum(["migrate", "skip", "delete"]),
+});
+export type AnonymousMigrationInput = z.infer<typeof anonymousMigrationInputSchema>;
+
 export const searchPlanSchema = z.object({
   intents: z.array(searchIntentSchema).min(1).max(15),
   maximumCombinations: z.number().int().min(1).max(15),

@@ -6,6 +6,18 @@
   PNPM_VERSION = "11.9.0"
   NETLIFY_NEXT_SKEW_PROTECTION = "true"
 
+[[redirects]]
+  from = "/api/backend/*"
+  to = "https://flight-lens-api.onrender.com/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/auth/*"
+  to = "https://flight-lens-api.onrender.com/api/auth/:splat"
+  status = 200
+  force = true
+
 [[headers]]
   for = "/*"
   [headers.values]

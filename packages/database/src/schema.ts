@@ -11,6 +11,71 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
+export const authUsers = pgTable(
+  "user",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    email: text("email").notNull().unique(),
+    emailVerified: boolean("email_verified").notNull().default(false),
+    image: text("image"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("user_email_idx").on(table.email)],
+);
+
+export const authSessions = pgTable(
+  "session",
+  {
+    id: text("id").primaryKey(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    token: text("token").notNull().unique(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    userId: text("user_id").notNull().references(() => authUsers.id, { onDelete: "cascade" }),
+  },
+  (table) => [index("session_user_id_idx").on(table.userId), index("session_expires_at_idx").on(table.expiresAt)],
+);
+
+export const authAccounts = pgTable(
+  "account",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("account_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    userId: text("user_id").notNull().references(() => authUsers.id, { onDelete: "cascade" }),
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    idToken: text("id_token"),
+    accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }),
+    refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { withTimezone: true }),
+    scope: text("scope"),
+    password: text("password"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("account_user_id_idx").on(table.userId),
+    uniqueIndex("account_provider_account_idx").on(table.providerId, table.accountId),
+  ],
+);
+
+export const authVerifications = pgTable(
+  "verification",
+  {
+    id: text("id").primaryKey(),
+    identifier: text("identifier").notNull(),
+    value: text("value").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("verification_identifier_idx").on(table.identifier)],
+);
+
 export const connectorState = pgEnum("connector_state", [
   "pending",
   "searching",
@@ -169,6 +234,7 @@ export const priceAlerts = pgTable(
   {
     id: uuid("id").primaryKey(),
     ownerTokenHash: text("owner_token_hash").notNull(),
+    userId: text("user_id").references(() => authUsers.id, { onDelete: "cascade" }),
     intent: jsonb("intent").notNull(),
     targetAmountCnyMinor: integer("target_amount_cny_minor").notNull(),
     checkIntervalMinutes: integer("check_interval_minutes").notNull(),
@@ -184,6 +250,7 @@ export const priceAlerts = pgTable(
   },
   (table) => [
     index("price_alerts_owner_idx").on(table.ownerTokenHash, table.updatedAt),
+    index("price_alerts_user_idx").on(table.userId, table.updatedAt),
     index("price_alerts_due_idx").on(table.status, table.nextCheckAt),
   ],
 );
@@ -210,9 +277,97 @@ export const alertRuns = pgTable(
   ],
 );
 
-export const userPreferences = pgTable("user_preferences", {
-  ownerTokenHash: text("owner_token_hash").primaryKey(),
-  preferences: jsonb("preferences").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const userPreferences = pgTable(
+  "user_preferences",
+  {
+    ownerTokenHash: text("owner_token_hash").primaryKey(),
+    userId: text("user_id").references(() => authUsers.id, { onDelete: "cascade" }),
+    preferences: jsonb("preferences").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("user_preferences_user_idx").on(table.userId)],
+);
+
+export const personalSearchHistory = pgTable(
+  "personal_search_history",
+  {
+    id: uuid("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => authUsers.id, { onDelete: "cascade" }),
+    searchId: uuid("search_id").notNull().references(() => searches.id, { onDelete: "cascade" }),
+    intent: jsonb("intent").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("personal_search_history_user_search_idx").on(table.userId, table.searchId),
+    index("personal_search_history_user_created_idx").on(table.userId, table.createdAt),
+  ],
+);
+
+export const savedItineraries = pgTable(
+  "saved_itineraries",
+  {
+    id: uuid("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => authUsers.id, { onDelete: "cascade" }),
+    contentKey: text("content_key").notNull(),
+    name: text("name").notNull(),
+    itinerary: jsonb("itinerary").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("saved_itineraries_user_content_idx").on(table.userId, table.contentKey),
+    index("saved_itineraries_user_updated_idx").on(table.userId, table.updatedAt),
+  ],
+);
+
+export const notificationSettings = pgTable(
+  "notification_settings",
+  {
+    userId: text("user_id").primaryKey().references(() => authUsers.id, { onDelete: "cascade" }),
+    emailEnabled: boolean("email_enabled").notNull().default(true),
+    pushEnabled: boolean("push_enabled").notNull().default(false),
+    ntfyTopic: text("ntfy_topic"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+);
+
+export const anonymousMigrationStatus = pgEnum("anonymous_migration_status", [
+  "pending",
+  "completed",
+  "skipped",
+  "deleted",
+  "failed",
+]);
+
+export const anonymousMigrations = pgTable(
+  "anonymous_migrations",
+  {
+    id: uuid("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => authUsers.id, { onDelete: "cascade" }),
+    ownerTokenHash: text("owner_token_hash").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    status: anonymousMigrationStatus("status").notNull().default("pending"),
+    result: jsonb("result").$type<Record<string, number>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("anonymous_migrations_owner_idx").on(table.ownerTokenHash),
+    uniqueIndex("anonymous_migrations_idempotency_idx").on(table.userId, table.idempotencyKey),
+    index("anonymous_migrations_user_idx").on(table.userId, table.updatedAt),
+  ],
+);
+
+export const securityAuditEvents = pgTable(
+  "security_audit_events",
+  {
+    id: uuid("id").primaryKey(),
+    userId: text("user_id").references(() => authUsers.id, { onDelete: "set null" }),
+    eventType: text("event_type").notNull(),
+    context: jsonb("context").$type<Record<string, string | number | boolean | null>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("security_audit_user_created_idx").on(table.userId, table.createdAt)],
+);
