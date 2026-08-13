@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { accountFetch } from "./account-api";
 import { authClient } from "./auth-client";
+import { consumeAuthUrl } from "./auth-url";
 
 type AuthView = "login" | "register" | "forgot" | "reset";
 type DeviceSession = { token: string; userAgent?: string | null; ipAddress?: string | null; createdAt: Date; expiresAt: Date };
@@ -36,6 +37,7 @@ export function AccountPanel() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [resetToken, setResetToken] = useState("");
   const [message, setMessage] = useState("");
   const [devices, setDevices] = useState<DeviceSession[]>([]);
   const [emailEnabled, setEmailEnabled] = useState(true);
@@ -51,8 +53,10 @@ export function AccountPanel() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get("token") && params.get("mode") === "reset-password") {
+      const authUrl = consumeAuthUrl(new URL(window.location.href));
+      if (authUrl.sanitizedPath) window.history.replaceState(window.history.state, "", authUrl.sanitizedPath);
+      if (authUrl.resetToken) {
+        setResetToken(authUrl.resetToken);
         setView("reset");
         setOpen(true);
       }
@@ -110,10 +114,12 @@ export function AccountPanel() {
         const { error } = await authClient.requestPasswordReset({ email, redirectTo: `${window.location.origin}/?mode=reset-password` });
         setMessage(error ? errorText(error, "重置邮件") : "如果该邮箱已注册，我们会发送一次性重置链接。");
       } else if (view === "reset") {
-        const token = new URLSearchParams(window.location.search).get("token") ?? "";
-        const { error } = await authClient.resetPassword({ newPassword, token });
+        const { error } = await authClient.resetPassword({ newPassword, token: resetToken });
         setMessage(error ? errorText(error) : "密码已重置，所有旧设备会话已撤销。请重新登录。");
-        if (!error) setView("login");
+        if (!error) {
+          setResetToken("");
+          setView("login");
+        }
       } else {
         const { data, error } = await authClient.signIn.email({ email, password, rememberMe: true });
         setMessage(error ? errorText(error) : "");
