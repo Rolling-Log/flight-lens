@@ -18,8 +18,14 @@ async function ownerDecisionMarker(ownerToken: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function errorText(error: { message?: string } | null | undefined): string {
-  return error?.message ? "操作未完成，请检查信息或稍后重试。" : "";
+function errorText(error: { message?: string; code?: string; status?: number; statusCode?: number } | null | undefined, action = "操作"): string {
+  if (!error) return "";
+  const detail = `${error.code ?? ""} ${error.message ?? ""}`.toUpperCase();
+  const status = error.status ?? error.statusCode;
+  if (action.includes("邮件") && ((status !== undefined && status >= 500) || detail.includes("EMAIL") || detail.includes("DELIVERY") || detail.includes("INTERNAL_SERVER_ERROR") || detail.includes("INTERNAL SERVER"))) {
+    return `${action}发送失败，请检查 staging 的发件域名配置后重试。`;
+  }
+  return `${action}未完成，请检查信息或稍后重试。`;
 }
 
 export function AccountPanel() {
@@ -99,10 +105,10 @@ export function AccountPanel() {
     try {
       if (view === "register") {
         const { error } = await authClient.signUp.email({ name, email, password, callbackURL: window.location.origin });
-        setMessage(error ? errorText(error) : "请查收验证邮件。验证后即可登录。");
+        setMessage(error ? errorText(error, "验证邮件") : "请查收验证邮件。验证后即可登录。");
       } else if (view === "forgot") {
-        await authClient.requestPasswordReset({ email, redirectTo: `${window.location.origin}/?mode=reset-password` });
-        setMessage("如果该邮箱已注册，我们会发送一次性重置链接。");
+        const { error } = await authClient.requestPasswordReset({ email, redirectTo: `${window.location.origin}/?mode=reset-password` });
+        setMessage(error ? errorText(error, "重置邮件") : "如果该邮箱已注册，我们会发送一次性重置链接。");
       } else if (view === "reset") {
         const token = new URLSearchParams(window.location.search).get("token") ?? "";
         const { error } = await authClient.resetPassword({ newPassword, token });

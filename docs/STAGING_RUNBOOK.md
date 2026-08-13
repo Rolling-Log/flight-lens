@@ -29,6 +29,8 @@
 7. 从允许与拒绝的 Origin 分别探测，确认只允许登记的 Netlify Origin；
 8. 检查 Render 日志，不得包含数据库密码、供应商 Key 或 Token。
 
+认证邮件注意事项：Resend 的 `onboarding@resend.dev` 仅允许发送到 Resend 账户自身邮箱，不能用于任意外部收件人。要在 staging 验收 163、QQ 等测试邮箱，必须先在 Resend 验证自有域名，再将 `AUTH_EMAIL_FROM` 更新为该域名下的发件地址。前端遇到投递失败会明确提示发件域名配置问题，不应把失败描述为“请查收验证邮件”。
+
 ## 3. Netlify Web
 
 1. 创建与 Production 分离的 Netlify Staging Site；
