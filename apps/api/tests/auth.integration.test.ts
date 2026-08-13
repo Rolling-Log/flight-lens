@@ -396,6 +396,11 @@ test("migrates anonymous data once without overwriting newer account data or dup
   assert.equal(alerts.rows[0]!.status, "deleted");
   assert.equal(alerts.rows[0]!.user_id, userA);
   assert.equal(alerts.rows[1]!.last_triggered_amount_minor, 98_000);
+  const migratedNotifications = await pglite.query<{ push_enabled: boolean; ntfy_topic: string | null }>(
+    "select push_enabled, ntfy_topic from notification_settings where user_id = $1",
+    [userA],
+  );
+  assert.deepEqual(migratedNotifications.rows, [{ push_enabled: true, ntfy_topic: "same-topic" }]);
   await assert.rejects(
     store.migrateAnonymous(userB, { ...input, idempotencyKey: "00000000-0000-4000-8000-000000000021" }),
     /ANONYMOUS_TOKEN_ALREADY_CLAIMED/,

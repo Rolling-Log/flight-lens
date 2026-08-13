@@ -661,6 +661,7 @@ export function createAccountStoreWithDatabase(database: FlightLensDatabase) {
         let preferences = 0;
         let alerts = 0;
         let duplicates = 0;
+        let migratedTopic: string | null = null;
         if (input.decision === "migrate") {
           const [anonymousPreference] = await transaction.select().from(schema.userPreferences)
             .where(and(eq(schema.userPreferences.ownerTokenHash, ownerTokenHash), isNull(schema.userPreferences.userId))).limit(1);
@@ -680,6 +681,7 @@ export function createAccountStoreWithDatabase(database: FlightLensDatabase) {
             .where(and(eq(schema.priceAlerts.ownerTokenHash, ownerTokenHash), isNull(schema.priceAlerts.userId)));
           const accountAlerts = await transaction.select().from(schema.priceAlerts)
             .where(eq(schema.priceAlerts.userId, userId));
+          migratedTopic = accountAlerts.find((item) => item.status !== "deleted")?.ntfyTopic ?? null;
           const existingKeys = new Set(accountAlerts.filter((item) => item.status !== "deleted").map(alertSemanticKey));
           for (const alert of legacyAlerts) {
             const key = alertSemanticKey(alert);
@@ -721,6 +723,7 @@ export function createAccountStoreWithDatabase(database: FlightLensDatabase) {
               await transaction.update(schema.priceAlerts).set({ userId, updatedAt: new Date() })
                 .where(eq(schema.priceAlerts.id, alert.id));
               existingKeys.add(key);
+              migratedTopic ??= alert.ntfyTopic;
               alerts += 1;
             }
           }
@@ -733,6 +736,18 @@ export function createAccountStoreWithDatabase(database: FlightLensDatabase) {
             .where(and(eq(schema.priceAlerts.ownerTokenHash, ownerTokenHash), isNull(schema.priceAlerts.userId)))
             .returning({ id: schema.priceAlerts.id });
           alerts = removedAlerts.length;
+        }
+        if (input.decision === "migrate" && migratedTopic) {
+          const [settings] = await transaction.select({ userId: schema.notificationSettings.userId })
+            .from(schema.notificationSettings).where(eq(schema.notificationSettings.userId, userId)).limit(1);
+          if (!settings) {
+            await transaction.insert(schema.notificationSettings).values({
+              userId,
+              pushEnabled: true,
+              ntfyTopic: migratedTopic,
+              updatedAt: new Date(),
+            });
+          }
         }
         const status = input.decision === "migrate" ? "completed" : input.decision === "skip" ? "skipped" : "deleted";
         const [completed] = await transaction.update(schema.anonymousMigrations).set({
