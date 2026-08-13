@@ -296,6 +296,50 @@ test("returns transparent coverage for a configured empty source", async () => {
   await app.close();
 });
 
+test("records a completed search only for the authenticated account", async () => {
+  const recorded: Array<{ userId: string; searchId: string }> = [];
+  const connector: FlightConnector = {
+    metadata: {
+      id: "history-source",
+      name: "History source",
+      kind: "aggregator",
+      environment: "sandbox",
+      authorization: "self_service_api",
+      resultRole: "verification",
+      handoff: "none",
+      configured: true,
+    },
+    health: async () => ({ state: "healthy", checkedAt: new Date().toISOString() }),
+    search: async () => ({ offers: [] }),
+  };
+  const app = await buildApp({
+    config,
+    connectors: [connector],
+    auditStore: null,
+    authService: authServiceStub(),
+    accountStore: accountStoreStub({
+      recordSearch: async (userId, searchId) => { recorded.push({ userId, searchId }); },
+    }),
+    now: fixedNow,
+  });
+  const authenticated = await app.inject({
+    method: "POST",
+    url: "/v1/searches",
+    headers: { cookie: "test-user=history-user" },
+    payload: validIntent,
+  });
+  assert.equal(authenticated.statusCode, 200);
+  assert.deepEqual(recorded, [{ userId: "history-user", searchId: authenticated.json().requestId }]);
+  const anonymous = await app.inject({
+    method: "POST",
+    url: "/v1/searches",
+    payload: validIntent,
+  });
+  assert.equal(anonymous.statusCode, 200);
+  assert.equal(recorded.length, 1);
+  await app.close();
+});
+
 test("excludes structurally unsupported connectors from planned coverage", async () => {
   let searched = false;
   const connector: FlightConnector = {
