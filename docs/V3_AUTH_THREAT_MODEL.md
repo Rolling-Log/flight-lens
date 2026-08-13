@@ -23,7 +23,7 @@
 | Token leakage | Never log passwords, cookies, reset/verification/session tokens, raw owner tokens, topics, or provider secrets; authenticated exports may contain the user's own notification settings but are never logged or shared |
 | Anonymous migration theft/replay | Require a valid session, hash submitted token, unique hash/idempotency constraints, transactionally claim once, expose no data before claim |
 | Migration overwrite/data loss | Merge only missing fields or when anonymous `updated_at` is newer; alert semantic dedupe; retain source rows until completion; partial failure is retryable |
-| Duplicate/false notifications | Preserve alert and run IDs where possible, unique migration/dedupe keys, keep `lastTriggered*`, pause alerts during unresolved migration |
+| Duplicate/false notifications | Preserve alert and run IDs where possible, unique migration/dedupe keys, keep `lastTriggered*`, pause alerts during unresolved migration; resolve current account notification settings at send time, never a stale alert topic; require a topic when push is enabled and create the subscription plus alert atomically |
 | Account deletion race | Better Auth verifies the fresh password and deletes the auth user; database cascades remove sessions, alerts, and personal rows while public observations remain de-identified |
 | Open redirect/link abuse | Allowlist Web callback origins; provider links never appear in auth callback parameters unchecked |
 

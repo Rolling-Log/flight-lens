@@ -403,6 +403,62 @@ test("migrates anonymous data once without overwriting newer account data or dup
   await store.close();
 });
 
+test("resolves alert delivery from the owning account settings and preserves anonymous topics", async () => {
+  const pglite = new PGlite();
+  await applyMigrations(pglite);
+  const db = drizzle(pglite, { schema });
+  const store = createAccountStoreWithDatabase({
+    db,
+    close: async () => pglite.close(),
+  } as unknown as FlightLensDatabase);
+  await pglite.query("insert into \"user\" (id, name, email, email_verified) values ('delivery-a', 'A', 'a@example.test', true), ('delivery-b', 'B', 'b@example.test', false)");
+  await pglite.query("insert into notification_settings (user_id, email_enabled, push_enabled, ntfy_topic) values ('delivery-a', true, true, 'current-a'), ('delivery-b', true, true, 'current-b')");
+  await pglite.query(
+    "insert into price_alerts (id, owner_token_hash, user_id, intent, target_amount_cny_minor, check_interval_minutes, ntfy_topic, status, next_check_at) values ('00000000-0000-4000-8000-000000000040', 'owner-a', 'delivery-a', '{}'::jsonb, 10000, 360, 'stale-a', 'active', now()), ('00000000-0000-4000-8000-000000000041', 'owner-b', 'delivery-b', '{}'::jsonb, 10000, 360, 'stale-b', 'active', now()), ('00000000-0000-4000-8000-000000000042', 'anonymous', null, '{}'::jsonb, 10000, 360, 'legacy-topic', 'active', now())",
+  );
+  assert.deepEqual(await store.getAlertDelivery("00000000-0000-4000-8000-000000000040"), {
+    userId: "delivery-a", email: "a@example.test", emailEnabled: true, pushEnabled: true, ntfyTopic: "current-a",
+  });
+  assert.deepEqual(await store.getAlertDelivery("00000000-0000-4000-8000-000000000041"), {
+    userId: "delivery-b", email: null, emailEnabled: false, pushEnabled: true, ntfyTopic: "current-b",
+  });
+  assert.deepEqual(await store.getAlertDelivery("00000000-0000-4000-8000-000000000042"), {
+    userId: null, email: null, emailEnabled: false, pushEnabled: true, ntfyTopic: "legacy-topic",
+  });
+  const created = await store.createAlert("delivery-a", {
+    intent: {
+      schemaVersion: "1",
+      tripType: "one_way",
+      origin: { kind: "airport", code: "PVG" },
+      destination: { kind: "airport", code: "NRT" },
+      departureDate: "2026-09-01",
+      flexibleDays: 0,
+      adults: 1,
+      cabin: "economy",
+      directOnly: false,
+      maxStops: 1,
+      avoidRedEye: false,
+      minimumCheckedBaggageKg: 0,
+      includeNearbyAirports: false,
+      explicitFields: [],
+      inferredFields: [],
+      pendingQuestions: [],
+    },
+    targetAmountCnyMinor: 100_000,
+    checkIntervalMinutes: 360,
+    ntfyTopic: "atomic-current-topic",
+  });
+  assert.deepEqual(await store.getAlertDelivery(created.id), {
+    userId: "delivery-a", email: "a@example.test", emailEnabled: true, pushEnabled: true, ntfyTopic: "atomic-current-topic",
+  });
+  const persisted = await pglite.query<{ count: string }>(
+    "select count(*)::text as count from price_alerts where id = $1 and user_id = 'delivery-a' and ntfy_topic = 'atomic-current-topic'",
+    [created.id],
+  );
+  assert.equal(persisted.rows[0]!.count, "1");
+  await store.close();
+});
+
 test("keeps skipped anonymous data and physically deletes an explicit anonymous deletion", async () => {
   const pglite = new PGlite();
   await applyMigrations(pglite);

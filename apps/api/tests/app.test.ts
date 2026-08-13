@@ -751,6 +751,7 @@ function accountStoreStub(overrides: Partial<AccountStore> = {}): AccountStore {
     deleteItinerary: async () => false,
     saveNotifications: async () => undefined,
     getNotifications: async () => ({ emailEnabled: true, pushEnabled: false, ntfyTopic: null }),
+    getAlertDelivery: async () => null,
     migrateAnonymous: async () => { throw new Error("not implemented"); },
     exportData: async () => ({ exportedAt: fixedNow().toISOString(), preferences: null, alerts: [], searches: [], itineraries: [], notifications: { emailEnabled: true, pushEnabled: false, ntfyTopic: null } }),
     audit: async () => undefined,
@@ -849,7 +850,7 @@ test("discloses alert delivery state and refuses alerts without a server schedul
     headers: { cookie: "test-user=user-a" },
   });
   assert.equal(listed.statusCode, 200);
-  assert.deepEqual(listed.json().delivery, { serverSchedulingConfigured: false, channel: "ntfy" });
+  assert.deepEqual(listed.json().delivery, { serverSchedulingConfigured: false, channels: ["email", "ntfy"] });
 
   const created = await app.inject({
     method: "POST",
@@ -865,6 +866,37 @@ test("discloses alert delivery state and refuses alerts without a server schedul
   assert.equal(created.statusCode, 503);
   assert.equal(created.json().error.code, "MONITOR_UNCONFIGURED");
   assert.equal(createCalls, 0);
+  await app.close();
+});
+
+test("creates an alert only for the authenticated user", async () => {
+  const creates: string[] = [];
+  const app = await buildApp({
+    config,
+    connectors: [],
+    auditStore: null,
+    v2Store: v2StoreStub(),
+    authService: authServiceStub(),
+    accountStore: accountStoreStub({
+      createAlert: async (userId) => { creates.push(userId); return activeAlert(); },
+    }),
+    monitorQueue: { start: async () => undefined, enqueue: async () => "job", stop: async () => undefined },
+    now: fixedNow,
+  });
+  const response = await app.inject({
+    method: "POST",
+    url: "/v2/alerts",
+    payload: {
+      userId: "user-b",
+      intent: validIntent,
+      targetAmountCnyMinor: 100_000,
+      checkIntervalMinutes: 360,
+      ntfyTopic: "current-user-topic",
+    },
+    headers: { cookie: "test-user=user-a", origin: "http://localhost:3000" },
+  });
+  assert.equal(response.statusCode, 201);
+  assert.deepEqual(creates, ["user-a"]);
   await app.close();
 });
 
@@ -1073,6 +1105,76 @@ test("persists monitored history before a notification failure and records the r
   await handlerRef.current(alert.id);
   assert.equal(persisted.length, 1);
   assert.deepEqual(finished, [{ notificationSent: false, errorCode: "NOTIFICATION_FAILED", amountCnyMinor: 200_000 }]);
+  await app.close();
+});
+
+test("does not deliver an account alert after all notification channels are unsubscribed", async () => {
+  const alert = activeAlert();
+  const handlerRef: { current?: (alertId: string) => Promise<void> } = {};
+  const queue: MonitorQueue = {
+    start: async (value) => { handlerRef.current = value; },
+    enqueue: async () => "job-1",
+    stop: async () => undefined,
+  };
+  let deliveries = 0;
+  const finished: Array<{ notificationSent: boolean; errorCode: string | null }> = [];
+  const app = await buildApp({
+    config,
+    connectors: [{
+      ...readinessConnector("monitor-unsubscribed", "purchase_handoff", "monitor-family"),
+      search: async () => ({ offers: [comparableOffer()] }),
+    }],
+    auditStore: null,
+    v2Store: v2StoreStub({
+      getAlert: async () => alert,
+      claimAlertRun: async () => "run-unsubscribed",
+      finishAlertRun: async (input) => { finished.push({ notificationSent: input.notificationSent, errorCode: input.errorCode }); },
+    }),
+    accountStore: accountStoreStub({
+      getAlertDelivery: async () => ({ userId: "user-a", email: "user-a@example.test", emailEnabled: false, pushEnabled: false, ntfyTopic: null }),
+    }),
+    monitorQueue: queue,
+    notifier: { send: async () => { deliveries += 1; } },
+    authEmailSender: { send: async () => { deliveries += 1; } },
+    now: fixedNow,
+  });
+  assert.ok(handlerRef.current);
+  await handlerRef.current(alert.id);
+  assert.equal(deliveries, 0);
+  assert.deepEqual(finished, [{ notificationSent: false, errorCode: null }]);
+  await app.close();
+});
+
+test("delivers an account alert only to its current subscribed topic and verified email", async () => {
+  const alert = activeAlert();
+  const handlerRef: { current?: (alertId: string) => Promise<void> } = {};
+  const queue: MonitorQueue = {
+    start: async (value) => { handlerRef.current = value; },
+    enqueue: async () => "job-1",
+    stop: async () => undefined,
+  };
+  const topics: string[] = [];
+  const recipients: string[] = [];
+  const app = await buildApp({
+    config,
+    connectors: [{
+      ...readinessConnector("monitor-subscribed", "purchase_handoff", "monitor-family"),
+      search: async () => ({ offers: [comparableOffer()] }),
+    }],
+    auditStore: null,
+    v2Store: v2StoreStub({ getAlert: async () => alert, claimAlertRun: async () => "run-subscribed" }),
+    accountStore: accountStoreStub({
+      getAlertDelivery: async () => ({ userId: "user-a", email: "user-a@example.test", emailEnabled: true, pushEnabled: true, ntfyTopic: "current-topic" }),
+    }),
+    monitorQueue: queue,
+    notifier: { send: async (input) => { topics.push(input.topic); } },
+    authEmailSender: { send: async (input) => { recipients.push(input.to); } },
+    now: fixedNow,
+  });
+  assert.ok(handlerRef.current);
+  await handlerRef.current(alert.id);
+  assert.deepEqual(topics, ["current-topic"]);
+  assert.deepEqual(recipients, ["user-a@example.test"]);
   await app.close();
 });
 

@@ -11,6 +11,12 @@ type PersonalSearch = { id: string; intent: { origin?: { code?: string }; destin
 type SavedItinerary = { id: string; name: string; itinerary: { seller?: { name?: string }; totalPrice?: { amountMinor?: number; currency?: string } }; updatedAt: string };
 
 const legacyOwnerKey = "flight-lens-owner-token";
+const legacyDecisionKey = "flight-lens-owner-migration-decision";
+
+async function ownerDecisionMarker(ownerToken: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(ownerToken));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 function errorText(error: { message?: string } | null | undefined): string {
   return error?.message ? "操作未完成，请检查信息或稍后重试。" : "";
@@ -35,6 +41,7 @@ export function AccountPanel() {
   const [preferredAirlines, setPreferredAirlines] = useState("");
   const [preferredAirports, setPreferredAirports] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [hasPendingAnonymousData, setHasPendingAnonymousData] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -78,6 +85,14 @@ export function AccountPanel() {
     return () => window.removeEventListener("flight-lens-personal-data", refresh);
   }, [open, session]);
 
+  async function refreshAnonymousDataState() {
+    const ownerToken = localStorage.getItem(legacyOwnerKey);
+    const decidedOwner = localStorage.getItem(legacyDecisionKey)?.split(":", 2)[1];
+    setHasPendingAnonymousData(Boolean(
+      ownerToken && decidedOwner !== await ownerDecisionMarker(ownerToken),
+    ));
+  }
+
   async function submitAuth() {
     setBusy(true);
     setMessage("");
@@ -98,6 +113,7 @@ export function AccountPanel() {
         setMessage(error ? errorText(error) : "");
         if (!error) {
           setDisplayName(data?.user.name ?? "");
+          void refreshAnonymousDataState();
           await refetch();
         }
       }
@@ -127,6 +143,10 @@ export function AccountPanel() {
   }
 
   async function saveNotifications() {
+    if (pushEnabled && !topic.trim()) {
+      setMessage("开启推送前需要填写通知订阅标识。");
+      return;
+    }
     const response = await accountFetch("/v3/me/notifications", {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -180,7 +200,11 @@ export function AccountPanel() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ ownerToken, idempotencyKey: crypto.randomUUID(), decision }),
     });
-    if (response.ok && decision !== "skip") localStorage.removeItem(legacyOwnerKey);
+    if (response.ok) {
+      if (decision !== "skip") localStorage.removeItem(legacyOwnerKey);
+      localStorage.setItem(legacyDecisionKey, `${decision}:${await ownerDecisionMarker(ownerToken)}`);
+      setHasPendingAnonymousData(false);
+    }
     setMessage(response.ok ? "匿名数据选择已记录。" : "匿名数据处理失败，可稍后重试。");
   }
 
@@ -208,6 +232,7 @@ export function AccountPanel() {
     <>
       <button className="account-trigger" onClick={() => {
         setDisplayName(session?.user.name ?? "");
+        void refreshAnonymousDataState();
         setOpen(true);
       }}>
         {isPending ? "账号" : session ? session.user.name : "登录"}
@@ -240,7 +265,7 @@ export function AccountPanel() {
             ) : (
               <div className="account-sections">
                 <section><b>账号</b><p>{session.user.email} · {session.user.emailVerified ? "邮箱已验证" : "邮箱待验证"}</p><label>显示名称<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" /></label><div className="account-actions"><button onClick={saveAccount}>保存账号设置</button><button onClick={signOut}>退出当前设备</button></div></section>
-                <section><b>匿名数据</b><p>处理此浏览器此前保存的偏好和提醒。</p><div className="account-actions"><button onClick={() => migrate("migrate")}>迁移</button><button onClick={() => migrate("skip")}>跳过</button><button onClick={() => migrate("delete")}>删除匿名数据</button></div></section>
+                {hasPendingAnonymousData && <section><b>匿名数据</b><p>处理此浏览器此前保存的偏好和提醒。选择只会记录一次。</p><div className="account-actions"><button onClick={() => migrate("migrate")}>迁移</button><button onClick={() => migrate("skip")}>跳过</button><button onClick={() => migrate("delete")}>删除匿名数据</button></div></section>}
                 <section><b>偏好</b><label>常用航司<input value={preferredAirlines} onChange={(event) => setPreferredAirlines(event.target.value)} placeholder="MU, CA" /></label><label>常用机场<input value={preferredAirports} onChange={(event) => setPreferredAirports(event.target.value)} placeholder="PVG, SHA" /></label><button onClick={savePreferences}>保存偏好</button></section>
                 <section><b>通知</b><label><input type="checkbox" checked={emailEnabled} onChange={(event) => setEmailEnabled(event.target.checked)} /> 邮件通知</label><label><input type="checkbox" checked={pushEnabled} onChange={(event) => setPushEnabled(event.target.checked)} /> 推送通知</label><label>通知订阅标识<input value={topic} onChange={(event) => setTopic(event.target.value)} /></label><button onClick={saveNotifications}>保存通知设置</button></section>
                 <section><b>最近查询</b>{searches.length ? searches.slice(0, 8).map((item) => <div className="personal-row" key={item.id}><span>{item.intent.origin?.code} → {item.intent.destination?.code}<small>{item.intent.departureDate} · {new Date(item.createdAt).toLocaleString("zh-CN")}</small></span></div>) : <p>登录后的查询会在这里跨设备恢复。</p>}</section>

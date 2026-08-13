@@ -55,7 +55,9 @@ test("account entry supports auth recovery and cross-device personal data withou
   await page.route("**/v3/me/notifications", async (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ notifications: { emailEnabled: true, pushEnabled: false, ntfyTopic: null } }) }));
   await page.route("**/v3/me/searches", async (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ searches: [{ id: "history-1", intent: { origin: { code: "PVG" }, destination: { code: "NRT" }, departureDate: "2026-09-01" }, createdAt: "2026-08-13T00:00:00.000Z" }] }) }));
   await page.route("**/v3/me/itineraries", async (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ itineraries: [{ id: "saved-1", name: "MU 521 · 示例航旅", itinerary: { seller: { name: "示例航旅" } }, updatedAt: "2026-08-13T00:00:00.000Z" }] }) }));
+  await page.route("**/v3/me/anonymous-migration", async (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ migration: { status: "skipped" } }) }));
   await page.route("**/v2/preferences", async (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ preferences: { preferredAirlines: ["MU"], preferredAirports: ["PVG"] } }) }));
+  await page.evaluate(() => localStorage.setItem("flight-lens-owner-token", "anonymous-owner-token-1234"));
   await page.reload();
   await page.getByRole("button", { name: "跨设备用户" }).click();
   const accountDialog = page.getByRole("dialog", { name: "跨设备用户" });
@@ -64,6 +66,13 @@ test("account entry supports auth recovery and cross-device personal data withou
   await expect(accountDialog.getByText("MU 521 · 示例航旅")).toBeVisible();
   await expect(accountDialog.getByText("Chrome on test device")).toBeVisible();
   await expect(accountDialog.getByLabel("常用航司")).toHaveValue("MU");
+  await expect(accountDialog.getByText("处理此浏览器此前保存的偏好和提醒。选择只会记录一次。")).toBeVisible();
+  await accountDialog.getByRole("button", { name: "跳过", exact: true }).click();
+  await expect(accountDialog.getByText("处理此浏览器此前保存的偏好和提醒。选择只会记录一次。")).toBeHidden();
+  expect(await page.evaluate(() => ({
+    owner: localStorage.getItem("flight-lens-owner-token"),
+    decision: localStorage.getItem("flight-lens-owner-migration-decision"),
+  }))).toEqual({ owner: "anonymous-owner-token-1234", decision: expect.stringMatching(/^skip:[a-f0-9]{64}$/) });
   const box = await accountDialog.boundingBox();
   expect(box).not.toBeNull();
   expect(box!.x).toBeGreaterThanOrEqual(0);

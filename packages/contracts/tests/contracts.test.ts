@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { airportCodesForLocation, companionSearchRequestSchema, createPriceAlertSchema, exchangeRateSchema, locationOptions, marketPriceInsightSchema, priceHistoryQuerySchema, priceJudgmentSchema, searchIntentSchema, searchLocations, searchMarket, userPreferencesSchema } from "../src/index.js";
+import { airportCodesForLocation, companionSearchRequestSchema, createPriceAlertSchema, exchangeRateSchema, locationOptions, marketPriceInsightSchema, notificationSettingsSchema, priceHistoryQuerySchema, priceJudgmentSchema, searchIntentSchema, searchLocations, searchMarket, userPreferencesSchema } from "../src/index.js";
 
 test("finds canonical cities and airports by Chinese, pinyin, and IATA", () => {
   assert.equal(searchLocations("北京")[0]?.code, "BJS");
@@ -177,6 +177,12 @@ test("validates V2 history, alert, and anonymous preference inputs", () => {
   });
   assert.deepEqual(preferences.redEyeWindow, { start: "00:00", end: "06:00" });
   assert.equal(preferences.cabin, "economy");
+});
+
+test("requires a topic whenever account push notifications are enabled", () => {
+  assert.equal(notificationSettingsSchema.safeParse({ emailEnabled: true, pushEnabled: true, ntfyTopic: null }).success, false);
+  assert.equal(notificationSettingsSchema.safeParse({ emailEnabled: false, pushEnabled: false, ntfyTopic: null }).success, true);
+  assert.equal(notificationSettingsSchema.safeParse({ emailEnabled: true, pushEnabled: true, ntfyTopic: "flight-lens-user" }).success, true);
 });
 
 test("validates market insight and five-level judgment contracts", () => {

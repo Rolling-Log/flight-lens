@@ -471,21 +471,33 @@ export function createAccountStoreWithDatabase(database: FlightLensDatabase) {
     async createAlert(userId: string, input: AccountPriceAlertInput): Promise<PriceAlert> {
       const now = new Date();
       const id = crypto.randomUUID();
-      await database.db.insert(schema.priceAlerts).values({
-        id,
-        userId,
-        ownerTokenHash: await accountOwnerHash(userId),
-        intent: input.intent,
-        targetAmountCnyMinor: input.targetAmountCnyMinor,
-        checkIntervalMinutes: input.checkIntervalMinutes,
-        ntfyTopic: input.ntfyTopic,
-        status: "active",
-        nextCheckAt: now,
+      const ownerTokenHash = await accountOwnerHash(userId);
+      await database.db.transaction(async (transaction) => {
+        await transaction.insert(schema.notificationSettings).values({
+          userId,
+          pushEnabled: true,
+          ntfyTopic: input.ntfyTopic,
+          updatedAt: now,
+        }).onConflictDoUpdate({
+          target: schema.notificationSettings.userId,
+          set: { pushEnabled: true, ntfyTopic: input.ntfyTopic, updatedAt: now },
+        });
+        await transaction.insert(schema.priceAlerts).values({
+          id,
+          userId,
+          ownerTokenHash,
+          intent: input.intent,
+          targetAmountCnyMinor: input.targetAmountCnyMinor,
+          checkIntervalMinutes: input.checkIntervalMinutes,
+          ntfyTopic: input.ntfyTopic,
+          status: "active",
+          nextCheckAt: now,
+        });
       });
       return mapAlert({
         id,
         userId,
-        ownerTokenHash: await accountOwnerHash(userId),
+        ownerTokenHash,
         intent: input.intent,
         targetAmountCnyMinor: input.targetAmountCnyMinor,
         checkIntervalMinutes: input.checkIntervalMinutes,
@@ -602,6 +614,37 @@ export function createAccountStoreWithDatabase(database: FlightLensDatabase) {
         .where(eq(schema.notificationSettings.userId, userId)).limit(1);
       return row ? { emailEnabled: row.emailEnabled, pushEnabled: row.pushEnabled, ntfyTopic: row.ntfyTopic } : {
         emailEnabled: true, pushEnabled: false, ntfyTopic: null,
+      };
+    },
+    async getAlertDelivery(alertId: string) {
+      const [row] = await database.db.select({
+        userId: schema.priceAlerts.userId,
+        legacyTopic: schema.priceAlerts.ntfyTopic,
+        email: schema.authUsers.email,
+        emailVerified: schema.authUsers.emailVerified,
+        emailEnabled: schema.notificationSettings.emailEnabled,
+        pushEnabled: schema.notificationSettings.pushEnabled,
+        settingsTopic: schema.notificationSettings.ntfyTopic,
+      }).from(schema.priceAlerts)
+        .leftJoin(schema.authUsers, eq(schema.priceAlerts.userId, schema.authUsers.id))
+        .leftJoin(schema.notificationSettings, eq(schema.priceAlerts.userId, schema.notificationSettings.userId))
+        .where(eq(schema.priceAlerts.id, alertId)).limit(1);
+      if (!row) return null;
+      if (!row.userId) {
+        return {
+          userId: null,
+          email: null,
+          emailEnabled: false,
+          pushEnabled: true,
+          ntfyTopic: row.legacyTopic,
+        };
+      }
+      return {
+        userId: row.userId,
+        email: row.emailVerified ? row.email : null,
+        emailEnabled: (row.emailEnabled ?? true) && row.emailVerified === true,
+        pushEnabled: row.pushEnabled ?? false,
+        ntfyTopic: row.settingsTopic,
       };
     },
     async migrateAnonymous(userId: string, input: AnonymousMigrationInput) {

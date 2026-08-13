@@ -578,6 +578,14 @@ export const notificationSettingsSchema = z.object({
   emailEnabled: z.boolean().default(true),
   pushEnabled: z.boolean().default(false),
   ntfyTopic: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).nullable().default(null),
+}).superRefine((settings, context) => {
+  if (settings.pushEnabled && !settings.ntfyTopic) {
+    context.addIssue({
+      code: "custom",
+      path: ["ntfyTopic"],
+      message: "A notification topic is required while push delivery is enabled.",
+    });
+  }
 });
 export type NotificationSettings = z.infer<typeof notificationSettingsSchema>;
 

@@ -50,6 +50,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingHttpHeaders } from "node:http";
 import { createAuthService, type AuthService } from "./auth.js";
+import { createAuthEmailSender, type AuthEmailSender } from "./auth-email.js";
 import type { ApiConfig } from "./config.js";
 import {
   FallbackIntentParser,
@@ -75,6 +76,7 @@ type BuildAppOptions = {
   intentParser?: IntentParser | null;
   now?: () => Date;
   authService?: AuthService | null;
+  authEmailSender?: AuthEmailSender | null;
   accountStore?: AccountStore | null;
 };
 
@@ -246,12 +248,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       ? createV2Store(config.databaseUrl)
       : options.v2Store ?? null;
   const notifier = options.notifier ?? new NtfyNotifier(config.ntfyBaseUrl, config.ntfyAccessToken);
+  const authEmailSender = options.authEmailSender === undefined
+    ? createAuthEmailSender(config.resendApiKey, config.authEmailFrom)
+    : options.authEmailSender;
   const monitorQueue =
     options.monitorQueue === undefined && config.databaseUrl
       ? createMonitorQueue(config.databaseUrl, config.monitorExecutionTimeoutMs)
       : options.monitorQueue ?? null;
   const authService = options.authService === undefined
-    ? createAuthService(config)
+    ? createAuthService(config, authEmailSender)
     : options.authService;
   const accountStore = options.accountStore === undefined && config.databaseUrl
     ? createAccountStore(config.databaseUrl)
@@ -417,19 +422,37 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       let notificationSent = false;
       let notificationError: string | null = null;
       if (shouldNotify) {
-        try {
-          await notifier.send({
-            topic: alert.ntfyTopic,
+        const delivery = accountStore
+          ? await accountStore.getAlertDelivery(alert.id)
+          : { userId: null, email: null, emailEnabled: false, pushEnabled: true, ntfyTopic: alert.ntfyTopic };
+        if (!delivery) throw new Error("ALERT_DELIVERY_NOT_FOUND");
+        const message = `${alert.intent.origin.code} → ${alert.intent.destination.code} 的最低可核验全价已到 ¥${Math.round(amount / 100)}。`;
+        const attempts: Promise<void>[] = [];
+        if (delivery.pushEnabled && delivery.ntfyTopic) {
+          attempts.push(notifier.send({
+            topic: delivery.ntfyTopic,
             title: "航探降价提醒",
-            message: `${alert.intent.origin.code} → ${alert.intent.destination.code} 的最低可核验全价已到 ¥${Math.round(amount / 100)}。`,
+            message,
             ...(lowest?.seller.deepLink ? { clickUrl: lowest.seller.deepLink } : {}),
           }, AbortSignal.timeout(Math.max(250, Math.min(
             10_000,
             config.monitorExecutionTimeoutMs - searchTimeoutMs - config.auditTimeoutMs,
-          ))));
-          notificationSent = true;
-        } catch {
-          notificationError = "NOTIFICATION_FAILED";
+          )))));
+        }
+        if (delivery.emailEnabled && delivery.email && authEmailSender) {
+          attempts.push(authEmailSender.send({
+            to: delivery.email,
+            subject: "航探降价提醒",
+            text: `${message}${lowest?.seller.deepLink ? `\n核验来源：${lowest.seller.deepLink}` : ""}`,
+          }));
+        }
+        if (attempts.length > 0) {
+          const outcomes = await Promise.allSettled(attempts);
+          const sent = outcomes.filter((outcome) => outcome.status === "fulfilled").length;
+          notificationSent = sent > 0;
+          if (sent < outcomes.length) {
+            notificationError = sent > 0 ? "NOTIFICATION_PARTIAL_FAILURE" : "NOTIFICATION_FAILED";
+          }
         }
       }
       await v2Store.finishAlertRun({
@@ -624,7 +647,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       alerts: await accountStore.listAlerts(session.user.id),
       delivery: {
         serverSchedulingConfigured: Boolean(monitorQueue),
-        channel: "ntfy",
+        channels: ["email", "ntfy"],
       },
     });
   });
