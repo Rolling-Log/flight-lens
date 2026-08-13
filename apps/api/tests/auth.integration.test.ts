@@ -8,6 +8,7 @@ import {
   schema,
   type FlightLensDatabase,
 } from "@flight-lens/database";
+import type { SearchIntent } from "@flight-lens/contracts";
 import { drizzle } from "drizzle-orm/pglite";
 import { buildApp } from "../src/app.js";
 import { createAuthServiceWithDatabase } from "../src/auth.js";
@@ -501,6 +502,32 @@ test("keeps skipped anonymous data and physically deletes an explicit anonymous 
   assert.equal(deleted.id, repeated.id);
   const remaining = await pglite.query<{ owner_token_hash: string }>("select owner_token_hash from user_preferences union all select owner_token_hash from price_alerts order by owner_token_hash");
   assert.deepEqual(remaining.rows.map((item) => item.owner_token_hash), [skippedHash, skippedHash]);
+  await store.close();
+});
+
+test("isolates personal search history by the authenticated user", async () => {
+  const pglite = new PGlite();
+  await applyMigrations(pglite);
+  const db = drizzle(pglite, { schema });
+  const store = createAccountStoreWithDatabase({
+    db,
+    close: async () => pglite.close(),
+  } as unknown as FlightLensDatabase);
+  await pglite.query(
+    "insert into \"user\" (id, name, email, email_verified) values ('history-user-a', 'A', 'history-a@example.test', true), ('history-user-b', 'B', 'history-b@example.test', true)",
+  );
+  await pglite.query(
+    "insert into searches (id, intent, status, planned_source_count, successful_source_count) values ($1, '{}'::jsonb, 'completed', 1, 1), ($2, '{}'::jsonb, 'completed', 1, 1)",
+    ["00000000-0000-4000-8000-000000000050", "00000000-0000-4000-8000-000000000051"],
+  );
+  const intent: SearchIntent = { schemaVersion: "1", tripType: "one_way", origin: { kind: "airport", code: "PVG" }, destination: { kind: "airport", code: "NRT" }, departureDate: "2026-09-01", flexibleDays: 0, adults: 1, cabin: "economy", directOnly: false, maxStops: 1, avoidRedEye: false, minimumCheckedBaggageKg: 0, includeNearbyAirports: false, explicitFields: [], inferredFields: [], pendingQuestions: [] };
+  await store.recordSearch("history-user-a", "00000000-0000-4000-8000-000000000050", intent);
+  await store.recordSearch("history-user-b", "00000000-0000-4000-8000-000000000051", intent);
+  assert.deepEqual((await store.listSearches("history-user-a")).map((item) => item.searchId), ["00000000-0000-4000-8000-000000000050"]);
+  assert.deepEqual((await store.listSearches("history-user-b")).map((item) => item.searchId), ["00000000-0000-4000-8000-000000000051"]);
+  await pglite.query("delete from \"user\" where id = 'history-user-a'");
+  const remaining = await pglite.query<{ count: string }>("select count(*)::text as count from personal_search_history where user_id = 'history-user-a'");
+  assert.equal(remaining.rows[0]!.count, "0");
   await store.close();
 });
 
