@@ -16,7 +16,7 @@
 3. 取得直连连接，仅在迁移会话中作为 `DATABASE_DIRECT_URL`；
 4. 从仓库根目录执行 `pnpm --filter @flight-lens/database db:migrate`；
 5. 验证 `searches`、`connector_runs`、`offers` 与 landing-page verification 表；
-6. Migration 不放入 Railway 自动启动流程。
+6. Migration 不放入 Render 自动启动流程。
 
 ## 2. Render API
 
@@ -66,7 +66,7 @@ pnpm --filter @flight-lens/database price:verify -- \
 
 ## 5. 留痕与清理
 
-- 记录 Git commit、Netlify Deploy、Railway Deployment、Neon Branch、测试时间和结果；
+- 记录 Git commit、Netlify Deploy、Render Deployment、Neon Branch、测试时间和结果；
 - 历史 Netlify Function 证据不计作当前 Render 架构的 Staging 通过；
 - 临时预览不再使用后关闭，避免持续费用；
 - 未经产品负责人确认，不合并 `main`、不打正式 Tag、不部署 Production。
