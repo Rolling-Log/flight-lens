@@ -2,7 +2,7 @@
 
 Date: 2026-08-13
 Branch: `codex/v3-development`
-Staging API revision: `2fbff49f425ed73230bd597b0abd8b7dddec36fc`
+Staging API revision: `fa381cbdb1f8e550b512132b0349bbb2adb3b193`
 
 ## Implemented scope
 
@@ -23,7 +23,7 @@ Staging API revision: `2fbff49f425ed73230bd597b0abd8b7dddec36fc`
 
 ## Verification evidence
 
-- `pnpm check` passed: type checking, lint, 151 workspace tests, and production
+- `pnpm check` passed: type checking, lint, 154 workspace tests, and production
   builds. The API suite contains 56 tests, including two-user object isolation,
   session expiry/revocation, login rate limiting, hostile Origin rejection,
   hardened cookies, password reset, anonymous migration, account deletion,
@@ -40,6 +40,16 @@ Staging API revision: `2fbff49f425ed73230bd597b0abd8b7dddec36fc`
   anonymous session lookup returns 200 with no session, a personal preferences
   read returns 401, and public de-identified price history remains available
   with 200.
+- With the Resend owner mailbox `free.skater.hy@gmail.com` as the recipient,
+  staging registration produced a Resend `delivered` verification email. The
+  link was accepted by Better Auth, the account displayed `邮箱已验证`, login
+  succeeded, and a password-reset email was also marked `delivered`. The reset
+  flow changed the password and revoked the previous session before a fresh
+  login succeeded. This validates the application and Resend test-sender path,
+  but does not replace delivery to an external 163.com mailbox.
+- Auth verification and reset tokens are now captured in memory and removed
+  from the visible browser URL immediately after landing; dedicated Web tests
+  cover token and callback URL scrubbing.
 
 ## Residual gate
 
