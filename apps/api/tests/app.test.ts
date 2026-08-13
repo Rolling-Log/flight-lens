@@ -126,6 +126,8 @@ test("health discloses connector release readiness", async () => {
   const app = await buildApp({ config, connectors: [], auditStore: null, now: fixedNow });
   const response = await app.inject({ method: "GET", url: "/health" });
   assert.equal(response.statusCode, 200);
+  assert.equal(response.json().revision, "local");
+  assert.equal("version" in response.json(), false);
   assert.deepEqual(response.json().accounts, {
     authConfigured: false,
     personalStoreConfigured: false,

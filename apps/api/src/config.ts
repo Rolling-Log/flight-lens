@@ -19,6 +19,7 @@ const envSchema = z.object({
   AUTH_BASE_URL: z.string().url().optional(),
   AUTH_EMAIL_FROM: z.string().email().optional(),
   RESEND_API_KEY: optionalNonEmpty,
+  RENDER_GIT_COMMIT: optionalNonEmpty,
   OPENAI_INTENT_PARSER_ENABLED: z
     .enum(["true", "false"])
     .default("false")
@@ -90,6 +91,7 @@ export type ApiConfig = {
   authBaseUrl?: string;
   authEmailFrom?: string;
   resendApiKey?: string;
+  deploymentRevision?: string;
   openaiIntentParserEnabled: boolean;
   openaiApiKey?: string;
   openaiModel: string;
@@ -140,6 +142,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     ...(parsed.AUTH_BASE_URL ? { authBaseUrl: parsed.AUTH_BASE_URL } : {}),
     ...(parsed.AUTH_EMAIL_FROM ? { authEmailFrom: parsed.AUTH_EMAIL_FROM } : {}),
     ...(parsed.RESEND_API_KEY ? { resendApiKey: parsed.RESEND_API_KEY } : {}),
+    ...(parsed.RENDER_GIT_COMMIT ? { deploymentRevision: parsed.RENDER_GIT_COMMIT } : {}),
     openaiIntentParserEnabled: parsed.OPENAI_INTENT_PARSER_ENABLED,
     ...(parsed.OPENAI_API_KEY ? { openaiApiKey: parsed.OPENAI_API_KEY } : {}),
     openaiModel: parsed.OPENAI_MODEL,

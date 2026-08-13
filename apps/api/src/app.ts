@@ -464,7 +464,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.get("/health", async () => ({
     status: "ok",
     service: "flight-lens-api",
-    version: "v2-development",
+    revision: config.deploymentRevision ?? "local",
     database: auditStore && v2Store ? "configured" : "unconfigured",
     accounts: {
       authConfigured: Boolean(authService),
