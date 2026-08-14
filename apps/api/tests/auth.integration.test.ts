@@ -531,6 +531,33 @@ test("isolates personal search history by the authenticated user", async () => {
   await store.close();
 });
 
+test("isolates saved itineraries and refuses cross-user deletion", async () => {
+  const pglite = new PGlite();
+  await applyMigrations(pglite);
+  const db = drizzle(pglite, { schema });
+  const store = createAccountStoreWithDatabase({
+    db,
+    close: async () => pglite.close(),
+  } as unknown as FlightLensDatabase);
+  const itineraryA = "00000000-0000-4000-8000-000000000060";
+  const itineraryB = "00000000-0000-4000-8000-000000000061";
+  await pglite.query(
+    "insert into \"user\" (id, name, email, email_verified) values ('itinerary-user-a', 'A', 'itinerary-a@example.test', true), ('itinerary-user-b', 'B', 'itinerary-b@example.test', true)",
+  );
+  await pglite.query(
+    "insert into saved_itineraries (id, user_id, content_key, name, itinerary) values ($1, 'itinerary-user-a', 'content-a', 'A', '{}'::jsonb), ($2, 'itinerary-user-b', 'content-b', 'B', '{}'::jsonb)",
+    [itineraryA, itineraryB],
+  );
+
+  assert.deepEqual((await store.listItineraries("itinerary-user-a")).map((item) => item.id), [itineraryA]);
+  assert.deepEqual((await store.listItineraries("itinerary-user-b")).map((item) => item.id), [itineraryB]);
+  assert.equal(await store.deleteItinerary("itinerary-user-b", itineraryA), false);
+  assert.deepEqual((await store.listItineraries("itinerary-user-a")).map((item) => item.id), [itineraryA]);
+  assert.equal(await store.deleteItinerary("itinerary-user-a", itineraryA), true);
+  assert.deepEqual(await store.listItineraries("itinerary-user-a"), []);
+  await store.close();
+});
+
 test("rehearses the additive account migration rollback and reapply", async () => {
   const pglite = new PGlite();
   await applyMigrations(pglite);

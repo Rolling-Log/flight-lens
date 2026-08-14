@@ -1118,6 +1118,60 @@ test("enforces session identity, CSRF origin, and two-user object isolation", as
   await app.close();
 });
 
+test("scopes saved itinerary reads and deletion to the authenticated user", async () => {
+  const itineraryId = "00000000-0000-4000-8000-000000000060";
+  const reads: string[] = [];
+  const deletions: Array<{ userId: string; id: string }> = [];
+  const app = await buildApp({
+    config,
+    connectors: [],
+    auditStore: null,
+    v2Store: v2StoreStub(),
+    authService: authServiceStub(),
+    accountStore: accountStoreStub({
+      listItineraries: async (userId) => {
+        reads.push(userId);
+        return [];
+      },
+      deleteItinerary: async (userId, id) => {
+        deletions.push({ userId, id });
+        return userId === "user-a" && id === itineraryId;
+      },
+    }),
+    now: fixedNow,
+  });
+
+  const anonymous = await app.inject({ method: "GET", url: "/v3/me/itineraries" });
+  assert.equal(anonymous.statusCode, 401);
+
+  const otherUser = await app.inject({
+    method: "DELETE",
+    url: `/v3/me/itineraries/${itineraryId}`,
+    headers: { cookie: "test-user=user-b", origin: "http://localhost:3000" },
+  });
+  assert.equal(otherUser.statusCode, 404);
+
+  const owner = await app.inject({
+    method: "DELETE",
+    url: `/v3/me/itineraries/${itineraryId}`,
+    headers: { cookie: "test-user=user-a", origin: "http://localhost:3000" },
+  });
+  assert.equal(owner.statusCode, 204);
+
+  const listed = await app.inject({
+    method: "GET",
+    url: "/v3/me/itineraries",
+    headers: { cookie: "test-user=user-b" },
+  });
+  assert.equal(listed.statusCode, 200);
+  assert.deepEqual(reads, ["user-b"]);
+  assert.deepEqual(deletions, [
+    { userId: "user-b", id: itineraryId },
+    { userId: "user-a", id: itineraryId },
+  ]);
+  await app.close();
+});
+
 test("persists monitored history before a notification failure and records the retryable failure", async () => {
   const alert = activeAlert();
   const handlerRef: { current?: (alertId: string) => Promise<void> } = {};

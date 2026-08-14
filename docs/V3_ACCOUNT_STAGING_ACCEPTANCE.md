@@ -23,11 +23,12 @@ Staging API revision: `987e0986a59817b8aefe6d27d6d54d88a008517b`
 
 ## Verification evidence
 
-- `pnpm check` passed: type checking, lint, 155 workspace tests, and production
-  builds. The API suite contains 56 tests, including two-user object isolation,
+- `pnpm check` passed: type checking, lint, 157 workspace tests, and production
+  builds. The API suite contains 59 tests, including two-user object isolation,
   session expiry/revocation, login rate limiting, hostile Origin rejection,
   hardened cookies, password reset, anonymous migration, account deletion,
-  notification unsubscribe behavior, and personal-search ownership.
+  notification unsubscribe behavior, personal-search ownership, and saved
+  itinerary read/delete ownership at both the Fastify and database layers.
 - `pnpm test:e2e` passed 16/16 on desktop and mobile Chromium.
 - Migration `0006_solid_daimon_hellstrom.sql` was applied to Neon staging. Its
   dedicated down script and forward reapply were rehearsed on an isolated
@@ -49,16 +50,36 @@ Staging API revision: `987e0986a59817b8aefe6d27d6d54d88a008517b`
 - Auth verification and reset tokens are now captured in memory and removed
   from the visible browser URL immediately after landing; dedicated Web tests
   cover token and callback URL scrubbing.
+- Two disposable Gmail aliases were registered and verified through the Netlify
+  origin, then authenticated as three independent Cookie clients. A preference
+  written by device A1 was restored by A2, while user B retained empty/default
+  preferences and notification settings. Extra client-supplied `userId`, email,
+  and `ownerToken` fields did not change ownership. Account-name changes and an
+  email-notification opt-out were also restored by A2.
+- A one-time anonymous `skip` decision returned the same migration record when
+  retried from A2; user B received `409 ANONYMOUS_TOKEN_ALREADY_CLAIMED` for the
+  same owner token. Integration tests separately cover migrate/delete behavior,
+  newer-data preservation, duplicate-alert suppression, and delete idempotency.
+- Account export returned an attachment containing A's preferences and current
+  notification settings without B's data. A single-device revoke invalidated A2
+  but retained A1; all-device logout then invalidated both active A sessions.
+  Both disposable accounts were deleted afterward, their sessions became null,
+  and subsequent password login returned 401.
+- Through the deployed Netlify proxy, a hostile auth Origin returned 403, an
+  anonymous personal export returned 401, and public de-identified price history
+  remained available with 200.
 
 ## Residual gate
 
-The remaining staging browser gate is personal-data interaction through the
-Netlify `/api/backend/*` proxy. The Edge automation extension currently returns
-`ERR_BLOCKED_BY_CLIENT` for that path, while direct health, CORS preflight, API
-unit/integration coverage, and desktop/mobile E2E remain green. Consequently,
-manual staging evidence for preference persistence, anonymous migration,
-export, and a genuinely independent second-device session is not recorded yet.
-Use a normal browser session with the extension restriction removed, then repeat
-those actions and record the response evidence here. Do not promote this stage
-to Production, merge `main`, or create a release tag before that evidence is
-recorded.
+No account-and-personal-data staging blocker remains. The Edge automation
+extension still blocks direct controlled navigation to `/api/backend/*`, so the
+cross-device protocol acceptance used independent HTTP Cookie clients instead
+of a second graphical browser; desktop and mobile UI behavior remains covered by
+Playwright E2E.
+
+This does not clear the broader production release gate. Render health still
+reports only two production purchase-handoff connectors and zero production
+verification connectors against the required two-plus-two mix. Long-running
+source reliability, reminder delivery, suppression, and cost telemetry also
+remain outside this account-phase acceptance. Do not promote to Production,
+merge `main`, or create a release tag until those later gates are addressed.
