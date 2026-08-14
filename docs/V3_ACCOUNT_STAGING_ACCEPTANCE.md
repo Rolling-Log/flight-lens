@@ -1,8 +1,8 @@
 # V3 account staging acceptance
 
-Date: 2026-08-13
+Date: 2026-08-14
 Branch: `codex/v3-development`
-Staging API revision: `fa381cbdb1f8e550b512132b0349bbb2adb3b193`
+Staging API revision: `987e0986a59817b8aefe6d27d6d54d88a008517b`
 
 ## Implemented scope
 
@@ -23,7 +23,7 @@ Staging API revision: `fa381cbdb1f8e550b512132b0349bbb2adb3b193`
 
 ## Verification evidence
 
-- `pnpm check` passed: type checking, lint, 154 workspace tests, and production
+- `pnpm check` passed: type checking, lint, 155 workspace tests, and production
   builds. The API suite contains 56 tests, including two-user object isolation,
   session expiry/revocation, login rate limiting, hostile Origin rejection,
   hardened cookies, password reset, anonymous migration, account deletion,
@@ -40,28 +40,25 @@ Staging API revision: `fa381cbdb1f8e550b512132b0349bbb2adb3b193`
   anonymous session lookup returns 200 with no session, a personal preferences
   read returns 401, and public de-identified price history remains available
   with 200.
-- With the Resend owner mailbox `free.skater.hy@gmail.com` as the recipient,
-  staging registration produced a Resend `delivered` verification email. The
-  link was accepted by Better Auth, the account displayed `邮箱已验证`, login
-  succeeded, and a password-reset email was also marked `delivered`. The reset
-  flow changed the password and revoked the previous session before a fresh
-  login succeeded. This validates the application and Resend test-sender path,
-  but does not replace delivery to an external 163.com mailbox.
+- Resend domain `mail.flightlens.cn` is verified in Tokyo and Render staging now
+  uses `Flight Lens <noreply@mail.flightlens.cn>`. Registration resend and
+  password-reset requests for `a18807718007@163.com` returned success; Resend
+  marked both messages `delivered`. The verification link was accepted by
+  Better Auth, the account displayed `邮箱已验证`, the user completed the reset
+  step, and the staging UI confirmed a fresh login as that 163 account.
 - Auth verification and reset tokens are now captured in memory and removed
   from the visible browser URL immediately after landing; dedicated Web tests
   cover token and callback URL scrubbing.
 
 ## Residual gate
 
-Resend is configured, but `onboarding@resend.dev` is a testing sender that may
-only deliver to the Resend account owner's address. It rejected the staged
-verification email to an external 163.com test account with HTTP 403. Therefore
-real external-mail registration, verification, password reset, and a complete
-two-browser cross-device login rehearsal are not accepted yet.
-
-To close this gate without paid upgrades, verify a user-owned sending domain in
-Resend, change `AUTH_EMAIL_FROM` to an address on that domain, redeploy Render
-staging, and repeat registration, verification, login, reset, revoke, migration,
-export, and deletion through the Netlify staging origin. Do not promote this
-stage to Production, merge `main`, or create a release tag before that evidence
-is recorded.
+The remaining staging browser gate is personal-data interaction through the
+Netlify `/api/backend/*` proxy. The Edge automation extension currently returns
+`ERR_BLOCKED_BY_CLIENT` for that path, while direct health, CORS preflight, API
+unit/integration coverage, and desktop/mobile E2E remain green. Consequently,
+manual staging evidence for preference persistence, anonymous migration,
+export, and a genuinely independent second-device session is not recorded yet.
+Use a normal browser session with the extension restriction removed, then repeat
+those actions and record the response evidence here. Do not promote this stage
+to Production, merge `main`, or create a release tag before that evidence is
+recorded.
