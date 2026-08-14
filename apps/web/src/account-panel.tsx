@@ -136,6 +136,24 @@ export function AccountPanel() {
     }
   }
 
+  async function resendVerificationEmail() {
+    if (!email.trim()) {
+      setMessage("请先填写需要验证的邮箱。");
+      return;
+    }
+    setBusy(true);
+    setMessage("");
+    try {
+      const { error } = await authClient.sendVerificationEmail({
+        email,
+        callbackURL: window.location.origin,
+      });
+      setMessage(error ? errorText(error, "验证邮件") : "验证邮件已重新发送，请检查收件箱和垃圾邮件。");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function signOut() {
     await authClient.signOut();
     await refetch();
@@ -272,6 +290,7 @@ export function AccountPanel() {
                   {["login", "register"].includes(view) && <label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={view === "login" ? "current-password" : "new-password"} /></label>}
                   {view === "reset" && <label>新密码<input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" /></label>}
                   <button className="primary-button" disabled={busy} onClick={submitAuth}>{view === "register" ? "创建账号" : view === "forgot" ? "发送重置邮件" : view === "reset" ? "重置密码" : "登录"}</button>
+                  {view === "register" && <button disabled={busy} onClick={resendVerificationEmail}>重新发送验证邮件</button>}
                 </div>
               </>
             ) : (
