@@ -5,6 +5,12 @@ const optionalNonEmpty = z.preprocess(
   z.string().trim().min(1).optional(),
 );
 
+const emailAddress = z.string().email();
+const senderAddress = z.string().trim().refine((value) => {
+  const branded = value.match(/^[^<>\r\n]+<([^<>\r\n]+)>$/);
+  return emailAddress.safeParse(branded?.[1]?.trim() ?? value).success;
+}, "Invalid sender email address");
+
 const portNumber = z.coerce.number().int().min(1).max(65535);
 
 const envSchema = z.object({
@@ -17,7 +23,7 @@ const envSchema = z.object({
   DATABASE_URL: optionalNonEmpty,
   AUTH_SECRET: optionalNonEmpty,
   AUTH_BASE_URL: z.string().url().optional(),
-  AUTH_EMAIL_FROM: z.string().email().optional(),
+  AUTH_EMAIL_FROM: senderAddress.optional(),
   RESEND_API_KEY: optionalNonEmpty,
   RENDER_GIT_COMMIT: optionalNonEmpty,
   OPENAI_INTENT_PARSER_ENABLED: z
