@@ -3,6 +3,7 @@ import { chromium, type Browser, type Page } from "playwright";
 import {
   locationOptions,
   CompanionJourneyResult,
+  CompanionCard,
   CompanionPlatformResult,
   Offer,
   SearchIntent,
@@ -43,17 +44,7 @@ type PlatformDefinition = {
   };
 };
 
-export type RawDomCard = {
-  cardText: string;
-  flightNumberText: string;
-  airlineName: string;
-  departureTime: string;
-  arrivalTime: string;
-  departureAirport: string;
-  arrivalAirport: string;
-  priceText: string;
-  evidenceKind?: "structured_response" | "dom" | undefined;
-};
+export type RawDomCard = CompanionCard;
 
 type JsonObject = Record<string, unknown>;
 
@@ -298,6 +289,7 @@ function string(value: unknown): string | undefined {
 }
 
 function number(value: unknown): number | undefined {
+  if (typeof value !== "number" && (typeof value !== "string" || !value.trim())) return undefined;
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
 }
@@ -595,7 +587,16 @@ export function mapDomCards(
     const stops = /中转|转机|转\d+次/.test(card.cardText) ? 1 : 0;
     const origin = airportRefFromText(card.departureAirport, intent.origin);
     const destination = airportRefFromText(card.arrivalAirport, intent.destination);
-    const providerResponseVerified = card.evidenceKind === "structured_response";
+    const breakdown = card.priceBreakdown;
+    // A structured response is a transport, not proof that the fare includes tax.
+    // Older companion versions omitted this evidence and must remain listed-only.
+    const providerResponseVerified = platform === "ctrip" &&
+      card.evidenceKind === "structured_response" &&
+      breakdown?.currency === "CNY" &&
+      Number.isSafeInteger(breakdown.baseFareMinor) && breakdown.baseFareMinor > 0 &&
+      Number.isSafeInteger(breakdown.taxMinor) && breakdown.taxMinor >= 0 &&
+      breakdown.baseFareMinor + breakdown.taxMinor === perAdultMinor &&
+      Number.isSafeInteger(totalMinor);
     const reasons = [
       ...filterReasons(intent, departureAt, stops, card.cardText),
       ...(providerResponseVerified ? [] : ["PRICE_TAX_UNVERIFIED"]),
@@ -646,11 +647,21 @@ export function mapDomCards(
         arrivalAt,
         durationMinutes: inferredMinutes(departureAt, arrivalAt),
       }],
-      priceComponents: [{
+      priceComponents: providerResponseVerified ? [{
+        kind: "base" as const,
+        label: intent.adults === 1 ? "成人票面价" : `成人票面价 × ${intent.adults}`,
+        amountMinor: breakdown.baseFareMinor * intent.adults,
+        currency: "CNY",
+        required: true,
+      }, {
+        kind: "tax" as const,
+        label: intent.adults === 1 ? "税费（来源合并项）" : `税费（来源合并项） × ${intent.adults}`,
+        amountMinor: breakdown.taxMinor * intent.adults,
+        currency: "CNY",
+        required: true,
+      }] : [{
         kind: "required_service" as const,
-        label: providerResponseVerified
-          ? (intent.adults === 1 ? "来源结构化响应价" : `来源结构化响应价 × ${intent.adults}`)
-          : (intent.adults === 1 ? "来源列表展示价" : `来源列表展示价 × ${intent.adults}`),
+        label: intent.adults === 1 ? "来源列表展示价" : `来源列表展示价 × ${intent.adults}`,
         amountMinor: totalMinor,
         currency: "CNY",
         required: true,

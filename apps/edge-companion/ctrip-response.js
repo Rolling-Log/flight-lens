@@ -11,9 +11,11 @@ var FlightLensCtripResponse = (() => {
     return typeof value === "string" && value.trim() ? value.trim() : "";
   }
 
-  function positiveNumber(value) {
+  function moneyMinor(value) {
+    if (typeof value !== "number" && (typeof value !== "string" || !value.trim())) return null;
     const parsed = typeof value === "number" ? value : Number(value);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    const minor = Math.round(parsed * 100);
+    return Number.isFinite(parsed) && parsed >= 0 && Number.isSafeInteger(minor) ? minor : null;
   }
 
   function time(value) {
@@ -34,13 +36,19 @@ var FlightLensCtripResponse = (() => {
     const cabinPrices = prices.filter((price) =>
       !string(price.cabin) || string(price.cabin).toUpperCase() === requestedCabin
     );
-    const candidates = (cabinPrices.length ? cabinPrices : prices).flatMap((price) => {
-      const base = positiveNumber(price.adultPrice);
-      const tax = positiveNumber(price.adultTax) || 0;
-      const total = base ? base + tax : positiveNumber(price.sortPrice);
-      return total ? [total] : [];
+    const candidates = cabinPrices.flatMap((price) => {
+      const base = moneyMinor(price.adultPrice);
+      const tax = moneyMinor(price.adultTax);
+      const total = base ? base + (tax ?? 0) : moneyMinor(price.sortPrice);
+      if (!total || !Number.isSafeInteger(total)) return [];
+      return [{
+        amountMinor: total,
+        ...(base && tax !== null ? {
+          priceBreakdown: { currency: "CNY", baseFareMinor: base, taxMinor: tax },
+        } : {}),
+      }];
     });
-    return candidates.length ? Math.min(...candidates) : null;
+    return candidates.sort((left, right) => left.amountMinor - right.amountMinor)[0] ?? null;
   }
 
   function airportLabel(name, terminal) {
@@ -70,7 +78,7 @@ var FlightLensCtripResponse = (() => {
         !departureTime || !arrivalTime || !departureAirport || !arrivalAirport || !price
       ) return [];
       const airlineName = string(flight.marketAirlineName) || string(flight.airlineName);
-      const priceText = `¥${Math.round(price)}`;
+      const priceText = `¥${price.amountMinor / 100}`;
       return [{
         cardText: [
           airlineName,
@@ -89,6 +97,7 @@ var FlightLensCtripResponse = (() => {
         arrivalAirport,
         priceText,
         evidenceKind: "structured_response",
+        ...(price.priceBreakdown ? { priceBreakdown: price.priceBreakdown } : {}),
       }];
     }).slice(0, 50);
   }

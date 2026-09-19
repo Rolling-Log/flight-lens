@@ -312,7 +312,7 @@ export function PriceTools({ apiBase, intent, marketPriceInsights, priceJudgment
           ref={triggerRef}
           className="result-status-button"
           onClick={() => showDrawer("history")}
-          aria-label={`价格判断：${level?.label ?? "暂无法判断"}，查看详情`}
+          aria-label={`价格判断：${level?.compact ?? "暂无法判断"}，查看详情`}
         >
           <ChartNoAxesCombined size={17} />
           <span><small>价格判断</small><strong style={{ color: level?.color }}>{level?.compact ?? "暂无"}</strong></span>

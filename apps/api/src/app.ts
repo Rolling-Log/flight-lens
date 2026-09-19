@@ -281,9 +281,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         },
       },
     },
-    // Render contributes the single trusted hop. Taking only the right-most
-    // forwarded address prevents client-supplied entries from becoming identity.
-    trustProxy: 1,
+    // Trust only explicitly configured proxy addresses; hop count alone lets
+    // direct clients spoof forwarded identity (Fastify GHSA-3m5p-2c4r-xxw2).
+    trustProxy: config.trustedProxyCidrs ?? false,
     bodyLimit: 512 * 1024,
     requestIdHeader: false,
     genReqId: () => crypto.randomUUID(),

@@ -41,6 +41,7 @@ import { resolveApiBase } from "../src/api-base";
 import { searchWithEdgeCompanion } from "../src/edge-companion";
 import { LocationCombobox } from "../src/location-combobox";
 import { resultSourceStatus } from "../src/result-source-status";
+import { isOfferVisible } from "../src/offer-visibility";
 import { PriceTools } from "../src/v2-panel";
 import { AccountPanel } from "../src/account-panel";
 import { accountFetch } from "../src/account-api";
@@ -359,7 +360,8 @@ function money(offer: Offer): string {
   return new Intl.NumberFormat("zh-CN", {
     style: "currency",
     currency: value.currency,
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
   }).format(value.amountMinor / 100);
 }
 
@@ -733,7 +735,7 @@ export default function Home() {
   const orderedOffers = useMemo(() => {
     if (!result) return [];
     const offers = result.offers.filter((offer) =>
-      (offer.comparable || offer.purchaseMode === "split_ticket" || offer.priceVerificationStatus === "listed_only") &&
+      isOfferVisible(offer) &&
       (airlineFilter === "all" || offer.segments.some((segment) => segment.marketingCarrier === airlineFilter)) &&
       (aircraftFilter === "all" || offer.segments.some((segment) => segment.aircraftCode === aircraftFilter)) &&
       (departureAirportFilter === "all" || offer.legs[0]?.origin.code === departureAirportFilter) &&
@@ -952,11 +954,7 @@ export default function Home() {
   const lowestSplit = result?.offers.find((offer) => offer.id === result.lowestSplitOfferId) ?? null;
   const recommended = result?.offers.find((offer) => offer.id === result.recommendedOfferId) ?? null;
   const excludedOfferCount =
-    result?.offers.filter((offer) =>
-      !offer.comparable &&
-      offer.purchaseMode !== "split_ticket" &&
-      offer.priceVerificationStatus !== "listed_only",
-    ).length ?? 0;
+    result?.offers.filter((offer) => !isOfferVisible(offer)).length ?? 0;
   const usesSkyscanner = result?.offers.some(
     (offer) => ["skyscanner-live-prices", "flightapi-skyscanner"].includes(offer.connectorId),
   ) ?? false;
@@ -1636,7 +1634,7 @@ export default function Home() {
                               )}
                               {offer.purchaseMode === "split_ticket" && offer.purchaseParts?.map((part) => (
                                 <a key={part.legIndex} className="handoff-link" href={part.bookingUrl} target="_blank" rel="noopener noreferrer">
-                                  {part.label} {new Intl.NumberFormat("zh-CN", { style: "currency", currency: part.price.currency, maximumFractionDigits: 0 }).format(part.price.amountMinor / 100)} ↗
+                                  {part.label} {new Intl.NumberFormat("zh-CN", { style: "currency", currency: part.price.currency, minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(part.price.amountMinor / 100)} ↗
                                 </a>
                               ))}
                               <button onClick={() => openQuoteDetail(offer)}>
@@ -1692,7 +1690,7 @@ export default function Home() {
               <h1 id="quote-detail-title"><AirportRoute origin={selectedOffer.legs[0]?.origin} destination={selectedOffer.legs[0]?.destination} /></h1>
               <p>{selectedOffer.seller.name} · {offerPriceLabel(selectedOffer)} · 核验于 {new Date(selectedOffer.fetchedAt).toLocaleString("zh-CN")}</p>
             </div>
-            <div className="quote-total"><span>来源记录总价</span><strong>{money(selectedOffer)}</strong><small>{selectedOffer.purchaseMode === "split_ticket" ? "两张单程票合计" : "购买前再次核验"}</small></div>
+            <div className="quote-total"><span>{offerPriceLabel(selectedOffer)}</span><strong>{money(selectedOffer)}</strong><small>{selectedOffer.purchaseMode === "split_ticket" ? "两张单程票合计" : selectedOffer.priceVerificationStatus === "listed_only" ? "税费、机建燃油待核验" : "购买前再次核验"}</small></div>
           </div>
 
           <div className="quote-detail-grid">
@@ -1748,7 +1746,7 @@ export default function Home() {
               <span>价格构成</span>
               <h2>{money(selectedOffer)}</h2>
               <div className="component-list">
-                {selectedOffer.priceComponents.map((component) => <div key={`${component.kind}-${component.label}`}><span>{component.label}</span><b>{new Intl.NumberFormat("zh-CN", { style: "currency", currency: component.currency, maximumFractionDigits: 0 }).format(component.amountMinor / 100)}</b></div>)}
+                {selectedOffer.priceComponents.map((component) => <div key={`${component.kind}-${component.label}`}><span>{component.label}</span><b>{new Intl.NumberFormat("zh-CN", { style: "currency", currency: component.currency, minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(component.amountMinor / 100)}</b></div>)}
               </div>
               {selectedOffer.exchangeRate && <p>1 {selectedOffer.exchangeRate.baseCurrency} = {selectedOffer.exchangeRate.rate} {selectedOffer.exchangeRate.quoteCurrency}<small>{selectedOffer.exchangeRate.source} · {new Date(selectedOffer.exchangeRate.quotedAt).toLocaleString("zh-CN")}</small></p>}
               <div className="evidence-source"><ShieldCheck size={16} /><div><b>{selectedOffer.seller.name}</b><small>{offerPriceLabel(selectedOffer)}</small></div></div>

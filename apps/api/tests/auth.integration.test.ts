@@ -20,6 +20,7 @@ const config: ApiConfig = {
   host: "127.0.0.1",
   port: 4000,
   webOrigins: ["http://localhost:3000"],
+  trustedProxyCidrs: ["127.0.0.1/32"],
   logLevel: "silent",
   authSecret: "test-only-secret-that-is-at-least-thirty-two-characters",
   authBaseUrl: "http://localhost:4000",

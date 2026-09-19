@@ -137,6 +137,11 @@ export const companionCardSchema = z.object({
   arrivalAirport: z.string().max(500),
   priceText: z.string().max(500),
   evidenceKind: z.enum(["structured_response", "dom"]).optional(),
+  priceBreakdown: z.object({
+    currency: z.literal("CNY"),
+    baseFareMinor: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    taxMinor: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  }).optional(),
 });
 export type CompanionCard = z.infer<typeof companionCardSchema>;
 

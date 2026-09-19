@@ -3,6 +3,23 @@ import AxeBuilder from "@axe-core/playwright";
 
 const pvgNrtRouteName = /浦东国际机场.*PVG.*成田国际机场.*NRT/;
 
+test("animated coverage dialog receives focus and traps keyboard navigation", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.goto("/");
+  const trigger = page.getByRole("button", { name: "来源", exact: true });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "来源数量不等于可信度" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "关闭" })).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(dialog.getByRole("button", { name: "我知道了" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(dialog.getByRole("button", { name: "关闭" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+});
+
 async function expectNoBlockingAccessibilityViolations(page: Page) {
   const scan = await new AxeBuilder({ page }).analyze();
   const blocking = scan.violations.filter(

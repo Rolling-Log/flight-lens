@@ -19,6 +19,7 @@ const envSchema = z.object({
   PORT: portNumber.optional(),
   API_PORT: portNumber.default(4000),
   WEB_ORIGINS: z.string().default("http://localhost:3000,http://127.0.0.1:3000"),
+  TRUSTED_PROXY_CIDRS: optionalNonEmpty,
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
   DATABASE_URL: optionalNonEmpty,
   AUTH_SECRET: optionalNonEmpty,
@@ -91,6 +92,7 @@ export type ApiConfig = {
   host: string;
   port: number;
   webOrigins: string[];
+  trustedProxyCidrs?: string[];
   logLevel: string;
   databaseUrl?: string;
   authSecret?: string;
@@ -142,6 +144,9 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     host: parsed.API_HOST,
     port: parsed.PORT ?? parsed.API_PORT,
     webOrigins: parsed.WEB_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean),
+    ...(parsed.TRUSTED_PROXY_CIDRS ? {
+      trustedProxyCidrs: parsed.TRUSTED_PROXY_CIDRS.split(",").map((value) => value.trim()).filter(Boolean),
+    } : {}),
     logLevel: parsed.LOG_LEVEL,
     ...(parsed.DATABASE_URL ? { databaseUrl: parsed.DATABASE_URL } : {}),
     ...(parsed.AUTH_SECRET ? { authSecret: parsed.AUTH_SECRET } : {}),

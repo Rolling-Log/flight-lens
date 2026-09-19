@@ -18,14 +18,15 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `node_modules/.bin/next start --hostname 127.0.0.1 --port ${webPort}`,
+      command: `node node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port ${webPort}`,
       cwd: "apps/web",
       url: `http://127.0.0.1:${webPort}`,
       reuseExistingServer: !process.env.CI && !process.env.PLAYWRIGHT_WEB_PORT,
       timeout: 30_000,
     },
     {
-      command: `PORT=${apiPort} node --conditions=development --import tsx tests/fixtures/ui-server.ts`,
+      command: "node --conditions=development --import tsx tests/fixtures/ui-server.ts",
+      env: { PORT: String(apiPort) },
       cwd: "apps/api",
       url: `http://127.0.0.1:${apiPort}/health`,
       reuseExistingServer: !process.env.CI && !process.env.PLAYWRIGHT_API_PORT,

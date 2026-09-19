@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { SearchIntent } from "@flight-lens/contracts";
+import { companionCardSchema, type SearchIntent } from "@flight-lens/contracts";
 import {
   AmadeusConnector,
   amadeusEnvironment,
@@ -245,6 +245,41 @@ test("maps visible airport names to canonical IATA and rejects an airport mismat
   );
 });
 
+test("companion tax proof survives the API contract and totals every adult", () => {
+  const card = companionCardSchema.parse({
+    cardText: "MU5102 直飞", flightNumberText: "MU5102", airlineName: "东方航空",
+    departureTime: "08:00", arrivalTime: "10:20",
+    departureAirport: "首都国际机场", arrivalAirport: "虹桥国际机场",
+    priceText: "¥570.75", evidenceKind: "structured_response",
+    priceBreakdown: { currency: "CNY", baseFareMinor: 45025, taxMinor: 12050 },
+  });
+  const domesticIntent = { ...intent, adults: 2,
+    origin: { kind: "airport" as const, code: "PEK" },
+    destination: { kind: "airport" as const, code: "SHA" },
+  };
+  const map = (value: typeof card) => mapDomCards([value], "ctrip", domesticIntent,
+    "tax-proof", "https://flights.ctrip.com/online/list/oneway-pek-sha")[0]!;
+  const verified = map(card);
+  assert.equal(verified.priceVerificationStatus, "provider_response_verified");
+  assert.equal(verified.comparable, true);
+  assert.equal(verified.totalPrice.amountMinor, 114150);
+  assert.deepEqual(verified.priceComponents.map(({ kind, amountMinor }) => ({ kind, amountMinor })), [
+    { kind: "base", amountMinor: 90050 }, { kind: "tax", amountMinor: 24100 },
+  ]);
+  for (const priceBreakdown of [undefined, { ...card.priceBreakdown!, taxMinor: 1 },
+    { ...card.priceBreakdown!, taxMinor: -1 }, { ...card.priceBreakdown!, taxMinor: Number.NaN }]) {
+    const listed = map({ ...card, priceBreakdown });
+    assert.equal(listed.priceVerificationStatus, "listed_only");
+    assert.equal(listed.comparable, false);
+    assert.equal(listed.priceVerifiedAt, undefined);
+    assert.ok(listed.incomparabilityReasons.includes("PRICE_TAX_UNVERIFIED"));
+  }
+  assert.equal(map({ ...card, priceText: "¥450.25",
+    priceBreakdown: { ...card.priceBreakdown!, taxMinor: 0 },
+  }).priceVerificationStatus, "provider_response_verified");
+  assert.equal(map({ ...card, evidenceKind: "dom" }).priceVerificationStatus, "listed_only");
+});
+
 test("combines two independently priced one-way results as a disclosed split ticket", () => {
   const make = (from: string, to: string, date: string, flight: string, price: string) => mapFlyAiFlightPayload({
     status: 0,
@@ -308,10 +343,11 @@ test("maps Ctrip batchSearch base fare and tax as provider-verified adult total"
 });
 
 test("does not treat a missing Ctrip tax field as zero tax", () => {
+  for (const adultTax of [undefined, null, "", " ", false, "unknown"]) {
   const offers = mapCtripBatchSearchPayload({
     data: {
       flightItineraryList: [{
-        priceList: [{ adultPrice: 520 }],
+        priceList: [{ adultPrice: 520, adultTax }],
         flightSegments: [{
           flightList: [{
             flightNo: "MU5101",
@@ -331,6 +367,7 @@ test("does not treat a missing Ctrip tax field as zero tax", () => {
   assert.equal(offers[0]?.comparable, false);
   assert.deepEqual(offers[0]?.priceComponents.map((component) => component.kind), ["required_service"]);
   assert.ok(offers[0]?.incomparabilityReasons.includes("PRICE_TAX_UNVERIFIED"));
+  }
 });
 
 test("registers the four V1 domestic real-source connectors without credentials in code", () => {

@@ -75,7 +75,9 @@ export function useLiquidOverlayMotion({
     // The settled backdrop is applied immediately so its full-screen blur is
     // composited once instead of being recalculated throughout the animation.
     gsap.set(backdrop, { autoAlpha: 1 });
-    gsap.set(panel, { autoAlpha: 0 });
+    // Keep the dialog focusable while it fades in. autoAlpha: 0 also hides
+    // visibility, which caused mount-time focus to remain behind the modal.
+    gsap.set(panel, { opacity: 0, visibility: "visible" });
     gsap.set(morph, {
       autoAlpha: 1,
       left: origin.left,

@@ -14,13 +14,19 @@
 
 ## 本地开发
 
-需要 Node.js 22 和 pnpm 11。
+需要 Node.js 22 和 pnpm 11.9.0（与 CI 一致）。仓库提供 `.nvmrc`；Windows 已验证 Node 22.23.2。
+本次实测 Node 25.3.0 会导致 FlyAI CLI 出现 libuv 断言崩溃，不能把这种运行时故障当作“航线无票”。
 
 ```bash
 pnpm install
-cp .env.example .env
+cp .env.example apps/api/.env
 pnpm dev
 ```
+
+上述复制只用于首次配置，已有 `apps/api/.env` 时保留原文件。Windows PowerShell 的首次复制命令为
+`Copy-Item .env.example apps/api/.env`。API 从自己的工作目录读取 `.env`；本地 Web 默认连接 4000 端口。
+Windows 的 `BROWSER_EXECUTABLE_PATH` 可设为 `C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe`，
+并按实际安装路径调整；没有本地代理时将 `BROWSER_PROXY_SERVER` 留空。
 
 - Web：<http://localhost:3000>
 - API：<http://localhost:4000>
@@ -57,6 +63,8 @@ packages/connectors 数据源适配器
 packages/database   Neon Schema 与 Migration
 docs                产品、架构与运行文档
 ```
+
+本轮实测、已修复问题与按真实最低支付价排序的后续工作见 [2026-09-20 项目深度评估](docs/PROJECT_AUDIT_2026-09-20.md)。
 
 航探不会在证据不足时宣称“全网最低”。结论必须包含成功、失败和超时来源、统一价格口径以及报价核验时间。只能跳到来源结果页的报价会显示为“抓取时来源展示价”，而不是可支付总价。
 

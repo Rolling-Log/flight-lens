@@ -44,6 +44,23 @@ test("redacts auth tokens and all query values from request logs", () => {
   assert.equal(safeRequestPath("/health"), "/health");
 });
 
+test("forwarded identity requires a configured trusted peer address", async () => {
+  for (const trustedProxyCidrs of [[], ["127.0.0.1/32"]]) {
+    const app = await buildApp({ config: { ...config, trustedProxyCidrs }, connectors: [], auditStore: null });
+    app.get("/test-peer", (request) => ({ ip: request.ip, host: request.host, protocol: request.protocol }));
+    try {
+      const headers = { "x-forwarded-for": "203.0.113.99, 198.51.100.20",
+        "x-forwarded-host": "spoof.example", "x-forwarded-proto": "https", host: "local.example" };
+      const direct = await app.inject({ url: "/test-peer", remoteAddress: "198.51.100.5", headers });
+      assert.deepEqual(direct.json(), { ip: "198.51.100.5", host: "local.example", protocol: "http" });
+      const viaLocal = await app.inject({ url: "/test-peer", remoteAddress: "127.0.0.1", headers });
+      assert.equal(viaLocal.json().ip, trustedProxyCidrs.length ? "198.51.100.20" : "127.0.0.1");
+    } finally {
+      await app.close();
+    }
+  }
+});
+
 function comparableOffer(overrides: Partial<Offer> = {}): Offer {
   return {
     schemaVersion: "1",
@@ -430,6 +447,7 @@ test("uses Edge companion evidence instead of the duplicate server connector", a
               arrivalAirport: "成田国际机场 T2",
               priceText: "¥1,299",
               evidenceKind: "structured_response",
+              priceBreakdown: { currency: "CNY", baseFareMinor: 109_900, taxMinor: 20_000 },
             }],
           }],
         }],
