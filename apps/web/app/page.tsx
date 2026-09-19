@@ -1527,13 +1527,12 @@ export default function Home() {
                     {groupedOffers.map((group) => {
                       const offer = group.offers[0]!;
                       const isShortlisted = shortlist.some((candidate) => candidate.id === offer.id);
-                      const groupIds = new Set(group.offers.map((candidate) => candidate.id));
-                      const isLowest = result.lowestComparableOfferId ? groupIds.has(result.lowestComparableOfferId) : false;
-                      const isRecommended = result.recommendedOfferId ? groupIds.has(result.recommendedOfferId) : false;
+                      const isLowest = offer.id === result.lowestComparableOfferId;
+                      const isRecommended = offer.id === result.recommendedOfferId;
                       const distinctions = [
                         ...(isLowest ? ["最低可核验全价"] : []),
                         ...(isRecommended ? ["综合推荐"] : []),
-                        ...(result.lowestSplitOfferId && groupIds.has(result.lowestSplitOfferId) ? ["最低分开购买价"] : []),
+                        ...(offer.id === result.lowestSplitOfferId ? ["最低分开购买价"] : []),
                         ...(offer.id === result.shortestOfferId ? ["最短耗时"] : []),
                         ...(offer.id === result.fewestStopsOfferId ? ["最少中转"] : []),
                         ...(offer.id === result.bestBaggageOfferId ? ["最佳行李"] : []),

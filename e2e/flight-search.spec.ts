@@ -3,6 +3,31 @@ import AxeBuilder from "@axe-core/playwright";
 
 const pvgNrtRouteName = /浦东国际机场.*PVG.*成田国际机场.*NRT/;
 
+test("a lower list fare never inherits a verified-price badge from the same flight", async ({ page }) => {
+  await page.route("**/v1/searches", async (route) => {
+    const response = await route.fetch({ url: `http://127.0.0.1:${process.env.PLAYWRIGHT_API_PORT ?? 4000}/v1/searches` });
+    const result = await response.json();
+    const lowest = result.offers.find((offer: { id: string }) => offer.id === result.lowestComparableOfferId);
+    expect(lowest).toBeTruthy();
+    result.offers.push({ ...lowest, id: "same-flight-listed-fare", comparable: false,
+      seller: { ...lowest.seller, id: "listed-seller", name: "列表价供应商" },
+      priceVerificationStatus: "listed_only", incomparabilityReasons: ["PRICE_TAX_UNVERIFIED"],
+      totalPrice: { amountMinor: 190000, currency: "CNY" },
+      totalPriceCny: { amountMinor: 190000, currency: "CNY" },
+    });
+    await route.fulfill({ response, json: result });
+  });
+  await page.goto("/");
+  await page.getByRole("tab", { name: "精确筛选" }).click();
+  await page.getByRole("button", { name: "开始检索" }).click();
+  const card = page.getByRole("article").filter({ hasText: "列表价供应商" });
+  await page.getByRole("button", { name: /价格排序，当前低到高/ }).click();
+  await page.getByRole("menuitemradio", { name: "低到高" }).click();
+  await expect(card.locator(".price")).toContainText("¥1,900");
+  await expect(card.locator(".flight-tag")).not.toContainText("最低可核验全价");
+  await expect(card.locator(".flight-tag")).not.toContainText("综合推荐");
+});
+
 test("animated coverage dialog receives focus and traps keyboard navigation", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.goto("/");
