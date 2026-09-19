@@ -1,5 +1,5 @@
 import type { FlightConnector } from "@flight-lens/connectors";
-import type { Offer, SearchIntent } from "@flight-lens/contracts";
+import type { MarketPriceInsight, Offer, SearchIntent } from "@flight-lens/contracts";
 import { buildApp } from "../../src/app.js";
 import type { ApiConfig } from "../../src/config.js";
 
@@ -180,6 +180,7 @@ function fixtureOffer(input: {
 function connector(
   metadata: FlightConnector["metadata"],
   offers: (intent: SearchIntent) => Offer[],
+  marketPriceInsights?: (intent: SearchIntent) => MarketPriceInsight[],
 ): FlightConnector {
   return {
     metadata,
@@ -187,7 +188,11 @@ function connector(
       return { state: "healthy", checkedAt: new Date().toISOString() };
     },
     async search(intent) {
-      return { offers: offers(intent), notes: ["LOCAL_SANDBOX_CONNECTOR"] };
+      return {
+        offers: offers(intent),
+        ...(marketPriceInsights ? { marketPriceInsights: marketPriceInsights(intent) } : {}),
+        notes: ["LOCAL_SANDBOX_CONNECTOR"],
+      };
     },
   };
 }
@@ -255,6 +260,29 @@ const connectors: FlightConnector[] = [
         handoffPrecision: "search_results",
       }),
     ],
+    (intent) => [{
+      sourceId: "serpapi-google-flights",
+      sourceName: "Google Flights 市场洞察",
+      fetchedAt: new Date().toISOString(),
+      currency: "CNY",
+      originCode: intent.origin.code,
+      destinationCode: intent.destination.code,
+      departureDate: intent.departureDate,
+      returnDate: intent.returnDate ?? null,
+      tripType: intent.tripType,
+      cabin: intent.cabin,
+      adults: intent.adults,
+      priceBasis: "listed_only",
+      lowestPriceMinor: 246_000,
+      priceLevel: "low",
+      typicalPriceRangeMinor: [270_000, 330_000],
+      history: [
+        ["2026-07-05", 330_000], ["2026-07-08", 320_000], ["2026-07-12", 315_000],
+        ["2026-07-18", 305_000], ["2026-07-23", 300_000], ["2026-07-29", 292_000],
+        ["2026-08-02", 285_000], ["2026-08-05", 278_000], ["2026-08-08", 270_000],
+        ["2026-08-11", 260_000],
+      ].map(([date, amountMinor]) => ({ date: String(date), amountMinor: Number(amountMinor) })),
+    }],
   ),
 ];
 

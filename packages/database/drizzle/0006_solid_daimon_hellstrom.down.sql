@@ -1,0 +1,16 @@
+DROP INDEX IF EXISTS "user_preferences_user_idx";
+DROP INDEX IF EXISTS "price_alerts_user_idx";
+ALTER TABLE "user_preferences" DROP CONSTRAINT IF EXISTS "user_preferences_user_id_user_id_fk";
+ALTER TABLE "price_alerts" DROP CONSTRAINT IF EXISTS "price_alerts_user_id_user_id_fk";
+ALTER TABLE "user_preferences" DROP COLUMN IF EXISTS "user_id";
+ALTER TABLE "price_alerts" DROP COLUMN IF EXISTS "user_id";
+DROP TABLE IF EXISTS "security_audit_events";
+DROP TABLE IF EXISTS "saved_itineraries";
+DROP TABLE IF EXISTS "personal_search_history";
+DROP TABLE IF EXISTS "notification_settings";
+DROP TABLE IF EXISTS "anonymous_migrations";
+DROP TABLE IF EXISTS "verification";
+DROP TABLE IF EXISTS "session";
+DROP TABLE IF EXISTS "account";
+DROP TABLE IF EXISTS "user";
+DROP TYPE IF EXISTS "anonymous_migration_status";

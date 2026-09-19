@@ -5,6 +5,12 @@ const optionalNonEmpty = z.preprocess(
   z.string().trim().min(1).optional(),
 );
 
+const emailAddress = z.string().email();
+const senderAddress = z.string().trim().refine((value) => {
+  const branded = value.match(/^[^<>\r\n]+<([^<>\r\n]+)>$/);
+  return emailAddress.safeParse(branded?.[1]?.trim() ?? value).success;
+}, "Invalid sender email address");
+
 const portNumber = z.coerce.number().int().min(1).max(65535);
 
 const envSchema = z.object({
@@ -15,6 +21,11 @@ const envSchema = z.object({
   WEB_ORIGINS: z.string().default("http://localhost:3000,http://127.0.0.1:3000"),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
   DATABASE_URL: optionalNonEmpty,
+  AUTH_SECRET: optionalNonEmpty,
+  AUTH_BASE_URL: z.string().url().optional(),
+  AUTH_EMAIL_FROM: senderAddress.optional(),
+  RESEND_API_KEY: optionalNonEmpty,
+  RENDER_GIT_COMMIT: optionalNonEmpty,
   OPENAI_INTENT_PARSER_ENABLED: z
     .enum(["true", "false"])
     .default("false")
@@ -82,6 +93,11 @@ export type ApiConfig = {
   webOrigins: string[];
   logLevel: string;
   databaseUrl?: string;
+  authSecret?: string;
+  authBaseUrl?: string;
+  authEmailFrom?: string;
+  resendApiKey?: string;
+  deploymentRevision?: string;
   openaiIntentParserEnabled: boolean;
   openaiApiKey?: string;
   openaiModel: string;
@@ -128,6 +144,11 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     webOrigins: parsed.WEB_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean),
     logLevel: parsed.LOG_LEVEL,
     ...(parsed.DATABASE_URL ? { databaseUrl: parsed.DATABASE_URL } : {}),
+    ...(parsed.AUTH_SECRET ? { authSecret: parsed.AUTH_SECRET } : {}),
+    ...(parsed.AUTH_BASE_URL ? { authBaseUrl: parsed.AUTH_BASE_URL } : {}),
+    ...(parsed.AUTH_EMAIL_FROM ? { authEmailFrom: parsed.AUTH_EMAIL_FROM } : {}),
+    ...(parsed.RESEND_API_KEY ? { resendApiKey: parsed.RESEND_API_KEY } : {}),
+    ...(parsed.RENDER_GIT_COMMIT ? { deploymentRevision: parsed.RENDER_GIT_COMMIT } : {}),
     openaiIntentParserEnabled: parsed.OPENAI_INTENT_PARSER_ENABLED,
     ...(parsed.OPENAI_API_KEY ? { openaiApiKey: parsed.OPENAI_API_KEY } : {}),
     openaiModel: parsed.OPENAI_MODEL,

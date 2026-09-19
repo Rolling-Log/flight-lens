@@ -1,0 +1,10 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <mask id="ticket-shape">
+    <rect x="7" y="13" width="50" height="38" rx="9" fill="white"/>
+    <circle cx="7" cy="32" r="5" fill="black"/>
+    <circle cx="57" cy="32" r="5" fill="black"/>
+  </mask>
+  <rect x="7" y="13" width="50" height="38" rx="9" fill="#0066CC" mask="url(#ticket-shape)"/>
+  <path d="M43.5 20.5C42.2 20.1 40.5 20.8 39.1 22.2L34.6 26.7L22.1 24L19.6 26.5L29.1 32.1L24.3 36.9H19.6L17.5 39L23.4 40.6L25 46.5L27.1 44.4V39.7L31.9 34.9L37.5 44.4L40 41.9L37.3 29.4L41.8 24.9C43.2 23.5 43.9 21.8 43.5 20.5Z" fill="white"/>
+  <path d="M47 20V44" stroke="#9DD7FF" stroke-width="2" stroke-linecap="round" stroke-dasharray="2 4"/>
+</svg>

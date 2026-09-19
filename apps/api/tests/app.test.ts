@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { FlightConnector } from "@flight-lens/connectors";
 import type { Offer, PriceAlert } from "@flight-lens/contracts";
-import { buildApp } from "../src/app.js";
+import { buildApp, safeRequestPath } from "../src/app.js";
 import type { ApiConfig } from "../src/config.js";
-import type { V2Store } from "@flight-lens/database";
+import type { AccountStore, V2Store } from "@flight-lens/database";
+import type { AuthService } from "../src/auth.js";
 import type { MonitorQueue } from "../src/monitor-queue.js";
 
 const config: ApiConfig = {
@@ -37,6 +38,11 @@ const validIntent = {
   departureDate: "2026-08-24",
 } as const;
 const fixedNow = () => new Date("2026-07-30T00:00:00.000Z");
+
+test("redacts auth tokens and all query values from request logs", () => {
+  assert.equal(safeRequestPath("/api/auth/verify-email?token=secret&callbackURL=https%3A%2F%2Fexample.test"), "/api/auth/verify-email");
+  assert.equal(safeRequestPath("/health"), "/health");
+});
 
 function comparableOffer(overrides: Partial<Offer> = {}): Offer {
   return {
@@ -120,6 +126,13 @@ test("health discloses connector release readiness", async () => {
   const app = await buildApp({ config, connectors: [], auditStore: null, now: fixedNow });
   const response = await app.inject({ method: "GET", url: "/health" });
   assert.equal(response.statusCode, 200);
+  assert.equal(response.json().revision, "local");
+  assert.equal("version" in response.json(), false);
+  assert.deepEqual(response.json().accounts, {
+    authConfigured: false,
+    personalStoreConfigured: false,
+    emailDeliveryConfigured: false,
+  });
   assert.deepEqual(response.json().connectors, {
     configured: 0,
     purchaseHandoffConfigured: 0,
@@ -280,6 +293,50 @@ test("returns transparent coverage for a configured empty source", async () => {
   assert.equal(response.json().disclosure.successfulSources, 1);
   assert.equal(response.json().offers.length, 0);
   assert.equal(response.json().audit.persisted, false);
+  await app.close();
+});
+
+test("records a completed search only for the authenticated account", async () => {
+  const recorded: Array<{ userId: string; searchId: string }> = [];
+  const connector: FlightConnector = {
+    metadata: {
+      id: "history-source",
+      name: "History source",
+      kind: "aggregator",
+      environment: "sandbox",
+      authorization: "self_service_api",
+      resultRole: "verification",
+      handoff: "none",
+      configured: true,
+    },
+    health: async () => ({ state: "healthy", checkedAt: new Date().toISOString() }),
+    search: async () => ({ offers: [] }),
+  };
+  const app = await buildApp({
+    config,
+    connectors: [connector],
+    auditStore: null,
+    authService: authServiceStub(),
+    accountStore: accountStoreStub({
+      recordSearch: async (userId, searchId) => { recorded.push({ userId, searchId }); },
+    }),
+    now: fixedNow,
+  });
+  const authenticated = await app.inject({
+    method: "POST",
+    url: "/v1/searches",
+    headers: { cookie: "test-user=history-user" },
+    payload: validIntent,
+  });
+  assert.equal(authenticated.statusCode, 200);
+  assert.deepEqual(recorded, [{ userId: "history-user", searchId: authenticated.json().requestId }]);
+  const anonymous = await app.inject({
+    method: "POST",
+    url: "/v1/searches",
+    payload: validIntent,
+  });
+  assert.equal(anonymous.statusCode, 200);
+  assert.equal(recorded.length, 1);
   await app.close();
 });
 
@@ -469,6 +526,46 @@ test("returns separate verifiable-all-in, recommendation, and split-ticket concl
   assert.equal(response.json().lowestComparableOfferId, "all-in");
   assert.equal(response.json().recommendedOfferId, "all-in");
   assert.equal(response.json().lowestSplitOfferId, "split");
+  await app.close();
+});
+
+test("returns SerpApi market history and a same-semantics five-level judgment", async () => {
+  const history = [70, 80, 90, 100, 110, 120, 130, 140, 150, 160].map((amount, index) => ({
+    date: `2026-07-${String(index + 1).padStart(2, "0")}`,
+    amountMinor: amount * 1_000,
+  }));
+  const connector: FlightConnector = {
+    ...readinessConnector("serpapi-google-flights", "purchase_handoff", "google-flights"),
+    search: async () => ({
+      offers: [],
+      marketPriceInsights: [{
+        sourceId: "serpapi-google-flights",
+        sourceName: "Google Flights 市场洞察",
+        fetchedAt: fixedNow().toISOString(),
+        currency: "CNY",
+        originCode: "PVG",
+        destinationCode: "NRT",
+        departureDate: "2026-08-24",
+        returnDate: null,
+        tripType: "one_way",
+        cabin: "economy",
+        adults: 1,
+        priceBasis: "listed_only",
+        lowestPriceMinor: 70_000,
+        priceLevel: "low",
+        typicalPriceRangeMinor: [90_000, 130_000],
+        history,
+      }],
+    }),
+  };
+  const app = await buildApp({ config, connectors: [connector], auditStore: null, now: fixedNow });
+  const response = await app.inject({ method: "POST", url: "/v1/searches", payload: validIntent });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().marketPriceInsights[0].history.length, 10);
+  assert.equal(response.json().priceJudgment.level, "top");
+  assert.equal(response.json().priceJudgment.currentPriceBasis, "listed_only");
+  assert.equal(response.json().priceJudgment.basis, "external_history");
   await app.close();
 });
 
@@ -664,6 +761,49 @@ function v2StoreStub(overrides: Partial<V2Store> = {}): V2Store {
   };
 }
 
+function authServiceStub(): AuthService {
+  return {
+    handler: async () => new Response(null, { status: 404 }),
+    async getSession(headers) {
+      const match = headers.cookie?.match(/test-user=([^;]+)/);
+      if (!match) return null;
+      const userId = match[1]!;
+      return {
+        session: { id: `session-${userId}`, token: `token-${userId}`, expiresAt: new Date("2026-08-30T00:00:00.000Z") },
+        user: { id: userId, name: userId, email: `${userId}@example.test`, emailVerified: true },
+      };
+    },
+    close: async () => undefined,
+  };
+}
+
+function accountStoreStub(overrides: Partial<AccountStore> = {}): AccountStore {
+  return {
+    createAlert: async () => activeAlert(),
+    listAlerts: async () => [],
+    getAlert: async () => null,
+    setAlertStatus: async () => false,
+    clearAlerts: async () => 0,
+    savePreferences: async () => undefined,
+    getPreferences: async () => null,
+    clearPreferences: async () => undefined,
+    recordSearch: async () => undefined,
+    listSearches: async () => [],
+    clearSearches: async () => 0,
+    saveItinerary: async () => { throw new Error("not implemented"); },
+    listItineraries: async () => [],
+    deleteItinerary: async () => false,
+    saveNotifications: async () => undefined,
+    getNotifications: async () => ({ emailEnabled: true, pushEnabled: false, ntfyTopic: null }),
+    getAlertDelivery: async () => null,
+    migrateAnonymous: async () => { throw new Error("not implemented"); },
+    exportData: async () => ({ exportedAt: fixedNow().toISOString(), preferences: null, alerts: [], searches: [], itineraries: [], notifications: { emailEnabled: true, pushEnabled: false, ntfyTopic: null } }),
+    audit: async () => undefined,
+    close: async () => undefined,
+    ...overrides,
+  } as AccountStore;
+}
+
 test("returns separate V2 price trends without merging price semantics", async () => {
   const history = [
     { amount: 120_000, at: "2026-07-27T00:00:00.000Z" },
@@ -677,6 +817,7 @@ test("returns separate V2 price trends without merging price semantics", async (
     departureDate: "2026-08-24",
     returnDate: null,
     cabin: "economy" as const,
+    adults: 1,
     connectorId: "verified-source",
     inventoryFamily: "verified-family",
     sellerId: "seller",
@@ -713,7 +854,7 @@ test("returns separate V2 price trends without merging price semantics", async (
   await app.close();
 });
 
-test("clears route history only with an anonymous owner token", async () => {
+test("keeps public route history immutable regardless of an anonymous owner token", async () => {
   const app = await buildApp({
     config,
     connectors: [],
@@ -725,14 +866,81 @@ test("clears route history only with an anonymous owner token", async () => {
     method: "DELETE",
     url: "/v2/prices/history?origin=PEK&destination=SHA&departureDate=2026-08-24&cabin=economy",
   });
-  assert.equal(denied.statusCode, 401);
+  assert.equal(denied.statusCode, 405);
+  assert.equal(denied.json().error.code, "PUBLIC_HISTORY_IMMUTABLE");
   const accepted = await app.inject({
     method: "DELETE",
     url: "/v2/prices/history?origin=PEK&destination=SHA&departureDate=2026-08-24&cabin=economy",
     headers: { "x-flight-lens-owner": "owner-token-value" },
   });
-  assert.equal(accepted.statusCode, 200);
-  assert.deepEqual(accepted.json(), { deleted: 7 });
+  assert.equal(accepted.statusCode, 405);
+  await app.close();
+});
+
+test("discloses alert delivery state and refuses alerts without a server scheduler", async () => {
+  let createCalls = 0;
+  const app = await buildApp({
+    config,
+    connectors: [],
+    auditStore: null,
+    v2Store: v2StoreStub({ createAlert: async () => { createCalls += 1; return activeAlert(); } }),
+    authService: authServiceStub(),
+    accountStore: accountStoreStub({ createAlert: async () => { createCalls += 1; return activeAlert(); } }),
+    now: fixedNow,
+  });
+  const listed = await app.inject({
+    method: "GET",
+    url: "/v2/alerts",
+    headers: { cookie: "test-user=user-a" },
+  });
+  assert.equal(listed.statusCode, 200);
+  assert.deepEqual(listed.json().delivery, { serverSchedulingConfigured: false, channels: ["email", "ntfy"] });
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/v2/alerts",
+    payload: {
+      intent: validIntent,
+      targetAmountCnyMinor: 100_000,
+      checkIntervalMinutes: 360,
+      ntfyTopic: "flight-lens-test",
+    },
+    headers: { cookie: "test-user=user-a", origin: "http://localhost:3000" },
+  });
+  assert.equal(created.statusCode, 503);
+  assert.equal(created.json().error.code, "MONITOR_UNCONFIGURED");
+  assert.equal(createCalls, 0);
+  await app.close();
+});
+
+test("creates an alert only for the authenticated user", async () => {
+  const creates: string[] = [];
+  const app = await buildApp({
+    config,
+    connectors: [],
+    auditStore: null,
+    v2Store: v2StoreStub(),
+    authService: authServiceStub(),
+    accountStore: accountStoreStub({
+      createAlert: async (userId) => { creates.push(userId); return activeAlert(); },
+    }),
+    monitorQueue: { start: async () => undefined, enqueue: async () => "job", stop: async () => undefined },
+    now: fixedNow,
+  });
+  const response = await app.inject({
+    method: "POST",
+    url: "/v2/alerts",
+    payload: {
+      userId: "user-b",
+      intent: validIntent,
+      targetAmountCnyMinor: 100_000,
+      checkIntervalMinutes: 360,
+      ntfyTopic: "current-user-topic",
+    },
+    headers: { cookie: "test-user=user-a", origin: "http://localhost:3000" },
+  });
+  assert.equal(response.statusCode, 201);
+  assert.deepEqual(creates, ["user-a"]);
   await app.close();
 });
 
@@ -812,6 +1020,8 @@ test("queues an owned active alert for immediate verification", async () => {
     connectors: [],
     auditStore: null,
     v2Store: v2StoreStub({ getOwnedAlert: async (id, owner) => id === alert.id && owner === "owner-token-value" ? alert : null }),
+    authService: authServiceStub(),
+    accountStore: accountStoreStub({ getAlert: async (userId, id) => userId === "user-a" && id === alert.id ? alert : null }),
     monitorQueue: queue,
     now: fixedNow,
   });
@@ -820,28 +1030,145 @@ test("queues an owned active alert for immediate verification", async () => {
   const accepted = await app.inject({
     method: "POST",
     url: `/v2/alerts/${alert.id}/test`,
-    headers: { "x-flight-lens-owner": "owner-token-value" },
+    headers: { cookie: "test-user=user-a", origin: "http://localhost:3000" },
   });
   assert.equal(accepted.statusCode, 202);
   assert.deepEqual(queued, [alert.id]);
   await app.close();
 });
 
-test("clears all alerts owned by an anonymous token", async () => {
+test("clears alerts only for the authenticated user", async () => {
   const app = await buildApp({
     config,
     connectors: [],
     auditStore: null,
     v2Store: v2StoreStub({ clearAlerts: async (owner) => owner === "owner-token-value" ? 3 : 0 }),
+    authService: authServiceStub(),
+    accountStore: accountStoreStub({ clearAlerts: async (userId) => userId === "user-a" ? 3 : 0 }),
     now: fixedNow,
   });
   const response = await app.inject({
     method: "DELETE",
     url: "/v2/alerts",
-    headers: { "x-flight-lens-owner": "owner-token-value" },
+    headers: { cookie: "test-user=user-a", origin: "http://localhost:3000" },
   });
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.json(), { deleted: 3 });
+  await app.close();
+});
+
+test("enforces session identity, CSRF origin, and two-user object isolation", async () => {
+  const alert = activeAlert();
+  const preferenceReads: string[] = [];
+  const preferenceWrites: string[] = [];
+  const queue: MonitorQueue = {
+    start: async () => undefined,
+    enqueue: async () => "unexpected",
+    stop: async () => undefined,
+  };
+  const app = await buildApp({
+    config,
+    connectors: [],
+    auditStore: null,
+    v2Store: v2StoreStub(),
+    authService: authServiceStub(),
+    accountStore: accountStoreStub({
+      getAlert: async (userId, id) => userId === "user-a" && id === alert.id ? alert : null,
+      getPreferences: async (userId) => { preferenceReads.push(userId); return null; },
+      savePreferences: async (userId) => { preferenceWrites.push(userId); },
+    }),
+    monitorQueue: queue,
+    now: fixedNow,
+  });
+
+  const anonymous = await app.inject({ method: "GET", url: "/v2/preferences" });
+  assert.equal(anonymous.statusCode, 401);
+
+  const forged = await app.inject({
+    method: "POST",
+    url: "/v2/preferences",
+    headers: { cookie: "test-user=user-a", origin: "http://localhost:3000" },
+    payload: { userId: "user-b", preferredAirlines: [], preferredAirports: [], cabin: "economy", minimumCheckedBaggageKg: 0, redEyeWindow: { start: "00:00", end: "06:00" }, budgetAmountCnyMinor: null, ntfyTopic: null },
+  });
+  assert.equal(forged.statusCode, 204);
+  assert.deepEqual(preferenceWrites, ["user-a"]);
+
+  const hostileOrigin = await app.inject({
+    method: "DELETE",
+    url: "/v2/preferences",
+    headers: { cookie: "test-user=user-a", origin: "https://attacker.example" },
+  });
+  assert.equal(hostileOrigin.statusCode, 403);
+  assert.equal(hostileOrigin.json().error.code, "UNTRUSTED_ORIGIN");
+
+  const otherUserObject = await app.inject({
+    method: "POST",
+    url: `/v2/alerts/${alert.id}/test`,
+    headers: { cookie: "test-user=user-b", origin: "http://localhost:3000" },
+  });
+  assert.equal(otherUserObject.statusCode, 404);
+
+  const accountRead = await app.inject({
+    method: "GET",
+    url: "/v2/preferences",
+    headers: { cookie: "test-user=user-b" },
+  });
+  assert.equal(accountRead.statusCode, 200);
+  assert.deepEqual(preferenceReads, ["user-b"]);
+  await app.close();
+});
+
+test("scopes saved itinerary reads and deletion to the authenticated user", async () => {
+  const itineraryId = "00000000-0000-4000-8000-000000000060";
+  const reads: string[] = [];
+  const deletions: Array<{ userId: string; id: string }> = [];
+  const app = await buildApp({
+    config,
+    connectors: [],
+    auditStore: null,
+    v2Store: v2StoreStub(),
+    authService: authServiceStub(),
+    accountStore: accountStoreStub({
+      listItineraries: async (userId) => {
+        reads.push(userId);
+        return [];
+      },
+      deleteItinerary: async (userId, id) => {
+        deletions.push({ userId, id });
+        return userId === "user-a" && id === itineraryId;
+      },
+    }),
+    now: fixedNow,
+  });
+
+  const anonymous = await app.inject({ method: "GET", url: "/v3/me/itineraries" });
+  assert.equal(anonymous.statusCode, 401);
+
+  const otherUser = await app.inject({
+    method: "DELETE",
+    url: `/v3/me/itineraries/${itineraryId}`,
+    headers: { cookie: "test-user=user-b", origin: "http://localhost:3000" },
+  });
+  assert.equal(otherUser.statusCode, 404);
+
+  const owner = await app.inject({
+    method: "DELETE",
+    url: `/v3/me/itineraries/${itineraryId}`,
+    headers: { cookie: "test-user=user-a", origin: "http://localhost:3000" },
+  });
+  assert.equal(owner.statusCode, 204);
+
+  const listed = await app.inject({
+    method: "GET",
+    url: "/v3/me/itineraries",
+    headers: { cookie: "test-user=user-b" },
+  });
+  assert.equal(listed.statusCode, 200);
+  assert.deepEqual(reads, ["user-b"]);
+  assert.deepEqual(deletions, [
+    { userId: "user-b", id: itineraryId },
+    { userId: "user-a", id: itineraryId },
+  ]);
   await app.close();
 });
 
@@ -876,6 +1203,76 @@ test("persists monitored history before a notification failure and records the r
   await handlerRef.current(alert.id);
   assert.equal(persisted.length, 1);
   assert.deepEqual(finished, [{ notificationSent: false, errorCode: "NOTIFICATION_FAILED", amountCnyMinor: 200_000 }]);
+  await app.close();
+});
+
+test("does not deliver an account alert after all notification channels are unsubscribed", async () => {
+  const alert = activeAlert();
+  const handlerRef: { current?: (alertId: string) => Promise<void> } = {};
+  const queue: MonitorQueue = {
+    start: async (value) => { handlerRef.current = value; },
+    enqueue: async () => "job-1",
+    stop: async () => undefined,
+  };
+  let deliveries = 0;
+  const finished: Array<{ notificationSent: boolean; errorCode: string | null }> = [];
+  const app = await buildApp({
+    config,
+    connectors: [{
+      ...readinessConnector("monitor-unsubscribed", "purchase_handoff", "monitor-family"),
+      search: async () => ({ offers: [comparableOffer()] }),
+    }],
+    auditStore: null,
+    v2Store: v2StoreStub({
+      getAlert: async () => alert,
+      claimAlertRun: async () => "run-unsubscribed",
+      finishAlertRun: async (input) => { finished.push({ notificationSent: input.notificationSent, errorCode: input.errorCode }); },
+    }),
+    accountStore: accountStoreStub({
+      getAlertDelivery: async () => ({ userId: "user-a", email: "user-a@example.test", emailEnabled: false, pushEnabled: false, ntfyTopic: null }),
+    }),
+    monitorQueue: queue,
+    notifier: { send: async () => { deliveries += 1; } },
+    authEmailSender: { send: async () => { deliveries += 1; } },
+    now: fixedNow,
+  });
+  assert.ok(handlerRef.current);
+  await handlerRef.current(alert.id);
+  assert.equal(deliveries, 0);
+  assert.deepEqual(finished, [{ notificationSent: false, errorCode: null }]);
+  await app.close();
+});
+
+test("delivers an account alert only to its current subscribed topic and verified email", async () => {
+  const alert = activeAlert();
+  const handlerRef: { current?: (alertId: string) => Promise<void> } = {};
+  const queue: MonitorQueue = {
+    start: async (value) => { handlerRef.current = value; },
+    enqueue: async () => "job-1",
+    stop: async () => undefined,
+  };
+  const topics: string[] = [];
+  const recipients: string[] = [];
+  const app = await buildApp({
+    config,
+    connectors: [{
+      ...readinessConnector("monitor-subscribed", "purchase_handoff", "monitor-family"),
+      search: async () => ({ offers: [comparableOffer()] }),
+    }],
+    auditStore: null,
+    v2Store: v2StoreStub({ getAlert: async () => alert, claimAlertRun: async () => "run-subscribed" }),
+    accountStore: accountStoreStub({
+      getAlertDelivery: async () => ({ userId: "user-a", email: "user-a@example.test", emailEnabled: true, pushEnabled: true, ntfyTopic: "current-topic" }),
+    }),
+    monitorQueue: queue,
+    notifier: { send: async (input) => { topics.push(input.topic); } },
+    authEmailSender: { send: async (input) => { recipients.push(input.to); } },
+    now: fixedNow,
+  });
+  assert.ok(handlerRef.current);
+  await handlerRef.current(alert.id);
+  assert.deepEqual(topics, ["current-topic"]);
+  assert.deepEqual(recipients, ["user-a@example.test"]);
   await app.close();
 });
 

@@ -2,6 +2,8 @@
 
 V2 免费层使用 Netlify Web + Render API + Neon Postgres。Development、Staging 和 Production 应使用独立数据库分支和独立密钥。
 
+网页不展示内部版本号；本文件中的版本名称仅用于开发和发布管理。
+
 ## 1. Render API
 
 Render 从 monorepo 根目录构建，`render.yaml` 定义免费 Web Service：
@@ -67,3 +69,11 @@ Secret: FLIGHT_LENS_MONITOR_WAKE_SECRET=<与 Render 相同>
 7. 经产品负责人确认后再合并 `main` 和发布 Production。
 
 免费 Render 实例可能休眠，GitHub Actions 唤醒和提醒到达时间不提供实时 SLA。任何平台出现不可控收费或自动升级时，先暂停对应环境。
+
+## 6. 价格历史与判断边界
+
+- 外部市场历史来自 SerpApi 同一次 Google Flights 查询响应中的 `price_insights`，不会为了画历史曲线再发起一次供应商请求；
+- 只有航线、出发/返程日期、行程类型、舱位、成人数、币种和价格口径全部一致时才用于五档判断；
+- 外部历史是来源展示价，不等于已核验支付总价；本站观测的含税全价、来源展示价和分开购买价保持独立；
+- SerpApi 没有返回可靠历史时，页面明确显示无外部历史，不伪造或用一分钟内重复查询填充 180 天曲线；
+- 免费额度和项目硬上限继续由 Connector 在每次供应商请求前校验。环境变量只保存密钥，不把真实值写入仓库。

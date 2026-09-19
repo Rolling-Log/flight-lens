@@ -37,6 +37,19 @@ test("requires an explicit opt-in before an injected OpenAI key can be used", ()
   assert.equal(enabled.openaiIntentParserEnabled, true);
 });
 
+test("accepts a branded authentication sender while rejecting malformed addresses", () => {
+  assert.equal(
+    loadConfig({
+      NODE_ENV: "production",
+      AUTH_EMAIL_FROM: "Flight Lens <noreply@mail.flightlens.cn>",
+    }).authEmailFrom,
+    "Flight Lens <noreply@mail.flightlens.cn>",
+  );
+  assert.throws(() =>
+    loadConfig({ NODE_ENV: "production", AUTH_EMAIL_FROM: "Flight Lens <invalid>" }),
+  );
+});
+
 test("prefers the platform PORT while retaining API_PORT for local development", () => {
   const local = loadConfig({ NODE_ENV: "test", API_PORT: "4100" });
   assert.equal(local.host, "::");

@@ -6,9 +6,31 @@ import type {
   SearchIntent,
   SearchResponse,
 } from "@flight-lens/contracts";
-import { searchMarket } from "@flight-lens/contracts";
+import { resolveLocation, searchMarket } from "@flight-lens/contracts";
 import Image from "next/image";
 import {
+  ArrowLeft,
+  ArrowRight,
+  CalendarDays,
+  Check,
+  ChevronDown,
+  ExternalLink,
+  Heart,
+  Info,
+  Luggage,
+  Plane,
+  Radar,
+  Search,
+  ShieldCheck,
+  ShoppingBasket,
+  SlidersHorizontal,
+  Star,
+  Trash2,
+  X,
+} from "lucide-react";
+import { createPortal } from "react-dom";
+import {
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   useEffect,
   useMemo,
@@ -18,13 +40,19 @@ import {
 import { resolveApiBase } from "../src/api-base";
 import { searchWithEdgeCompanion } from "../src/edge-companion";
 import { LocationCombobox } from "../src/location-combobox";
+import { resultSourceStatus } from "../src/result-source-status";
+import { PriceTools } from "../src/v2-panel";
+import { AccountPanel } from "../src/account-panel";
+import { accountFetch } from "../src/account-api";
+import { LiquidGlassSurface } from "../src/liquid-glass-surface";
 import {
-  isSingleSourceLiveResult,
-  resultSourceStatus,
-} from "../src/result-source-status";
-import { V2Panel } from "../src/v2-panel";
+  emptyLiquidOrigin,
+  liquidOriginFromElement,
+  useLiquidOverlayMotion,
+} from "../src/liquid-overlay-motion";
 
 type Mode = "agent" | "form";
+type WorkspaceView = "search" | "results" | "detail";
 type SortKey =
   | "recommended"
   | "price"
@@ -33,9 +61,56 @@ type SortKey =
   | "baggage"
   | "flexibility";
 type BusyState = "idle" | "parsing" | "searching";
+type SearchProgressState = { percent: number; label: string };
 type StopsFilter = "all" | "direct" | "one_or_less";
 type ConnectorMeta = { id: string; name: string };
 type SearchProgressSource = ConnectorMeta & { access: "本机 Edge" | "云端 API" };
+type AirportReference = {
+  kind?: "airport" | "city";
+  code: string;
+  name?: string;
+};
+
+const shortlistStorageKey = "flight-lens-shortlist-v1";
+
+function airportPresentation(airport?: AirportReference | null) {
+  if (!airport) return { name: "机场待确认", code: "---" };
+
+  const resolved = airport.kind
+    ? resolveLocation(airport.kind, airport.code)
+    : resolveLocation("airport", airport.code) ?? resolveLocation("city", airport.code);
+  const resolvedName = resolved
+    ? resolved.kind === "city"
+      ? `${resolved.cityNameZh}（所有机场）`
+      : `${resolved.cityNameZh} · ${resolved.airportNameZh}`
+    : undefined;
+  const suppliedName = airport.name?.trim();
+  const name = suppliedName && /[\u3400-\u9fff]/u.test(suppliedName)
+    ? suppliedName
+    : resolvedName ?? suppliedName ?? "机场待确认";
+
+  return { name, code: airport.code };
+}
+
+function AirportLabel({ airport, className = "" }: { airport?: AirportReference | null; className?: string }) {
+  const display = airportPresentation(airport);
+  return (
+    <span className={`airport-label ${className}`.trim()} title={`${display.name} ${display.code}`}>
+      <b>{display.name}</b>
+      <small>{display.code}</small>
+    </span>
+  );
+}
+
+function AirportRoute({ origin, destination, className = "" }: { origin?: AirportReference | null; destination?: AirportReference | null; className?: string }) {
+  return (
+    <span className={`airport-route ${className}`.trim()}>
+      <AirportLabel airport={origin} />
+      <ArrowRight aria-hidden="true" />
+      <AirportLabel airport={destination} />
+    </span>
+  );
+}
 
 const edgeCompanionSources: SearchProgressSource[] = [
   { id: "ctrip-edge-companion", name: "携程", access: "本机 Edge" },
@@ -50,6 +125,78 @@ const cabinLabels: Record<SearchIntent["cabin"], string> = {
   business: "商务舱",
   first: "头等舱",
 };
+
+const navGlassConfig = {
+  borderRadius: 26,
+  borderWidth: 0.045,
+  brightness: 92,
+  opacity: 0.68,
+  blur: 7,
+  displace: 0.2,
+  backgroundOpacity: 0.08,
+  saturation: 1.2,
+  distortionScale: -28,
+  redOffset: 0,
+  greenOffset: 2,
+  blueOffset: 5,
+  mixBlendMode: "screen",
+} as const;
+
+const actionGlassConfig = {
+  borderRadius: 28,
+  borderWidth: 0.05,
+  brightness: 92,
+  opacity: 0.72,
+  blur: 7,
+  displace: 0.25,
+  backgroundOpacity: 0.06,
+  saturation: 1.28,
+  distortionScale: -34,
+  redOffset: 0,
+  greenOffset: 3,
+  blueOffset: 6,
+  mixBlendMode: "screen",
+} as const;
+
+const summaryGlassConfig = {
+  borderRadius: 18,
+  borderWidth: 0.04,
+  brightness: 94,
+  opacity: 0.66,
+  blur: 8,
+  displace: 0.2,
+  backgroundOpacity: 0.08,
+  saturation: 1.18,
+  distortionScale: -24,
+  redOffset: 0,
+  greenOffset: 2,
+  blueOffset: 4,
+  mixBlendMode: "screen",
+} as const;
+
+const toolbarGlassConfig = {
+  ...summaryGlassConfig,
+  borderRadius: 12,
+  backgroundOpacity: 0.18,
+  saturation: 1.35,
+  distortionScale: -20,
+} as const;
+
+const statusGlassConfig = {
+  borderRadius: 31,
+  borderWidth: 0.05,
+  brightness: 92,
+  opacity: 0.7,
+  blur: 7,
+  displace: 0.25,
+  backgroundOpacity: 0.04,
+  saturation: 1.24,
+  distortionScale: -30,
+  mixBlendMode: "screen",
+  redOffset: 0,
+  greenOffset: 2,
+  blueOffset: 5,
+} as const;
 
 function apiBase(): string {
   return resolveApiBase(
@@ -354,6 +501,7 @@ function offerFingerprint(offer: Offer): string {
 }
 
 export default function Home() {
+  const [activeView, setActiveView] = useState<WorkspaceView>("search");
   const [mode, setMode] = useState<Mode>("agent");
   const [query, setQuery] = useState(
     () => `${dateFromToday(30)} 上海去东京，${dateFromToday(35)} 返回，1 位成人，经济舱，预算 3000 元，不坐红眼航班。`,
@@ -363,6 +511,7 @@ export default function Home() {
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [sort, setSort] = useState<SortKey>("recommended");
   const [priceDirection, setPriceDirection] = useState<"asc" | "desc">("asc");
+  const [showPriceSortMenu, setShowPriceSortMenu] = useState(false);
   const [airlineFilter, setAirlineFilter] = useState("all");
   const [aircraftFilter, setAircraftFilter] = useState("all");
   const [departureAirportFilter, setDepartureAirportFilter] = useState("all");
@@ -370,12 +519,51 @@ export default function Home() {
   const [stopsFilter, setStopsFilter] = useState<StopsFilter>("all");
   const [connectorMeta, setConnectorMeta] = useState<ConnectorMeta[]>([]);
   const [busy, setBusy] = useState<BusyState>("idle");
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [searchProgress, setSearchProgress] = useState<SearchProgressState>({ percent: 0, label: "准备检索" });
+  const [selectedOffer, setSelectedOffer] = useState<Offer | null>(null);
   const [showCoverage, setShowCoverage] = useState(false);
+  const [coverageOrigin, setCoverageOrigin] = useState(emptyLiquidOrigin);
+  const [navigationSplit, setNavigationSplit] = useState(false);
+  const [navigationMaterialUnited, setNavigationMaterialUnited] = useState(true);
+  const [shortlist, setShortlist] = useState<Offer[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const stored = JSON.parse(localStorage.getItem(shortlistStorageKey) ?? "[]") as unknown;
+      return Array.isArray(stored) ? stored as Offer[] : [];
+    } catch {
+      localStorage.removeItem(shortlistStorageKey);
+      return [];
+    }
+  });
+  const [showShortlist, setShowShortlist] = useState(false);
+  const [shortlistOrigin, setShortlistOrigin] = useState(emptyLiquidOrigin);
   const [error, setError] = useState("");
   const [locationValidity, setLocationValidity] = useState({ origin: true, destination: true });
   const coverageDialogRef = useRef<HTMLElement>(null);
+  const coverageBackdropRef = useRef<HTMLDivElement>(null);
+  const coverageMorphRef = useRef<HTMLSpanElement>(null);
   const coverageTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const shortlistDialogRef = useRef<HTMLElement>(null);
+  const shortlistBackdropRef = useRef<HTMLDivElement>(null);
+  const shortlistMorphRef = useRef<HTMLSpanElement>(null);
+  const shortlistTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const priceSortMenuRef = useRef<HTMLDivElement>(null);
+
+  useLiquidOverlayMotion({
+    open: showCoverage,
+    origin: coverageOrigin,
+    backdropRef: coverageBackdropRef,
+    panelRef: coverageDialogRef,
+    morphRef: coverageMorphRef,
+  });
+
+  useLiquidOverlayMotion({
+    open: showShortlist,
+    origin: shortlistOrigin,
+    backdropRef: shortlistBackdropRef,
+    panelRef: shortlistDialogRef,
+    morphRef: shortlistMorphRef,
+  });
 
   useEffect(() => {
     const controller = new AbortController();
@@ -387,9 +575,51 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (!showPriceSortMenu) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!priceSortMenuRef.current?.contains(event.target as Node)) {
+        setShowPriceSortMenu(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowPriceSortMenu(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showPriceSortMenu]);
+
+  useEffect(() => {
+    if (activeView !== "results") return;
+
+    let frame = 0;
+    const handleScroll = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        const currentY = window.scrollY;
+        if (currentY <= 24) setNavigationSplit(false);
+        else if (currentY > 150) setNavigationSplit(true);
+      });
+    };
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [activeView]);
+
+  useEffect(() => {
     if (!showCoverage) return;
     const dialog = coverageDialogRef.current;
     if (!dialog) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     const focusableSelector =
       'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
     const focusable = Array.from(
@@ -417,6 +647,7 @@ export default function Home() {
 
     document.addEventListener("keydown", handleKeyDown);
     return () => {
+      document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", handleKeyDown);
       coverageTriggerRef.current?.focus();
     };
@@ -424,7 +655,63 @@ export default function Home() {
 
   function openCoverage(trigger: HTMLButtonElement) {
     coverageTriggerRef.current = trigger;
+    setCoverageOrigin(liquidOriginFromElement(trigger));
+    setShowShortlist(false);
     setShowCoverage(true);
+  }
+
+  useEffect(() => {
+    if (!showShortlist) return;
+    const dialog = shortlistDialogRef.current;
+    if (!dialog) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const selector = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(selector));
+    focusable[0]?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setShowShortlist(false);
+        return;
+      }
+      if (event.key !== "Tab" || !focusable.length) return;
+      const first = focusable[0]!;
+      const last = focusable.at(-1)!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+      shortlistTriggerRef.current?.focus();
+    };
+  }, [showShortlist]);
+
+  function updateShortlist(next: Offer[]) {
+    setShortlist(next);
+    localStorage.setItem(shortlistStorageKey, JSON.stringify(next));
+  }
+
+  function toggleShortlist(offer: Offer) {
+    const exists = shortlist.some((candidate) => candidate.id === offer.id);
+    updateShortlist(exists
+      ? shortlist.filter((candidate) => candidate.id !== offer.id)
+      : [...shortlist, offer]);
+  }
+
+  function openShortlist(trigger: HTMLButtonElement) {
+    shortlistTriggerRef.current = trigger;
+    setShortlistOrigin(liquidOriginFromElement(trigger));
+    setShowCoverage(false);
+    setShowShortlist(true);
   }
 
   function handleModeTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
@@ -556,6 +843,7 @@ export default function Home() {
     setArrivalAirportFilter("all");
     setStopsFilter("all");
     setError("");
+    setActiveView("search");
   }
 
   async function parseQuery(): Promise<SearchIntent | null> {
@@ -609,24 +897,55 @@ export default function Home() {
       searchIntent = intent;
     }
     if (!searchIntent) return;
+    const searchStartedAt = performance.now();
     setBusy("searching");
+    setSearchProgress({ percent: 8, label: "正在规划适用来源" });
     setError("");
     setResult(null);
     try {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      setSearchProgress({ percent: 24, label: "正在读取本机来源" });
       const companion = await searchWithEdgeCompanion(searchIntent);
+      setSearchProgress({ percent: 56, label: "本机来源已返回" });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      setSearchProgress({ percent: 68, label: "正在核验云端来源" });
       const response = await apiRequest<SearchResponse>(
         "/v1/searches",
         companion ? { intent: searchIntent, companion } : searchIntent,
       );
+      setSearchProgress({ percent: 94, label: "正在整理可比报价" });
       setResult(response);
-      window.setTimeout(() => {
-        document.getElementById("results")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }, 80);
+      setSelectedOffer(null);
+      setSearchProgress({ percent: 100, label: "检索完成" });
+      const remainingDisplayTime = Math.max(0, 520 - (performance.now() - searchStartedAt));
+      if (remainingDisplayTime > 0) {
+        await new Promise((resolve) => window.setTimeout(resolve, remainingDisplayTime));
+      }
+      setActiveView("results");
+      setNavigationSplit(false);
+      window.scrollTo({ top: 0 });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "搜索失败，请稍后重试。");
     } finally {
       setBusy("idle");
     }
+  }
+
+  async function saveOffer(offer: Offer) {
+    const response = await accountFetch("/v3/me/itineraries", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: `${offer.segments[0]?.marketingCarrier ?? "航班"} ${offer.segments[0]?.flightNumber ?? "方案"} · ${offer.seller.name}`,
+        offer,
+      }),
+    });
+    if (!response.ok) {
+      setError(response.status === 401 ? "登录后可跨设备收藏方案。" : "收藏失败，请稍后重试。");
+      return;
+    }
+    window.dispatchEvent(new Event("flight-lens-personal-data"));
+    setError("方案已收藏到账号。");
   }
 
   const lowest = result?.offers.find((offer) => offer.id === result.lowestComparableOfferId) ?? null;
@@ -644,37 +963,85 @@ export default function Home() {
   const sourceStatus = result
     ? resultSourceStatus(result.offers, result.connectorReports)
     : null;
-  const singleSourceLiveResult = result
-    ? isSingleSourceLiveResult(result.offers)
-    : false;
   const progressSources = plannedProgressSources(intent, connectorMeta);
+  const activeNavigation = activeView === "search" ? "search" : "results";
+  const navigationIsSplit = activeView === "results" && navigationSplit;
+
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => setNavigationMaterialUnited(!navigationIsSplit),
+      navigationIsSplit ? 0 : 520,
+    );
+    return () => window.clearTimeout(timer);
+  }, [navigationIsSplit]);
+
+  function openQuoteDetail(offer: Offer) {
+    setSelectedOffer(offer);
+    setActiveView("detail");
+    window.scrollTo({ top: 0 });
+  }
 
   return (
-    <main>
-      <header className="topbar">
-        <a className="brand" href="#top" aria-label="航探首页">
-          <span className="brand-mark">航</span>
-          <span>航探 <small>Flight Lens</small></span>
-        </a>
-        <nav aria-label="主导航">
-          <a className="active" href="#search">找机票</a>
-          <a href="#coverage">数据覆盖</a>
-          <a href="#principles">如何推荐</a>
-        </nav>
-        <button className="ghost-button" onClick={(event) => openCoverage(event.currentTarget)}>
-          覆盖透明度 <span className="live-dot" /> V1 接入中
-        </button>
-      </header>
+    <main className={navigationIsSplit ? "navigation-split" : undefined}>
+      <div
+        className={`adaptive-navigation ${navigationIsSplit ? "is-split" : "is-united"} ${navigationMaterialUnited && !navigationIsSplit ? "material-united" : ""}`}
+        data-split={navigationIsSplit}
+      >
+        <LiquidGlassSurface
+          label="navigation-united"
+          className="united-nav-root"
+          panelClassName="united-nav-panel"
+          sceneClassName="topbar-scene"
+          config={navGlassConfig}
+          changeKey={`${activeView}-${Boolean(result)}`}
+        >
+          <span aria-hidden="true" />
+        </LiquidGlassSurface>
+        <LiquidGlassSurface
+          label="navigation-brand"
+          className="brand-nav-root"
+          panelClassName="brand-nav-panel"
+          sceneClassName="topbar-scene"
+          config={navGlassConfig}
+          changeKey={`${activeView}-${navigationIsSplit}`}
+        >
+          <button className="brand" onClick={() => { setNavigationSplit(false); setActiveView("search"); }} aria-label="航探首页">
+            <span className="brand-mark"><Image src="/flight-lens-logo.svg" alt="" width={30} height={30} priority /></span>
+            <span>航探 <small>Flight Lens</small></span>
+          </button>
+        </LiquidGlassSurface>
+        <LiquidGlassSurface
+          label="navigation-controls"
+          className="controls-nav-root"
+          panelClassName="controls-nav-panel"
+          sceneClassName="topbar-scene"
+          config={navGlassConfig}
+          changeKey={`${activeView}-${Boolean(result)}-${navigationIsSplit}`}
+        >
+          <header className="topbar-controls">
+            <nav aria-label="主导航">
+              <div className="nav-switcher" data-active={activeNavigation}>
+                <span className="nav-selection" aria-hidden="true" />
+                <button className={activeNavigation === "search" ? "active" : ""} onClick={() => { setNavigationSplit(false); setActiveView("search"); }}><Search size={14} />搜索</button>
+                <button className={activeNavigation === "results" ? "active" : ""} onClick={() => { if (result) { setNavigationSplit(false); setActiveView("results"); } }} disabled={!result}><SlidersHorizontal size={14} />结果</button>
+              </div>
+              <button className="source-nav-button" onClick={(event) => openCoverage(event.currentTarget)}><Radar size={14} />来源</button>
+            </nav>
+            <AccountPanel />
+          </header>
+        </LiquidGlassSurface>
+      </div>
 
-      <section className="hero" id="top">
-        <div className="eyebrow"><span /> 中国航线优先的透明比价工具</div>
-        <h1>看见本次最低价，<br /><em>也看懂它为什么便宜。</em></h1>
+      {activeView === "search" && <section className="hero" id="top">
+        <div className="eyebrow"><Plane size={14} /> 行程工作台</div>
+        <h1>今天要飞去哪里？</h1>
         <p className="hero-copy">
-          核对已授权的航班数据来源，统一比较来源展示的含税报价、行李和必要服务，并明确披露成功、失败与超时来源。
+          说出完整需求，或逐项设置航线、日期与偏好。检索前你始终可以检查每一项条件。
         </p>
 
         <div className="search-shell" id="search">
-          <div className="mode-tabs" role="tablist" aria-label="搜索方式">
+          <div className="mode-tabs" data-mode={mode} role="tablist" aria-label="搜索方式">
+            <span className="mode-selection" aria-hidden="true" />
             <button id="search-tab-agent" className={mode === "agent" ? "selected" : ""} onClick={() => setMode("agent")} onKeyDown={handleModeTabKeyDown} role="tab" aria-selected={mode === "agent"} aria-controls="search-panel-agent" tabIndex={mode === "agent" ? 0 : -1}>
               <span className="spark">✦</span> 对话找票
             </button>
@@ -702,161 +1069,157 @@ export default function Home() {
                 <div className="intent-review agent-review" role="status">
                   <b>请确认已解析条件</b>
                   <span>
-                    {intent.origin.code} → {intent.destination.code}
+                    <AirportRoute origin={intent.origin} destination={intent.destination} className="intent-airport-route" />
                     {" · "}
                     {intent.departureDate}
                     {intent.returnDate ? ` 至 ${intent.returnDate}` : ""}
                     {" · "}
                     {intent.adults} 位成人 · {cabinLabels[intent.cabin]}
                   </span>
-                  <small>
-                    {parseResult.parser.kind === "local_deterministic_zh"
-                      ? "本地规则解析 · 未调用外部 AI"
-                      : `AI 结构化解析 · ${parseResult.parser.model}`}
-                  </small>
+                  {parseResult.parser.kind !== "local_deterministic_zh" && (
+                    <small>AI 结构化解析 · {parseResult.parser.model}</small>
+                  )}
                   <button type="button" onClick={() => setMode("form")}>打开完整表单修改</button>
                 </div>
               )}
             </div>
           ) : (
             <div className="form-panel" id="search-panel-form" role="tabpanel" aria-labelledby="search-tab-form">
-              <div className="trip-switch" role="group" aria-label="行程类型">
-                {([
-                  ["one_way", "单程"],
-                  ["round_trip", "往返"],
-                ] as const).map(([value, label]) => (
-                  <button
-                    key={value}
-                    className={intent.tripType === value ? "selected" : ""}
-                    onClick={() =>
-                      updateIntent({
-                        tripType: value,
-                        returnDate:
-                          value === "round_trip"
-                            ? intent.returnDate ?? dateFromToday(35)
-                            : undefined,
-                      })
-                    }
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <div className="form-grid">
-                <LocationCombobox
-                  key={`origin-${intent.origin.kind}-${intent.origin.code}`}
-                  label="出发地"
-                  value={intent.origin}
-                  onValidityChange={(valid) => setLocationValidity((current) => ({ ...current, origin: valid }))}
-                  onChange={(location) => updateIntent({ origin: { kind: location.kind, code: location.code, name: location.kind === "city" ? location.cityNameZh : location.airportNameZh } })}
-                />
-                <button
-                  className="swap"
-                  aria-label="交换出发地和目的地"
-                  onClick={() => updateIntent({ origin: intent.destination, destination: intent.origin })}
-                >
-                  ⇄
-                </button>
-                <LocationCombobox
-                  key={`destination-${intent.destination.kind}-${intent.destination.code}`}
-                  label="目的地"
-                  value={intent.destination}
-                  onValidityChange={(valid) => setLocationValidity((current) => ({ ...current, destination: valid }))}
-                  onChange={(location) => updateIntent({ destination: { kind: location.kind, code: location.code, name: location.kind === "city" ? location.cityNameZh : location.airportNameZh } })}
-                />
-                <label>出发日期<input type="date" value={intent.departureDate} onChange={(event) => updateIntent({ departureDate: event.target.value })} /></label>
-                <label>返程日期<input type="date" value={intent.returnDate ?? ""} onChange={(event) => updateIntent({ returnDate: event.target.value })} disabled={intent.tripType === "one_way"} /></label>
-                <label>成人数
-                  <input
-                    type="number"
-                    min={1}
-                    max={9}
-                    value={intent.adults}
-                    onChange={(event) =>
-                      updateIntent({ adults: Math.min(9, Math.max(1, Number(event.target.value) || 1)) })
-                    }
-                  />
-                </label>
-                <label>舱位
-                  <select
-                    value={intent.cabin}
-                    onChange={(event) =>
-                      updateIntent({ cabin: event.target.value as SearchIntent["cabin"] })
-                    }
-                  >
-                    {Object.entries(cabinLabels).map(([value, label]) => (
-                      <option key={value} value={value}>{label}</option>
+              <section className="filter-section route-filter-section" aria-labelledby="route-filter-title">
+                <div className="filter-section-heading">
+                  <h2 id="route-filter-title"><Plane size={16} />航线</h2>
+                  <div className="trip-switch" role="group" aria-label="行程类型">
+                    {([
+                      ["one_way", "单程"],
+                      ["round_trip", "往返"],
+                    ] as const).map(([value, label]) => (
+                      <button
+                        key={value}
+                        className={intent.tripType === value ? "selected" : ""}
+                        onClick={() =>
+                          updateIntent({
+                            tripType: value,
+                            returnDate:
+                              value === "round_trip"
+                                ? intent.returnDate ?? dateFromToday(35)
+                                : undefined,
+                          })
+                        }
+                      >
+                        {label}
+                      </button>
                     ))}
-                  </select>
-                </label>
-                <label>总预算（人民币）
-                  <input
-                    type="number"
-                    min={1}
-                    step={100}
-                    value={intent.budget ? intent.budget.amountMinor / 100 : ""}
-                    placeholder="不限"
-                    onChange={(event) =>
-                      updateIntent({
-                        budget: event.target.value
-                          ? {
-                              amountMinor: Math.round(Number(event.target.value) * 100),
-                              currency: "CNY",
-                            }
-                          : undefined,
-                      })
-                    }
+                  </div>
+                </div>
+                <div className="route-grid">
+                  <LocationCombobox
+                    key={`origin-${intent.origin.kind}-${intent.origin.code}`}
+                    label="出发地"
+                    value={intent.origin}
+                    onValidityChange={(valid) => setLocationValidity((current) => ({ ...current, origin: valid }))}
+                    onChange={(location) => updateIntent({ origin: { kind: location.kind, code: location.code, name: location.kind === "city" ? location.cityNameZh : location.airportNameZh } })}
                   />
-                </label>
-                <label>最早起飞
-                  <input
-                    type="time"
-                    value={intent.departureTime?.earliest ?? ""}
-                    onChange={(event) => updateDepartureTime("earliest", event.target.value)}
-                  />
-                </label>
-                <label>最晚起飞
-                  <input
-                    type="time"
-                    value={intent.departureTime?.latest ?? ""}
-                    onChange={(event) => updateDepartureTime("latest", event.target.value)}
-                  />
-                </label>
-                <label>最多中转
-                  <select
-                    value={intent.directOnly ? 0 : intent.maxStops}
-                    disabled={intent.directOnly}
-                    onChange={(event) => updateIntent({ maxStops: Number(event.target.value) })}
+                  <button
+                    className="swap"
+                    aria-label="交换出发地和目的地"
+                    onClick={() => updateIntent({ origin: intent.destination, destination: intent.origin })}
                   >
-                    <option value={0}>直飞</option>
-                    <option value={1}>最多 1 次</option>
-                    <option value={2}>最多 2 次</option>
-                  </select>
-                </label>
-              </div>
-              <div className="filter-chips">
-                <label><input type="checkbox" checked={intent.directOnly} onChange={(event) => updateIntent({ directOnly: event.target.checked, maxStops: event.target.checked ? 0 : 1 })} />仅直飞</label>
-                <label className="filter-control">托运行李
-                  <select
-                    aria-label="最低托运行李额度"
-                    value={intent.minimumCheckedBaggageKg}
-                    onChange={(event) => updateIntent({ minimumCheckedBaggageKg: Number(event.target.value) })}
-                  >
-                    {[0, 10, 20, 23, 30, 46].map((kg) => <option key={kg} value={kg}>{kg === 0 ? "不限" : `至少 ${kg}kg`}</option>)}
-                  </select>
-                </label>
-                <label><input type="checkbox" checked={intent.avoidRedEye} onChange={(event) => updateIntent({ avoidRedEye: event.target.checked, redEyeWindow: intent.redEyeWindow ?? { start: "00:00", end: "06:00" } })} />拒绝红眼</label>
-                {intent.avoidRedEye && (
-                  <label className="filter-control">红眼时段
-                    <span className="time-range">
-                      <input aria-label="红眼开始时间" type="time" value={intent.redEyeWindow?.start ?? "00:00"} onChange={(event) => updateIntent({ redEyeWindow: { start: event.target.value, end: intent.redEyeWindow?.end ?? "06:00" } })} />
-                      <span>至</span>
-                      <input aria-label="红眼结束时间" type="time" value={intent.redEyeWindow?.end ?? "06:00"} onChange={(event) => updateIntent({ redEyeWindow: { start: intent.redEyeWindow?.start ?? "00:00", end: event.target.value } })} />
-                    </span>
+                    ⇄
+                  </button>
+                  <LocationCombobox
+                    key={`destination-${intent.destination.kind}-${intent.destination.code}`}
+                    label="目的地"
+                    value={intent.destination}
+                    onValidityChange={(valid) => setLocationValidity((current) => ({ ...current, destination: valid }))}
+                    onChange={(location) => updateIntent({ destination: { kind: location.kind, code: location.code, name: location.kind === "city" ? location.cityNameZh : location.airportNameZh } })}
+                  />
+                </div>
+              </section>
+
+              <section className="filter-section" aria-labelledby="schedule-filter-title">
+                <div className="filter-section-heading"><h2 id="schedule-filter-title"><CalendarDays size={16} />日期与乘客</h2></div>
+                <div className="schedule-grid">
+                  <label>出发日期<input type="date" value={intent.departureDate} onChange={(event) => updateIntent({ departureDate: event.target.value })} /></label>
+                  <label>返程日期<input type="date" value={intent.returnDate ?? ""} onChange={(event) => updateIntent({ returnDate: event.target.value })} disabled={intent.tripType === "one_way"} /></label>
+                  <label>成人数
+                    <input
+                      type="number"
+                      min={1}
+                      max={9}
+                      value={intent.adults}
+                      onChange={(event) =>
+                        updateIntent({ adults: Math.min(9, Math.max(1, Number(event.target.value) || 1)) })
+                      }
+                    />
                   </label>
-                )}
-                <label><input type="checkbox" checked={intent.includeNearbyAirports} onChange={(event) => updateIntent({ includeNearbyAirports: event.target.checked })} />出发地附近机场</label>
-              </div>
+                  <label>舱位
+                    <select
+                      value={intent.cabin}
+                      onChange={(event) =>
+                        updateIntent({ cabin: event.target.value as SearchIntent["cabin"] })
+                      }
+                    >
+                      {Object.entries(cabinLabels).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </section>
+
+              <section className="filter-section" aria-labelledby="preference-filter-title">
+                <div className="filter-section-heading"><h2 id="preference-filter-title"><SlidersHorizontal size={16} />价格与行程偏好</h2></div>
+                <div className="preference-fields">
+                  <label>总预算（人民币）
+                    <input
+                      type="number"
+                      min={1}
+                      step={100}
+                      value={intent.budget ? intent.budget.amountMinor / 100 : ""}
+                      placeholder="不限"
+                      onChange={(event) =>
+                        updateIntent({
+                          budget: event.target.value
+                            ? {
+                                amountMinor: Math.round(Number(event.target.value) * 100),
+                                currency: "CNY",
+                              }
+                            : undefined,
+                        })
+                      }
+                    />
+                  </label>
+                  <label>最早起飞<input type="time" value={intent.departureTime?.earliest ?? ""} onChange={(event) => updateDepartureTime("earliest", event.target.value)} /></label>
+                  <label>最晚起飞<input type="time" value={intent.departureTime?.latest ?? ""} onChange={(event) => updateDepartureTime("latest", event.target.value)} /></label>
+                  <label>最多中转
+                    <select value={intent.directOnly ? 0 : intent.maxStops} disabled={intent.directOnly} onChange={(event) => updateIntent({ maxStops: Number(event.target.value) })}>
+                      <option value={0}>直飞</option>
+                      <option value={1}>最多 1 次</option>
+                      <option value={2}>最多 2 次</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="preference-grid">
+                  <label className="preference-toggle"><span>仅直飞</span><input type="checkbox" checked={intent.directOnly} onChange={(event) => updateIntent({ directOnly: event.target.checked, maxStops: event.target.checked ? 0 : 1 })} /></label>
+                  <label className="preference-select"><span>托运行李</span>
+                    <select aria-label="最低托运行李额度" value={intent.minimumCheckedBaggageKg} onChange={(event) => updateIntent({ minimumCheckedBaggageKg: Number(event.target.value) })}>
+                      {[0, 10, 20, 23, 30, 46].map((kg) => <option key={kg} value={kg}>{kg === 0 ? "不限" : `至少 ${kg}kg`}</option>)}
+                    </select>
+                  </label>
+                  <label className="preference-toggle"><span>拒绝红眼</span><input type="checkbox" checked={intent.avoidRedEye} onChange={(event) => updateIntent({ avoidRedEye: event.target.checked, redEyeWindow: intent.redEyeWindow ?? { start: "00:00", end: "06:00" } })} /></label>
+                  <label className="preference-toggle"><span>出发地附近机场</span><input type="checkbox" checked={intent.includeNearbyAirports} onChange={(event) => updateIntent({ includeNearbyAirports: event.target.checked })} /></label>
+                  {intent.avoidRedEye && (
+                    <div className="red-eye-window">
+                      <span>红眼时段</span>
+                      <div className="time-range">
+                        <input aria-label="红眼开始时间" type="time" value={intent.redEyeWindow?.start ?? "00:00"} onChange={(event) => updateIntent({ redEyeWindow: { start: event.target.value, end: intent.redEyeWindow?.end ?? "06:00" } })} />
+                        <span>至</span>
+                        <input aria-label="红眼结束时间" type="time" value={intent.redEyeWindow?.end ?? "06:00"} onChange={(event) => updateIntent({ redEyeWindow: { start: intent.redEyeWindow?.start ?? "00:00", end: event.target.value } })} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </section>
               {parseResult && (
                 <div className="intent-review">
                   <b>对话条件已回填</b>
@@ -877,18 +1240,33 @@ export default function Home() {
               <span className="shield">✓</span>
               <span><strong>比较可核验来源报价</strong><small>没有实时来源时绝不展示演示价格</small></span>
             </div>
-            <button className="primary-button" onClick={runSearch} disabled={busy !== "idle"}>
-              {busy === "parsing" && <><span className="spinner" /> 正在解析条件</>}
-              {busy === "searching" && <><span className="spinner" /> 正在核验来源</>}
-              {busy === "idle" && mode === "agent" && parseResult?.ready
-                ? <>确认条件并检索 <span>→</span></>
-                : busy === "idle" && <>开始检索 <span>→</span></>}
-            </button>
+            <LiquidGlassSurface
+              label="search-primary-action"
+              className="search-action-root"
+              panelClassName="search-action-panel"
+              sceneClassName="action-scene"
+              config={actionGlassConfig}
+              changeKey={`${busy}-${mode}-${Boolean(parseResult?.ready)}`}
+            >
+              <button className="primary-button" onClick={runSearch} disabled={busy !== "idle"}>
+                {busy === "parsing" && <><span className="spinner" /> 正在解析条件</>}
+                {busy === "searching" && <><span className="spinner" /> 正在核验来源</>}
+                {busy === "idle" && mode === "agent" && parseResult?.ready
+                  ? <>确认并检索 <ArrowRight size={16} /></>
+                  : busy === "idle" && <><Search size={16} />开始检索</>}
+              </button>
+            </LiquidGlassSurface>
           </div>
           {busy === "searching" && (
             <div className="search-progress" role="status" aria-live="polite">
-              <div><span className="spinner dark-spinner" />正在并行核验本次计划来源</div>
-              <div className="search-progress-note">Edge Companion 使用你当前 Edge 登录会话；云端 API 仅显示已配置来源。</div>
+              <div className="search-progress-heading">
+                <span><small>检索进度</small><strong>{searchProgress.label}</strong></span>
+                <output aria-label={`检索进度 ${searchProgress.percent}%`}>{searchProgress.percent}%</output>
+              </div>
+              <div className="search-progress-track" role="progressbar" aria-label="航班来源检索进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={searchProgress.percent}>
+                <i style={{ "--search-progress": searchProgress.percent / 100 } as CSSProperties} />
+              </div>
+              <div className="search-progress-note">本机来源与云端 API 分阶段核验，百分比表示当前工作流进度。</div>
               <div className="searching-sources">
                 {progressSources.map((source) => (
                   <span key={source.id}>
@@ -903,25 +1281,61 @@ export default function Home() {
           )}
         </div>
 
-        <div className="trust-row">
-          <span>V1 原则</span>
-          <b>授权来源</b><b>统一全价</b><b>失败披露</b><b>证据可追溯</b>
-          <button onClick={(event) => openCoverage(event.currentTarget)}>了解来源状态 +</button>
+        <div className="trust-row" aria-label="检索承诺">
+          <span><ShieldCheck size={15} />可核验来源</span>
+          <span><Check size={15} />统一全价口径</span>
+          <span><Info size={15} />逐项披露失败</span>
         </div>
-      </section>
+      </section>}
 
-      {(result || (error && busy === "idle")) && (
+      {activeView === "results" && (result || (error && busy === "idle")) && (
         <section className="results-section revealed" id="results" aria-live="polite">
           <div className="section-heading">
             <div>
               <div className="eyebrow"><span /> 航班检索结果</div>
-              <h2>{result?.intent.origin.code ?? intent.origin.code} → {result?.intent.destination.code ?? intent.destination.code}</h2>
+              <h2><AirportRoute origin={result?.intent.origin ?? intent.origin} destination={result?.intent.destination ?? intent.destination} /></h2>
               <p>{result?.intent.departureDate ?? intent.departureDate} · {result?.intent.adults ?? intent.adults} 位成人 · {cabinLabels[result?.intent.cabin ?? intent.cabin]} · 统一 Offer 口径</p>
             </div>
             {result && (
-              <div className={`demo-badge ${sourceStatus?.productionStyle ? "production-badge" : ""}`}>
-                {sourceStatus?.label}
-              </div>
+              <>
+                <div className={`demo-badge ${sourceStatus?.productionStyle ? "production-badge" : ""}`}>
+                  {sourceStatus?.label}
+                </div>
+                <div className="result-status-stack">
+                  <LiquidGlassSurface
+                    label="result-price-status"
+                    className="result-status-root"
+                    panelClassName="result-status-glass"
+                    sceneClassName="status-glass-scene"
+                    config={statusGlassConfig}
+                    changeKey={`${result.requestId}-${result.priceJudgment.level}`}
+                  >
+                    <PriceTools
+                      apiBase={apiBase()}
+                      intent={result.intent}
+                      marketPriceInsights={result.marketPriceInsights}
+                      priceJudgment={result.priceJudgment}
+                    />
+                  </LiquidGlassSurface>
+                  <LiquidGlassSurface
+                    label="result-coverage-status"
+                    className="result-status-root"
+                    panelClassName="result-status-glass"
+                    sceneClassName="status-glass-scene"
+                    config={statusGlassConfig}
+                    changeKey={`${result.requestId}-${result.disclosure.successfulSources}`}
+                  >
+                    <button
+                      className="result-status-button"
+                      onClick={(event) => openCoverage(event.currentTarget)}
+                      aria-label={`本次搜索覆盖：${result.disclosure.successfulSources}/${result.disclosure.plannedSources}，查看详情`}
+                    >
+                      <Radar size={17} />
+                      <span><small>搜索覆盖</small><strong>{result.disclosure.successfulSources}/{result.disclosure.plannedSources}</strong></span>
+                    </button>
+                  </LiquidGlassSurface>
+                </div>
+              </>
             )}
           </div>
 
@@ -934,7 +1348,14 @@ export default function Home() {
           ) : (
             <div className="result-layout">
               <div className="result-main">
-                <div className="price-insight">
+                <LiquidGlassSurface
+                  label="result-summary"
+                  className="result-summary-root"
+                  panelClassName="price-insight"
+                  sceneClassName="result-summary-scene"
+                  config={summaryGlassConfig}
+                  changeKey={result.requestId}
+                >
                   <div>
                     <span>综合推荐</span>
                     <strong>{recommended ? money(recommended) : "暂无"}</strong>
@@ -950,20 +1371,25 @@ export default function Home() {
                     <strong>{lowestSplit ? money(lowestSplit) : "暂无"}</strong>
                     <small>{lowestSplit ? "两张单程票，库存与规则分别变化" : "本次没有分开购买方案"}</small>
                   </div>
-                  <div className="insight-copy">
-                    <b>结论范围</b>
-                    {singleSourceLiveResult && (
-                      <strong className="scope-warning">
-                        单来源实时搜索，尚非多来源比价
-                      </strong>
-                    )}
-                    <p>{result.disclosure.statement}</p>
+                  <div className="summary-result-count">
+                    共 {groupedOffers.length} 个航班 · {orderedOffers.length} 个平台报价
+                    {excludedOfferCount > 0
+                      ? ` · ${excludedOfferCount} 个不符合条件的报价已隐藏`
+                      : ""}
                   </div>
-                </div>
-
-                <V2Panel apiBase={apiBase()} intent={result.intent} />
+                </LiquidGlassSurface>
 
                 <div className="result-toolbar">
+                  <LiquidGlassSurface
+                    label="result-toolbar"
+                    className="result-toolbar-glass-root"
+                    panelClassName="result-toolbar-glass-panel"
+                    sceneClassName="result-toolbar-glass-scene"
+                    config={toolbarGlassConfig}
+                    changeKey={`${result.requestId}-${effectiveSort}`}
+                  >
+                    <span aria-hidden="true" />
+                  </LiquidGlassSurface>
                   <div className="sort-tabs">
                     {([
                       ["recommended", "综合推荐"],
@@ -972,19 +1398,63 @@ export default function Home() {
                       ["stops", "最少中转"],
                       ...(result.bestBaggageOfferId ? [["baggage", "最佳行李"]] as const : []),
                       ...(result.mostFlexibleOfferId ? [["flexibility", "最宽松退改"]] as const : []),
-                    ] as ReadonlyArray<readonly [SortKey, string]>).map(([key, label]) => (
-                      <button key={key} className={effectiveSort === key ? "selected" : ""} onClick={() => setSort(key)}>{label}</button>
-                    ))}
-                    {effectiveSort === "price" && (
+                    ] as ReadonlyArray<readonly [SortKey, string]>).map(([key, label]) => key === "price" ? (
+                      <div className="price-sort-control" ref={priceSortMenuRef} key={key}>
+                        <button
+                          type="button"
+                          className={`price-sort-trigger ${effectiveSort === key ? "selected" : ""}`}
+                          onClick={() => setShowPriceSortMenu((open) => !open)}
+                          aria-haspopup="menu"
+                          aria-expanded={showPriceSortMenu}
+                          aria-label={`价格排序，当前${priceDirection === "asc" ? "低到高" : "高到低"}`}
+                        >
+                          {label}
+                          <ChevronDown size={13} aria-hidden="true" />
+                        </button>
+                        {showPriceSortMenu && (
+                          <div className="price-sort-menu" role="menu" aria-label="价格排序">
+                            {([[
+                              "asc",
+                              "低到高",
+                            ], [
+                              "desc",
+                              "高到低",
+                            ]] as const).map(([direction, directionLabel]) => (
+                              <button
+                                type="button"
+                                role="menuitemradio"
+                                aria-checked={priceDirection === direction}
+                                className="price-sort-option"
+                                key={direction}
+                                onClick={() => {
+                                  setPriceDirection(direction);
+                                  setSort("price");
+                                  setShowPriceSortMenu(false);
+                                }}
+                              >
+                                {directionLabel}
+                                <Check
+                                  size={13}
+                                  aria-hidden="true"
+                                  className={priceDirection === direction ? "" : "sort-check-placeholder"}
+                                />
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
                       <button
-                        type="button"
-                        className="selected"
-                        onClick={() => setPriceDirection((value) => value === "asc" ? "desc" : "asc")}
-                        aria-label={priceDirection === "asc" ? "切换为价格从高到低" : "切换为价格从低到高"}
+                        key={key}
+                        className={effectiveSort === key ? "selected" : ""}
+                        onClick={() => {
+                          setShowPriceSortMenu(false);
+                          setSort(key);
+                        }}
                       >
-                        {priceDirection === "asc" ? "低到高 ↑" : "高到低 ↓"}
+                        {label}
                       </button>
-                    )}
+                    ))}
                   </div>
                   <div className="result-filters">
                     <label>航司
@@ -1002,13 +1472,13 @@ export default function Home() {
                     <label>起飞机场
                       <select value={departureAirportFilter} onChange={(event) => setDepartureAirportFilter(event.target.value)}>
                         <option value="all">全部</option>
-                        {departureAirports.map((airport) => <option key={airport} value={airport}>{airport}</option>)}
+                        {departureAirports.map((airport) => <option key={airport} value={airport}>{airportPresentation({ code: airport }).name} · {airport}</option>)}
                       </select>
                     </label>
                     <label>降落机场
                       <select value={arrivalAirportFilter} onChange={(event) => setArrivalAirportFilter(event.target.value)}>
                         <option value="all">全部</option>
-                        {arrivalAirports.map((airport) => <option key={airport} value={airport}>{airport}</option>)}
+                        {arrivalAirports.map((airport) => <option key={airport} value={airport}>{airportPresentation({ code: airport }).name} · {airport}</option>)}
                       </select>
                     </label>
                     <label>中转
@@ -1030,12 +1500,6 @@ export default function Home() {
                       }}
                     >重置筛选</button>
                   </div>
-                  <span>
-                    共 {groupedOffers.length} 个航班 · {orderedOffers.length} 个平台报价
-                    {excludedOfferCount > 0
-                      ? ` · ${excludedOfferCount} 个不符合条件的报价已隐藏`
-                      : ""}
-                  </span>
                 </div>
 
                 {usesSkyscanner && (
@@ -1064,6 +1528,7 @@ export default function Home() {
                   <div className="flight-list">
                     {groupedOffers.map((group) => {
                       const offer = group.offers[0]!;
+                      const isShortlisted = shortlist.some((candidate) => candidate.id === offer.id);
                       const groupIds = new Set(group.offers.map((candidate) => candidate.id));
                       const isLowest = result.lowestComparableOfferId ? groupIds.has(result.lowestComparableOfferId) : false;
                       const isRecommended = result.recommendedOfferId ? groupIds.has(result.recommendedOfferId) : false;
@@ -1108,7 +1573,7 @@ export default function Home() {
                                     </div>
                                     <div className="time">
                                       <strong>{time(leg.departureAt)}</strong>
-                                      <small title={leg.origin.name}>{leg.origin.code}</small>
+                                      <AirportLabel airport={leg.origin} className="compact-airport" />
                                     </div>
                                     <div className="route-line">
                                       <span>{duration(leg.durationMinutes)}</span>
@@ -1122,7 +1587,7 @@ export default function Home() {
                                           <sup>{dayOffset(leg.departureAt, leg.arrivalAt)}</sup>
                                         )}
                                       </strong>
-                                      <small title={leg.destination.name}>{leg.destination.code}</small>
+                                      <AirportLabel airport={leg.destination} className="compact-airport" />
                                     </div>
                                   </div>
                                 );
@@ -1131,49 +1596,62 @@ export default function Home() {
                             <div className="price"><small>{offer.purchaseMode === "split_ticket" ? "分开购买合计" : offerPriceLabel(offer)}</small><strong>{money(offer)}</strong><span className="plain-price">{offer.purchaseMode === "split_ticket" ? "两张单程票，非平台往返价" : offer.priceVerificationStatus === "listed_only" ? "税费、机建燃油待核验" : offer.seller.handoffPrecision === "search_results" ? "需在来源页重新选择" : "购买前再次核验"}</span></div>
                           </div>
                           <div className="flight-meta">
-                            <div>
-                              <span className="bag">▣</span>
-                              {offerCheckedBaggageKg(offer)
-                                ? `含 ${offerCheckedBaggageKg(offer)}kg 托运行李`
-                                : offer.baggage.length
-                                  ? `${offer.baggage.length} 项行李规则`
-                                  : "行李规则待来源补全"}
+                            <div className="flight-meta-facts">
+                              <div>
+                                <span className="bag">▣</span>
+                                {offerCheckedBaggageKg(offer)
+                                  ? `含 ${offerCheckedBaggageKg(offer)}kg 托运行李`
+                                  : offer.baggage.length
+                                    ? `${offer.baggage.length} 项行李规则`
+                                    : "行李规则待来源补全"}
+                              </div>
+                              <div>
+                                退改：
+                                {offer.refundable === true
+                                  ? "可退"
+                                  : offer.refundable === false
+                                    ? "不可退"
+                                    : "待核验"}
+                                {" · "}
+                                {offer.changeable === true
+                                  ? "可改"
+                                  : offer.changeable === false
+                                    ? "不可改"
+                                    : "待核验"}
+                              </div>
+                              <div className="source"><span>{offer.environment}</span><b>{offer.seller.name}</b><small>{new Date(offer.fetchedAt).toLocaleString("zh-CN")}</small></div>
                             </div>
-                            <div>
-                              退改：
-                              {offer.refundable === true
-                                ? "可退"
-                                : offer.refundable === false
-                                  ? "不可退"
-                                  : "待核验"}
-                              {" · "}
-                              {offer.changeable === true
-                                ? "可改"
-                                : offer.changeable === false
-                                  ? "不可改"
-                                  : "待核验"}
-                            </div>
-                            <div className="source"><span>{offer.environment}</span><b>{offer.seller.name}</b><small>{new Date(offer.fetchedAt).toLocaleString("zh-CN")}</small></div>
-                            {offer.seller.deepLink && offer.purchaseMode !== "split_ticket" && (
-                              <a
-                                className="handoff-link"
-                                href={offer.seller.deepLink}
-                                target="_blank"
-                                rel="noopener noreferrer"
+                            <div className="flight-meta-actions">
+                              {offer.seller.deepLink && offer.purchaseMode !== "split_ticket" && (
+                                <a
+                                  className="handoff-link"
+                                  href={offer.seller.deepLink}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  {offer.seller.handoffPrecision === "search_results"
+                                    ? `去 ${handoffSourceName(offer)} 重新选择 ↗`
+                                    : `去 ${offer.seller.name} 核验 ↗`}
+                                </a>
+                              )}
+                              {offer.purchaseMode === "split_ticket" && offer.purchaseParts?.map((part) => (
+                                <a key={part.legIndex} className="handoff-link" href={part.bookingUrl} target="_blank" rel="noopener noreferrer">
+                                  {part.label} {new Intl.NumberFormat("zh-CN", { style: "currency", currency: part.price.currency, maximumFractionDigits: 0 }).format(part.price.amountMinor / 100)} ↗
+                                </a>
+                              ))}
+                              <button onClick={() => openQuoteDetail(offer)}>
+                                查看报价详情 <ArrowRight size={13} />
+                              </button>
+                              <button
+                                className={`shortlist-card-action ${isShortlisted ? "selected" : ""}`}
+                                onClick={() => toggleShortlist(offer)}
+                                aria-pressed={isShortlisted}
                               >
-                                {offer.seller.handoffPrecision === "search_results"
-                                  ? `去 ${handoffSourceName(offer)} 重新选择 ↗`
-                                  : `去 ${offer.seller.name} 核验 ↗`}
-                              </a>
-                            )}
-                            {offer.purchaseMode === "split_ticket" && offer.purchaseParts?.map((part) => (
-                              <a key={part.legIndex} className="handoff-link" href={part.bookingUrl} target="_blank" rel="noopener noreferrer">
-                                {part.label} {new Intl.NumberFormat("zh-CN", { style: "currency", currency: part.price.currency, maximumFractionDigits: 0 }).format(part.price.amountMinor / 100)} ↗
-                              </a>
-                            ))}
-                            <button onClick={() => setExpanded(expanded === offer.id ? null : offer.id)} aria-expanded={expanded === offer.id}>
-                              {expanded === offer.id ? "收起价格构成" : "查看价格构成"} <span>⌄</span>
-                            </button>
+                                <Heart size={13} fill={isShortlisted ? "currentColor" : "none"} />
+                                {isShortlisted ? "已加入心选" : "加入心选"}
+                              </button>
+                              <button onClick={() => saveOffer(offer)}><Star size={13} />收藏机票</button>
+                            </div>
                           </div>
                           {group.offers.length > 1 && (
                             <div className="platform-quotes" aria-label="同航班平台报价">
@@ -1193,58 +1671,6 @@ export default function Home() {
                                 ))}
                             </div>
                           )}
-                          {expanded === offer.id && (
-                            <div className="price-breakdown">
-                              <div className="segment-details">
-                                <b>完整航段</b>
-                                {offer.segments.map((segment) => (
-                                  <span key={segment.id}>
-                                    {segment.marketingCarrier} {segment.flightNumber} ·{" "}
-                                    {segment.origin.name ?? segment.origin.code}{" "}
-                                    {time(segment.departureAt)} →{" "}
-                                    {segment.destination.name ?? segment.destination.code}{" "}
-                                    {time(segment.arrivalAt)}
-                                    {dayOffset(segment.departureAt, segment.arrivalAt)}
-                                  </span>
-                                ))}
-                              </div>
-                              {offer.priceComponents.map((component) => (
-                                <span key={`${offer.id}-${component.kind}-${component.label}`}>{component.label}<b>{new Intl.NumberFormat("zh-CN", { style: "currency", currency: component.currency }).format(component.amountMinor / 100)}</b></span>
-                              ))}
-                              {offer.exchangeRate && (
-                                <span>
-                                  人民币换算汇率
-                                  <b>
-                                    1 {offer.exchangeRate.baseCurrency} = {offer.exchangeRate.rate} {offer.exchangeRate.quoteCurrency}
-                                    {" · "}{offer.exchangeRate.source}
-                                    {" · "}{new Date(offer.exchangeRate.quotedAt).toLocaleString("zh-CN")}
-                                  </b>
-                                </span>
-                              )}
-                              <span>来源记录总价<b>{money(offer)}</b></span>
-                              {offer.seller.handoffPrecision === "search_results" && (
-                                <p className="handoff-warning">
-                                  此链接返回带本次条件的 {handoffSourceName(offer)} 结果页，不是该售卖方的精确报价落点；请重新选择相同行程并核验最终价格。
-                                </p>
-                              )}
-                              {offer.priceVerificationStatus === "listed_only" && (
-                                <p className="handoff-warning">
-                                  当前金额仅是来源展示价，不代表含税最终支付价；票面价、税费、机建费和燃油附加费尚未完整核验。
-                                </p>
-                              )}
-                              {offer.connectorId === "fliggy-flyai" && (
-                                <p className="handoff-warning">
-                                  FlyAI 只返回一个飞猪来源展示价，未覆盖结果页全部代理商。来源页可能同时出现 ¥1188、¥1240 等不同卖家票面价；航探不据此宣称飞猪最低价，跳转后需重新选择卖家并核验税费。
-                                </p>
-                              )}
-                              {offer.purchaseMode === "split_ticket" && (
-                                <p className="handoff-warning">
-                                  该方案需要分别购买去程和返程两张单程票。两单退改签与行李规则可能不同，库存和价格也会分别变化；任一单失败不会自动保护另一单。
-                                </p>
-                              )}
-                              <p>请在来源平台再次核验库存和最终支付页。航探不售票、不代收款。</p>
-                            </div>
-                          )}
                         </article>
                       );
                     })}
@@ -1252,60 +1678,231 @@ export default function Home() {
                 )}
               </div>
 
-              <aside className="coverage-card" id="coverage">
-                <div className="aside-title"><div><span className="radar">◎</span><b>本次检索覆盖</b></div><strong>{result.disclosure.successfulSources}/{result.disclosure.plannedSources}</strong></div>
-                <div className="coverage-progress"><i style={{ width: `${result.disclosure.plannedSources ? (result.disclosure.successfulSources / result.disclosure.plannedSources) * 100 : 0}%` }} /></div>
-                <p>{result.disclosure.statement}</p>
-                <ul>
-                  {result.connectorReports.map((report) => (
-                    <li key={report.connectorId}>
-                      <span>
-                        <b>{report.connectorName}</b>
-                        <small>{report.durationMs}ms · {report.offerCount} 个 Offer</small>
-                        {report.notes.map((note) => (
-                          <small key={note}>{reportNote(note)}</small>
-                        ))}
-                      </span>
-                      <strong className={`source-state state-${report.state}`}>{connectorStateLabel(report.state)}</strong>
-                    </li>
-                  ))}
-                </ul>
-                <button onClick={(event) => openCoverage(event.currentTarget)}>查看来源规则</button>
-                <div className="adversarial-note">
-                  <b>对抗式检查</b>
-                  <p>演示报价、总价构成错误、缺失汇率或没有购买落点的报价不会进入最低全价结论。</p>
-                </div>
-              </aside>
             </div>
           )}
         </section>
       )}
 
-      <section className="principles" id="principles">
-        <div className="section-heading">
-          <div><div className="eyebrow"><span /> 推荐不是黑箱</div><h2>最低价必须经得起追问</h2></div>
-        </div>
-        <div className="principle-grid">
-          <article><span>01</span><h3>同口径再比较</h3><p>统一税费、行李、支付手续费、机场与中转风险，拒绝用不可购买的“起价”制造错觉。</p></article>
-          <article><span>02</span><h3>每个结论可追溯</h3><p>展示来源平台、核验时间、价格构成与覆盖缺口。没有证据时，不宣称“全网最低”。</p></article>
-          <article><span>03</span><h3>主动寻找反例</h3><p>检查条件价、机场变化、经停、过期 Offer 与来源失败，明确告诉用户答案的边界。</p></article>
-          <article><span>04</span><h3>网页与 Companion 分工</h3><p>航探网页负责查询、统一口径、排序和解释；Edge Companion 只借助你的 Edge 登录会话读取来源证据，不独立比价、不购票。</p></article>
-        </div>
-      </section>
+      {activeView === "detail" && selectedOffer && result && (
+        <section className="quote-detail" aria-labelledby="quote-detail-title">
+          <div className="quote-detail-header">
+            <button className="back-button" onClick={() => setActiveView("results")}><ArrowLeft size={17} />返回结果</button>
+            <div>
+              <div className="eyebrow"><ShieldCheck size={14} /> 报价详情</div>
+              <h1 id="quote-detail-title"><AirportRoute origin={selectedOffer.legs[0]?.origin} destination={selectedOffer.legs[0]?.destination} /></h1>
+              <p>{selectedOffer.seller.name} · {offerPriceLabel(selectedOffer)} · 核验于 {new Date(selectedOffer.fetchedAt).toLocaleString("zh-CN")}</p>
+            </div>
+            <div className="quote-total"><span>来源记录总价</span><strong>{money(selectedOffer)}</strong><small>{selectedOffer.purchaseMode === "split_ticket" ? "两张单程票合计" : "购买前再次核验"}</small></div>
+          </div>
+
+          <div className="quote-detail-grid">
+            <div className="quote-main">
+              <section className="detail-band dark-band">
+                <div className="detail-band-title"><Plane size={18} /><h2>完整行程</h2></div>
+                {selectedOffer.legs.map((leg, legIndex) => (
+                  <div className="detail-leg" key={leg.id}>
+                    <span>{selectedOffer.legs.length === 1 ? "单程" : legIndex === 0 ? "去程" : "返程"}</span>
+                    <strong><span>{time(leg.departureAt)}</span><AirportLabel airport={leg.origin} className="detail-airport" /></strong>
+                    <i />
+                    <em>{duration(leg.durationMinutes)} · {leg.stopCount ? `${leg.stopCount} 次中转` : "直飞"}</em>
+                    <strong><span>{time(leg.arrivalAt)}{dayOffset(leg.departureAt, leg.arrivalAt) && <sup>{dayOffset(leg.departureAt, leg.arrivalAt)}</sup>}</span><AirportLabel airport={leg.destination} className="detail-airport" /></strong>
+                  </div>
+                ))}
+                <div className="segment-list">
+                  {selectedOffer.segments.map((segment) => (
+                    <div key={segment.id}>
+                      <b>{segment.marketingCarrier} {segment.flightNumber}</b>
+                      <span className="segment-airports">
+                        <AirportLabel airport={segment.origin} className="inline-airport" />
+                        <time>{time(segment.departureAt)}</time>
+                        <ArrowRight size={13} aria-hidden="true" />
+                        <AirportLabel airport={segment.destination} className="inline-airport" />
+                        <time>{time(segment.arrivalAt)}</time>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="detail-band">
+                <div className="detail-band-title"><Luggage size={18} /><h2>行李与退改</h2></div>
+                <div className="rule-grid">
+                  <div><span>托运行李</span><b>{offerCheckedBaggageKg(selectedOffer) ? `含 ${offerCheckedBaggageKg(selectedOffer)}kg` : "待来源补全"}</b></div>
+                  <div><span>退票</span><b>{selectedOffer.refundable === true ? "可退" : selectedOffer.refundable === false ? "不可退" : "待核验"}</b></div>
+                  <div><span>改签</span><b>{selectedOffer.changeable === true ? "可改" : selectedOffer.changeable === false ? "不可改" : "待核验"}</b></div>
+                  <div><span>票价品牌</span><b>{selectedOffer.fareBrand ?? cabinLabels[result.intent.cabin]}</b></div>
+                </div>
+                {selectedOffer.baggage.length > 0 && <div className="baggage-list">{selectedOffer.baggage.map((item, index) => <span key={`${item.type}-${index}`}>{item.type === "checked" ? "托运" : "随身"} · {item.included ? "已包含" : "需另购"}{item.weightKg ? ` · ${item.weightKg}kg` : ""}</span>)}</div>}
+              </section>
+
+              <section className="detail-band parchment-band">
+                <div className="detail-band-title"><Info size={18} /><h2>证据与边界</h2></div>
+                {selectedOffer.seller.handoffPrecision === "search_results" && <p className="handoff-warning">此链接返回带本次条件的 {handoffSourceName(selectedOffer)} 结果页，不是该售卖方的精确报价落点；请重新选择相同行程并核验最终价格。</p>}
+                {selectedOffer.priceVerificationStatus === "listed_only" && <p className="handoff-warning">当前金额仅是来源展示价，不代表含税最终支付价；税费、机建燃油和附加服务尚未完整核验。</p>}
+                {selectedOffer.purchaseMode === "split_ticket" && <p className="handoff-warning">该方案需要分别购买去程和返程。两单库存、行李与退改规则独立变化，任一单失败不会自动保护另一单。</p>}
+                <p>请在来源平台再次核验库存和最终支付页。航探不售票、不代收款。</p>
+              </section>
+            </div>
+
+            <aside className="quote-evidence">
+              <span>价格构成</span>
+              <h2>{money(selectedOffer)}</h2>
+              <div className="component-list">
+                {selectedOffer.priceComponents.map((component) => <div key={`${component.kind}-${component.label}`}><span>{component.label}</span><b>{new Intl.NumberFormat("zh-CN", { style: "currency", currency: component.currency, maximumFractionDigits: 0 }).format(component.amountMinor / 100)}</b></div>)}
+              </div>
+              {selectedOffer.exchangeRate && <p>1 {selectedOffer.exchangeRate.baseCurrency} = {selectedOffer.exchangeRate.rate} {selectedOffer.exchangeRate.quoteCurrency}<small>{selectedOffer.exchangeRate.source} · {new Date(selectedOffer.exchangeRate.quotedAt).toLocaleString("zh-CN")}</small></p>}
+              <div className="evidence-source"><ShieldCheck size={16} /><div><b>{selectedOffer.seller.name}</b><small>{offerPriceLabel(selectedOffer)}</small></div></div>
+              {selectedOffer.seller.deepLink && selectedOffer.purchaseMode !== "split_ticket" && <a className="primary-button" href={selectedOffer.seller.deepLink} target="_blank" rel="noopener noreferrer">去 {handoffSourceName(selectedOffer)} 核验 <ExternalLink size={15} /></a>}
+              <button className="secondary-button" onClick={() => saveOffer(selectedOffer)}><Star size={15} />收藏机票</button>
+            </aside>
+          </div>
+        </section>
+      )}
 
       <footer>
-        <div className="brand"><span className="brand-mark">航</span><span>航探 <small>Flight Lens</small></span></div>
+        <div className="brand"><span className="brand-mark"><Image src="/flight-lens-logo.svg" alt="" width={30} height={30} /></span><span>航探 <small>Flight Lens</small></span></div>
         <p>只负责搜索与解释，不售票、不代收款。最终价格与规则以来源平台支付页为准。</p>
-        <span>V1 开发版 · 2026</span>
+        <button onClick={(event) => openCoverage(event.currentTarget)}>来源与边界</button>
       </footer>
 
+      {result && activeView !== "search" && (
+        <LiquidGlassSurface
+          label="shortlist"
+          className="shortlist-fab-root"
+          panelClassName="shortlist-fab-panel"
+          sceneClassName="status-glass-scene"
+          config={statusGlassConfig}
+          changeKey={shortlist.length}
+        >
+          <button
+            ref={shortlistTriggerRef}
+            className="shortlist-fab"
+            onClick={(event) => openShortlist(event.currentTarget)}
+            aria-label={`打开心选，当前 ${shortlist.length} 个方案`}
+          >
+            <ShoppingBasket size={18} />
+            <span>心选</span>
+            <strong aria-label={`${shortlist.length} 个方案`}>{shortlist.length}</strong>
+          </button>
+        </LiquidGlassSurface>
+      )}
+
+      {showShortlist && typeof document !== "undefined" && createPortal(
+        <div
+          ref={shortlistBackdropRef}
+          className="modal-backdrop liquid-overlay-backdrop"
+          role="presentation"
+          onMouseDown={() => setShowShortlist(false)}
+        >
+          <span ref={shortlistMorphRef} className="liquid-morph" aria-hidden="true" />
+          <section
+            ref={shortlistDialogRef}
+            className="modal shortlist-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="shortlist-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <LiquidGlassSurface
+              label="shortlist-workspace"
+              className="workspace-glass-fill"
+              panelClassName="workspace-glass-panel"
+              config={{ ...summaryGlassConfig, borderRadius: 20, backgroundOpacity: 0.1, blur: 9 }}
+              changeKey={shortlist.length}
+            >
+              <span aria-hidden="true" />
+            </LiquidGlassSurface>
+            <button className="modal-close" onClick={() => setShowShortlist(false)} aria-label="关闭心选"><X size={19} /></button>
+            <div className="eyebrow"><ShoppingBasket size={14} /> 决策工作台</div>
+            <h2 id="shortlist-title">心选方案</h2>
+            <p>把价格、时间、机场与行李放在一起比较，最后再决定去哪个来源核验。</p>
+            {shortlist.length ? (
+              <div className="shortlist-table">
+                <div className="shortlist-table-heading" aria-hidden="true">
+                  <span>行程</span><span>时间与规则</span><span>来源</span><span>价格</span><span>操作</span>
+                </div>
+                {shortlist.map((offer) => {
+                  const firstLeg = offer.legs[0];
+                  const lastLeg = offer.legs.at(-1);
+                  const canInspect = result?.offers.some((candidate) => candidate.id === offer.id);
+                  return (
+                    <article className="shortlist-row" key={offer.id}>
+                      <div className="shortlist-route">
+                        <AirportRoute origin={firstLeg?.origin} destination={firstLeg?.destination} className="shortlist-airport-route" />
+                        <span>{offer.segments[0]?.marketingCarrier} {offer.segments[0]?.flightNumber}</span>
+                        {offer.legs.length > 1 && <AirportRoute origin={lastLeg?.origin} destination={lastLeg?.destination} className="shortlist-return-route" />}
+                      </div>
+                      <div className="shortlist-rules">
+                        <b>{duration(offerJourneyMinutes(offer))}</b>
+                        <span>{offerStops(offer) ? `${offerStops(offer)} 次中转` : "直飞"} · {offerCheckedBaggageKg(offer) ? `${offerCheckedBaggageKg(offer)}kg 行李` : "行李待核验"}</span>
+                      </div>
+                      <div className="shortlist-source"><b>{offer.seller.name}</b><span>{offerPriceLabel(offer)}</span></div>
+                      <div className="shortlist-price"><strong>{money(offer)}</strong><span>{offer.purchaseMode === "split_ticket" ? "分开购买" : "单票"}</span></div>
+                      <div className="shortlist-actions">
+                        {canInspect && <button onClick={() => { setShowShortlist(false); openQuoteDetail(offer); }}>详情</button>}
+                        {offer.seller.deepLink && <a href={offer.seller.deepLink} target="_blank" rel="noopener noreferrer">核验</a>}
+                        <button className="shortlist-remove" onClick={() => toggleShortlist(offer)} aria-label={`从心选移除 ${offer.segments[0]?.marketingCarrier ?? "航班"} ${offer.segments[0]?.flightNumber ?? "方案"}`}><Trash2 size={15} /></button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="shortlist-empty"><Heart size={24} /><b>还没有心选方案</b><span>在结果卡片中点“加入心选”，适合比较的航班会留在这里。</span></div>
+            )}
+          </section>
+        </div>,
+        document.body,
+      )}
+
       {showCoverage && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowCoverage(false)}>
-          <section ref={coverageDialogRef} className="modal" role="dialog" aria-modal="true" aria-labelledby="coverage-title" aria-describedby="coverage-description" onMouseDown={(event) => event.stopPropagation()}>
-            <button className="modal-close" onClick={() => setShowCoverage(false)} aria-label="关闭">×</button>
-            <div className="eyebrow"><span /> 来源透明度</div>
+        <div
+          ref={coverageBackdropRef}
+          className="modal-backdrop liquid-overlay-backdrop"
+          role="presentation"
+          onMouseDown={() => setShowCoverage(false)}
+        >
+          <span ref={coverageMorphRef} className="liquid-morph" aria-hidden="true" />
+          <section
+            ref={coverageDialogRef}
+            className="modal coverage-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="coverage-title"
+            aria-describedby="coverage-description"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <LiquidGlassSurface
+              label="coverage-workspace"
+              className="workspace-glass-fill"
+              panelClassName="workspace-glass-panel"
+              config={{ ...summaryGlassConfig, borderRadius: 20, backgroundOpacity: 0.1, blur: 9 }}
+              changeKey={result?.disclosure.successfulSources ?? 0}
+            >
+              <span aria-hidden="true" />
+            </LiquidGlassSurface>
+            <button className="modal-close" onClick={() => setShowCoverage(false)} aria-label="关闭"><ArrowLeft size={19} /></button>
+            <div className="eyebrow"><Radar size={14} /> 来源覆盖中心</div>
             <h2 id="coverage-title">来源数量不等于可信度</h2>
             <p id="coverage-description">来源只有在合法配置、实际响应、字段完整并通过价格校验后，才计入本次检索覆盖。超时和失败会单独披露。</p>
+            {result && (
+              <section className="current-coverage" aria-label="本次搜索覆盖详情">
+                <div className="current-coverage-heading">
+                  <div><span>当前搜索</span><AirportRoute origin={result.intent.origin} destination={result.intent.destination} className="coverage-airport-route" /></div>
+                  <strong>{result.disclosure.successfulSources}/{result.disclosure.plannedSources}</strong>
+                </div>
+                <div className="coverage-progress"><i style={{ width: `${result.disclosure.plannedSources ? (result.disclosure.successfulSources / result.disclosure.plannedSources) * 100 : 0}%` }} /></div>
+                <p>{result.disclosure.statement}</p>
+                <ul className="coverage-modal-list">
+                  {result.connectorReports.map((report) => (
+                    <li key={report.connectorId}>
+                      <span><b>{report.connectorName}</b><small>{report.durationMs}ms · {report.offerCount} 个 Offer</small>{report.notes.map((note) => <small key={note}>{reportNote(note)}</small>)}</span>
+                      <strong className={`source-state state-${report.state}`}>{connectorStateLabel(report.state)}</strong>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
             <div className="source-table">
               <div><b>SerpApi</b><span>Google Flights 与实际售卖方报价；跳转精度单独披露</span><em>首个生产查询已验证</em></div>
               <div><b>FlightAPI / Skyscanner</b><span>航司 / OTA 当前价格与跳转；同属一个库存族</span><em>本地实验待复核授权</em></div>
@@ -1314,8 +1911,14 @@ export default function Home() {
               <div><b>航司 / OTA</b><span>按开放平台与商务授权逐步接入</span><em>访问失败会逐项披露</em></div>
               <div><b>Mock 数据</b><span>只用于自动测试</span><em>生产强制禁用</em></div>
             </div>
-            <div className="modal-warning"><b>重要边界</b><p>公开网页不等于允许稳定、合法地批量抓取。每个 Connector 都必须有授权依据、限流策略和退出方案。</p></div>
-            <button className="primary-button" onClick={() => setShowCoverage(false)}>我知道了</button>
+            <LiquidGlassSurface
+              label="coverage-primary-action"
+              className="modal-primary-glass"
+              panelClassName="modal-primary-glass-panel"
+              config={actionGlassConfig}
+            >
+              <button className="modal-primary-button" onClick={() => setShowCoverage(false)}>我知道了</button>
+            </LiquidGlassSurface>
           </section>
         </div>
       )}
