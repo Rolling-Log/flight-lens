@@ -13,7 +13,7 @@ test("cloud results arrive before browser completion and login retry only search
       const message = event.data;
       if (message?.channel !== "flight-lens-edge-companion" || message.direction !== "to-extension") return;
       const reply = (payload: unknown) => window.postMessage({ channel: message.channel, direction: "to-page", requestId: message.requestId, ok: true, payload }, location.origin);
-      if (message.type === "PING") { reply({ extensionVersion: "0.2.0", capabilities: ["incremental", "platform_retry"] }); return; }
+      if (message.type === "PING") { setTimeout(() => reply({ extensionVersion: "0.2.0", capabilities: ["incremental", "platform_retry"] }), 1_000); return; }
       host.companionRequests!.push(message.payload);
       const retry = message.payload.platforms?.[0] === "ctrip";
       const result = { protocolVersion: "1", extensionVersion: "0.2.0", results: [{ platform: "ctrip", journeys: [
@@ -32,6 +32,7 @@ test("cloud results arrive before browser completion and login retry only search
   await expect(page.getByRole("status")).toContainText("结果陆续返回");
   await page.getByRole("article").first().getByRole("button", { name: "查看报价详情" }).click();
   await expect(page.getByRole("region", { name: pvgNrtRouteName })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => typeof (window as typeof window & { finishCompanion?: () => void }).finishCompanion)).toBe("function");
   await page.evaluate(() => (window as typeof window & { finishCompanion?: () => void }).finishCompanion?.());
   await page.getByRole("button", { name: "来源", exact: true }).click();
   const retry = page.getByRole("button", { name: "已完成登录／验证，继续" });
@@ -44,6 +45,38 @@ test("cloud results arrive before browser completion and login retry only search
   const requests = await page.evaluate(() => (window as typeof window & { companionRequests?: { platforms?: string[] }[] }).companionRequests);
   expect(requests).toHaveLength(2);
   expect(requests?.[1]?.platforms).toEqual(["ctrip"]);
+});
+
+test("missing bridge is visible and reconnect preserves cloud results without another cloud search", async ({ page }) => {
+  let cloudCalls = 0;
+  await page.route("**/v1/searches", async (route) => { cloudCalls += 1; await route.continue(); });
+  await page.goto("/");
+  await page.getByRole("tab", { name: "精确筛选" }).click();
+  await page.getByRole("button", { name: "开始检索" }).click();
+  await expect(page.getByRole("article").first()).toBeVisible();
+  const count = await page.getByRole("article").count();
+  await page.getByRole("button", { name: "来源", exact: true }).click();
+  await expect(page.getByTestId("companion-connection")).toContainText("本机扩展未连接", { timeout: 8_000 });
+  // Simulate a worker that only answers the second discovery attempt.
+  await page.evaluate(() => {
+    let pings = 0;
+    window.addEventListener("message", (event) => {
+      const message = event.data;
+      if (message?.channel !== "flight-lens-edge-companion" || message.direction !== "to-extension") return;
+      if (message.type === "PING" && ++pings === 1) return;
+      const payload = message.type === "PING"
+        ? { extensionVersion: "0.2.0", capabilities: ["incremental", "platform_retry"] }
+        : { protocolVersion: "1", extensionVersion: "0.2.0", results: [{ platform: "ctrip", journeys: [
+          { direction: "outbound", state: "login_required", bookingUrl: "https://flights.ctrip.com/online/list/", fetchedAt: new Date().toISOString(), cards: [] },
+        ] }] };
+      window.postMessage({ channel: message.channel, direction: "to-page", requestId: message.requestId, ok: true, payload }, location.origin);
+    });
+  });
+  await page.getByRole("button", { name: "重新连接并查询浏览器来源" }).click();
+  await expect(page.getByTestId("companion-connection")).toContainText("本机扩展已连接 · 0.2.0");
+  await expect(page.getByRole("button", { name: "已完成登录／验证，继续" })).toBeEnabled();
+  await expect(page.getByRole("article")).toHaveCount(count);
+  expect(cloudCalls).toBe(1);
 });
 
 test("a lower list fare never inherits a verified-price badge from the same flight", async ({ page }) => {

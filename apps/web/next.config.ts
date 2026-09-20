@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 import path from "node:path";
 
 const nextConfig: NextConfig = {
+  env: { NEXT_PUBLIC_BUILD_REVISION: (process.env.COMMIT_REF ?? "local").slice(0, 7) },
   outputFileTracingRoot: path.join(__dirname, "../.."),
   reactStrictMode: true,
   poweredByHeader: false,

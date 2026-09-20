@@ -41,7 +41,7 @@ import {
   useState,
 } from "react";
 import { resolveApiBase } from "../src/api-base";
-import { searchWithEdgeCompanion } from "../src/edge-companion";
+import { searchWithEdgeCompanion, type CompanionConnection } from "../src/edge-companion";
 import { mergeSearchResults } from "../src/search-results";
 import { LocationCombobox } from "../src/location-combobox";
 import { resultSourceStatus } from "../src/result-source-status";
@@ -536,6 +536,7 @@ export default function Home() {
   const [busy, setBusy] = useState<BusyState>("idle");
   const [searchProgress, setSearchProgress] = useState<SearchProgressState>({ percent: 0, label: "准备检索" });
   const searchGeneration = useRef(0);
+  const [companionConnection, setCompanionConnection] = useState<CompanionConnection>({ state: "idle" });
   useEffect(() => () => { searchGeneration.current += 1; }, []);
   const [selectedOffer, setSelectedOffer] = useState<Offer | null>(null);
   const [showCoverage, setShowCoverage] = useState(false);
@@ -954,6 +955,7 @@ export default function Home() {
       }]));
     });
     const browser = searchWithEdgeCompanion(queryIntent, {
+      onConnection: (connection) => { if (generation === searchGeneration.current) setCompanionConnection(connection); },
       onAvailable: () => {
         const now = new Date().toISOString();
         const platforms = searchMarket(queryIntent.origin, queryIntent.destination) === "domestic_cn"
@@ -983,24 +985,30 @@ export default function Home() {
     setBusy("idle");
   }
 
-  async function retryCompanion(platform: CompanionPlatform) {
+  async function retryCompanion(platform?: CompanionPlatform) {
     if (!result || busy !== "idle") return;
     const generation = searchGeneration.current;
     const queryIntent = result.intent;
     setBusy("searching");
     setError("");
     setSearchProgress({ percent: 25, label: "正在继续该来源，其他报价已保留" });
-    try {
-      const companion = await searchWithEdgeCompanion(queryIntent, { platform });
-      if (!companion) throw new Error("未连接本机扩展，请重新加载扩展并刷新网页。");
-      const response = await apiRequest<SearchResponse>("/v1/searches/companion", { intent: queryIntent, companion });
-      if (generation !== searchGeneration.current) return;
-      setResult((previous) => mergeSearchResults(previous, response));
-    } catch (cause) {
-      if (generation === searchGeneration.current) setError(cause instanceof Error ? cause.message : "补查失败，其他来源结果已保留。");
-    } finally {
-      if (generation === searchGeneration.current) setBusy("idle");
-    }
+    const mappings: Promise<void>[] = [];
+    const errors: string[] = [];
+    const failure = (cause: unknown) => { errors.push(cause instanceof Error ? cause.message : "补查失败，其他来源结果已保留。"); };
+    await searchWithEdgeCompanion(queryIntent, {
+      platform,
+      onConnection: (connection) => { if (generation === searchGeneration.current) setCompanionConnection(connection); },
+      onResult: (companion) => {
+        if (generation !== searchGeneration.current) return;
+        mappings.push(apiRequest<SearchResponse>("/v1/searches/companion", { intent: queryIntent, companion }).then((response) => {
+          if (generation === searchGeneration.current) setResult((previous) => mergeSearchResults(previous, response));
+        }).catch(failure));
+      },
+    }).catch(failure);
+    await Promise.all(mappings);
+    if (generation !== searchGeneration.current) return;
+    if (errors.length) setError([...new Set(errors)].join("；"));
+    setBusy("idle");
   }
 
   async function saveOffer(offer: Offer) {
@@ -1954,6 +1962,18 @@ export default function Home() {
             <div className="eyebrow"><Radar size={14} /> 来源覆盖中心</div>
             <h2 id="coverage-title">来源数量不等于可信度</h2>
             <p id="coverage-description">分别记录每个查询入口的返回、等待登录和失败状态。返回报价不代表已查全或已核验全价，同平台的接口与浏览器结果会合并比较。</p>
+            <p data-testid="companion-connection" role="status">
+              {companionConnection.state === "connected" ? `本机扩展已连接 · ${companionConnection.version}`
+                : companionConnection.state === "checking" ? "正在连接本机扩展…"
+                : companionConnection.state === "unavailable" ? "本机扩展未连接 · 浏览器来源尚未参与本轮查询"
+                : "本机扩展将在搜索时连接"}
+              <small> · 网页版本 {process.env.NEXT_PUBLIC_BUILD_REVISION}</small>
+            </p>
+            {result && companionConnection.state === "unavailable" && (
+              <button type="button" className="secondary-button" disabled={busy !== "idle"} onClick={() => void retryCompanion()}>
+                重新连接并查询浏览器来源
+              </button>
+            )}
             {error && <p className="field-error" role="alert">{error}</p>}
             {result && (
               <section className="current-coverage" aria-label="本次搜索覆盖详情">

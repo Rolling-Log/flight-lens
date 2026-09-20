@@ -7,6 +7,10 @@ import {
 
 const CHANNEL = "flight-lens-edge-companion";
 
+export type CompanionConnection =
+  | { state: "idle" | "checking" | "unavailable" }
+  | { state: "connected"; version: string };
+
 type CompanionReply = {
   channel: typeof CHANNEL;
   direction: "to-page";
@@ -57,10 +61,18 @@ function requestExtension(
 
 export async function searchWithEdgeCompanion(
   intent: SearchIntent,
-  options: { platform?: CompanionPlatform; onResult?: (result: CompanionSearchResult) => void; onAvailable?: () => void } = {},
-): Promise<CompanionSearchResult | null> {
-  const ping = await requestExtension("PING", null, 350);
-  if (!ping?.ok) return null;
+  options: { platform?: CompanionPlatform; onResult?: (result: CompanionSearchResult) => void; onAvailable?: () => void; onConnection?: (connection: CompanionConnection) => void } = {},
+): Promise<CompanionSearchResult> {
+  options.onConnection?.({ state: "checking" });
+  // MV3 workers can take time to wake up. Retry discovery, never SEARCH itself.
+  let ping = await requestExtension("PING", null, 2_000);
+  if (!ping?.ok) ping = await requestExtension("PING", null, 2_000);
+  if (!ping?.ok) {
+    options.onConnection?.({ state: "unavailable" });
+    throw new Error("本机扩展未连接，浏览器来源尚未参与搜索。若刚重新加载扩展，请刷新航探网页后再试；已返回的云端报价仍可查看。");
+  }
+  const version = (ping.payload as { extensionVersion?: string } | undefined)?.extensionVersion;
+  options.onConnection?.({ state: "connected", version: version ?? "未知版本" });
   const capabilities = (ping.payload as { capabilities?: string[] } | undefined)?.capabilities ?? [];
   if (options.platform && !capabilities.includes("platform_retry")) {
     throw new Error("请在 Edge 扩展管理页重新加载航探扩展，并刷新航探网页后再继续该来源。");
