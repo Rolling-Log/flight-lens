@@ -3,6 +3,49 @@ import AxeBuilder from "@axe-core/playwright";
 
 const pvgNrtRouteName = /浦东国际机场.*PVG.*成田国际机场.*NRT/;
 
+test("cloud results arrive before browser completion and login retry only searches one platform", async ({ page }) => {
+  let cloudCalls = 0;
+  await page.route("**/v1/searches", async (route) => { cloudCalls += 1; await route.continue(); });
+  await page.addInitScript(() => {
+    const host = window as typeof window & { finishCompanion?: () => void; companionRequests?: { platforms?: string[] }[] };
+    host.companionRequests = [];
+    window.addEventListener("message", (event) => {
+      const message = event.data;
+      if (message?.channel !== "flight-lens-edge-companion" || message.direction !== "to-extension") return;
+      const reply = (payload: unknown) => window.postMessage({ channel: message.channel, direction: "to-page", requestId: message.requestId, ok: true, payload }, location.origin);
+      if (message.type === "PING") { reply({ extensionVersion: "0.2.0", capabilities: ["incremental", "platform_retry"] }); return; }
+      host.companionRequests!.push(message.payload);
+      const retry = message.payload.platforms?.[0] === "ctrip";
+      const result = { protocolVersion: "1", extensionVersion: "0.2.0", results: [{ platform: "ctrip", journeys: [
+        { direction: "outbound", state: retry ? "empty" : "login_required", bookingUrl: "https://flights.ctrip.com/online/list/", fetchedAt: new Date().toISOString(), cards: [] },
+        ...(retry ? [{ direction: "inbound", state: "empty", bookingUrl: "https://flights.ctrip.com/online/list/", fetchedAt: new Date().toISOString(), cards: [] }] : []),
+      ] }] };
+      if (retry) reply(result);
+      else host.finishCompanion = () => reply(result);
+    });
+  });
+  await page.goto("/");
+  await page.getByRole("tab", { name: "精确筛选" }).click();
+  await page.getByRole("button", { name: "开始检索" }).click();
+  await expect.poll(() => cloudCalls).toBe(1);
+  await expect(page.getByRole("article").first()).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("结果陆续返回");
+  await page.getByRole("article").first().getByRole("button", { name: "查看报价详情" }).click();
+  await expect(page.getByRole("region", { name: pvgNrtRouteName })).toBeVisible();
+  await page.evaluate(() => (window as typeof window & { finishCompanion?: () => void }).finishCompanion?.());
+  await page.getByRole("button", { name: "来源", exact: true }).click();
+  const retry = page.getByRole("button", { name: "已完成登录／验证，继续" });
+  await expect(retry).toBeEnabled();
+  // Later source replies must not clear the quote the user is already reading.
+  await expect(page.getByRole("region", { name: pvgNrtRouteName })).toBeVisible();
+  await retry.click();
+  await expect(page.getByRole("button", { name: "重新查询此来源" })).toBeEnabled();
+  expect(cloudCalls).toBe(1);
+  const requests = await page.evaluate(() => (window as typeof window & { companionRequests?: { platforms?: string[] }[] }).companionRequests);
+  expect(requests).toHaveLength(2);
+  expect(requests?.[1]?.platforms).toEqual(["ctrip"]);
+});
+
 test("a lower list fare never inherits a verified-price badge from the same flight", async ({ page }) => {
   await page.route("**/v1/searches", async (route) => {
     const response = await route.fetch({ url: `http://127.0.0.1:${process.env.PLAYWRIGHT_API_PORT ?? 4000}/v1/searches` });

@@ -160,7 +160,12 @@ export const companionJourneyResultSchema = z.object({
   state: companionJourneyStateSchema,
   bookingUrl: z.string().url(),
   fetchedAt: isoDateTimeSchema,
-  cards: z.array(companionCardSchema).max(50).default([]),
+  cards: z.array(companionCardSchema).max(500).default([]),
+  coverage: z.object({
+    status: z.enum(["complete", "partial", "unknown"]),
+    pagesVisited: z.number().int().min(0).max(100),
+    reason: z.string().max(100).optional(),
+  }).optional(),
   errorCode: z.string().max(100).optional(),
 });
 export type CompanionJourneyResult = z.infer<typeof companionJourneyResultSchema>;
@@ -440,6 +445,7 @@ export const searchResponseSchema = z.object({
     successfulSources: z.number().int().nonnegative(),
     failedSources: z.number().int().nonnegative(),
     timedOutSources: z.number().int().nonnegative(),
+    pendingSources: z.number().int().nonnegative().default(0),
     statement: z.string(),
   }),
   audit: z.object({

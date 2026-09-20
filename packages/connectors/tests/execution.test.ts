@@ -50,6 +50,48 @@ const intent: SearchIntent = {
   pendingQuestions: [],
 };
 
+function personalObservation(price: number, state: "success" | "login_required" = "success") {
+  return {
+    platform: "tongcheng" as const,
+    journeys: [{ direction: "outbound" as const, state,
+      bookingUrl: "https://www.ly.com/flights/", fetchedAt: new Date().toISOString(),
+      cards: state === "success" ? [{
+        cardText: "南方航空 CZ3275 直飞", flightNumberText: "CZ3275", airlineName: "南方航空",
+        departureTime: "08:10", arrivalTime: "10:45", departureAirport: "咸阳国际机场 T3",
+        arrivalAirport: "吴圩国际机场 T2", priceText: `¥${price}`,
+      }] : [],
+    }],
+  };
+}
+
+test("personal observations never reuse another request's price or hide a later login failure", async () => {
+  clearConnectorExecutionCache();
+  const query = { ...intent, origin: { kind: "airport" as const, code: "XIY" }, destination: { kind: "airport" as const, code: "NNG" } };
+  const first = await executeConnector(new CompanionOtaConnector("tongcheng", personalObservation(520)), query, "session-a", 1000);
+  const second = await executeConnector(new CompanionOtaConnector("tongcheng", personalObservation(399)), query, "session-b", 1000);
+  const blocked = await executeConnector(new CompanionOtaConnector("tongcheng", personalObservation(0, "login_required")), query, "session-c", 1000);
+  assert.equal(first.result.offers[0]?.totalPrice.amountMinor, 52000);
+  assert.equal(second.result.offers[0]?.totalPrice.amountMinor, 39900);
+  assert.equal(second.report.notes.some((note) => note.startsWith("CACHE_")), false);
+  assert.equal(blocked.report.state, "login_required");
+  assert.equal(blocked.result.offers.length, 0);
+});
+
+test("blocked companion remains visible without any cloud replacement", async () => {
+  const [connector] = withCompanionConnectors([], [personalObservation(0, "login_required")], intent);
+  assert.ok(connector);
+  const execution = await executeConnector(connector, intent, "blocked", 1000);
+  assert.equal(execution.report.state, "login_required");
+});
+
+test("maps valid browser offers beyond the old thirty-card cutoff", () => {
+  const card = personalObservation(399).journeys[0]!.cards[0]!;
+  const cards = Array.from({ length: 45 }, (_, index) => ({ ...card, flightNumberText: `CZ${3000 + index}` }));
+  const offers = mapDomCards(cards, "tongcheng", { ...intent, origin: { kind: "airport", code: "XIY" }, destination: { kind: "airport", code: "NNG" } }, "full-list", "https://www.ly.com/flights/");
+  assert.equal(offers.length, 45);
+  assert.equal(offers.at(-1)?.segments[0]?.flightNumber, "3044");
+});
+
 test("maps SerpApi price insights without issuing a second search", () => {
   const insight = mapSerpApiPriceInsights({
     search_parameters: { currency: "CNY" },
@@ -1510,7 +1552,7 @@ test("maps Edge companion round-trip cards into truthful split-ticket offers", a
   assert.equal(result.offers[0]?.comparable, false);
 });
 
-test("replaces duplicate inventory families with Edge companion connectors", () => {
+test("retains API and browser runners for the same inventory family", () => {
   const serverConnector: FlightConnector = {
     metadata: {
       id: "server-fliggy",
@@ -1545,9 +1587,10 @@ test("replaces duplicate inventory families with Edge companion connectors", () 
       }],
     }],
   }], { ...intent, origin: { kind: "airport", code: "XIY" }, destination: { kind: "airport", code: "NNG" } });
-  assert.equal(merged.length, 1);
-  assert.equal(merged[0]?.metadata.id, "fliggy-edge-companion");
-  assert.equal(merged[0]?.metadata.capabilities?.executionLocation, "user_browser");
+  assert.equal(merged.length, 2);
+  assert.equal(merged[0]?.metadata.id, "server-fliggy");
+  assert.equal(merged[1]?.metadata.id, "fliggy-edge-companion");
+  assert.equal(merged[1]?.metadata.capabilities?.executionLocation, "user_browser");
 });
 
 test("retains a working server connector when Edge companion evidence failed", () => {
@@ -1577,7 +1620,7 @@ test("retains a working server connector when Edge companion evidence failed", (
       errorCode: "FLIGGY_COMPANION_PAGE_CHANGED",
     }],
   }], intent);
-  assert.equal(merged.length, 1);
+  assert.equal(merged.length, 2);
   assert.equal(merged[0]?.metadata.id, "fliggy-flyai");
   assert.equal(merged[0]?.metadata.capabilities?.executionLocation, undefined);
 });

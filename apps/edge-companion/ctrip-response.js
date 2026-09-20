@@ -99,7 +99,7 @@ var FlightLensCtripResponse = (() => {
         evidenceKind: "structured_response",
         ...(price.priceBreakdown ? { priceBreakdown: price.priceBreakdown } : {}),
       }];
-    }).slice(0, 50);
+    }).slice(0, 500);
   }
 
   return { normalize };

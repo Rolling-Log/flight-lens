@@ -565,7 +565,7 @@ export function mapDomCards(
   fetchedAt = new Date().toISOString(),
 ): Offer[] {
   const definition = DEFINITIONS[platform];
-  return cards.slice(0, 30).flatMap((card, index) => {
+  return cards.flatMap((card, index) => {
     const parts = flightParts(card.flightNumberText || card.cardText);
     const perAdultMinor = priceMinor(card.priceText);
     const departureAt = domDateTime(intent.departureDate, card.departureTime, false);
@@ -897,7 +897,7 @@ export class CompanionOtaConnector implements FlightConnector {
       return {
         offers: outboundOffers,
         providerRequestId: context.requestId,
-        notes: [`${this.platform.toUpperCase()}_EDGE_COMPANION_SESSION`],
+        notes: [`${this.platform.toUpperCase()}_EDGE_COMPANION_SESSION`, ...this.coverageNotes()],
       };
     }
 
@@ -931,8 +931,15 @@ export class CompanionOtaConnector implements FlightConnector {
       notes: [
         `${this.platform.toUpperCase()}_EDGE_COMPANION_SESSION`,
         `${this.platform.toUpperCase()}_ROUND_TRIP_SPLIT_TICKET`,
+        ...this.coverageNotes(),
       ],
     };
+  }
+
+  private coverageNotes(): string[] {
+    return this.result.journeys.map((journey) =>
+      `BROWSER_COVERAGE:${journey.direction}:${journey.coverage?.status ?? "unknown"}:${journey.coverage?.pagesVisited ?? 1}:${journey.coverage?.reason ?? "UNVERIFIED_SCOPE"}`,
+    );
   }
 
   private mapJourney(

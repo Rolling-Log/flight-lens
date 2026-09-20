@@ -246,7 +246,7 @@ test("keeps the cheaper duplicate for one seller", () => {
   assert.equal(deduplicateOffers([expensive, cheap])[0]?.id, "cheap");
 });
 
-test("deduplicates the same itinerary and normalized seller across connectors", () => {
+test("preserves the same seller across channels with independent quote evidence", () => {
   const first = offer({
     id: "first",
     connectorId: "source-a",
@@ -258,7 +258,19 @@ test("deduplicates the same itinerary and normalized seller across connectors", 
     connectorId: "source-b",
     seller: { id: "source-b-seller", name: "Example  OTA", kind: "ota" },
   });
-  assert.deepEqual(deduplicateOffers([first, second]).map((item) => item.id), ["second"]);
+  assert.deepEqual(deduplicateOffers([first, second]).map((item) => item.id), ["first", "second"]);
+});
+
+test("keeps baggage, eligibility, fare products and price evidence distinct", () => {
+  const base = offer({ id: "base" });
+  const variants = [
+    offer({ id: "bags", baggage: [{ type: "checked", included: true, weightKg: 20 }] }),
+    offer({ id: "member", eligibility: ["MEMBER_ONLY"] }),
+    offer({ id: "flex", fareBrand: "flex", refundable: true }),
+    offer({ id: "verified", priceVerificationStatus: "detail_verified" }),
+    offer({ id: "other-product", sourceOfferId: "different-product" }),
+  ];
+  assert.equal(deduplicateOffers([base, ...variants]).length, 6);
 });
 
 test("keeps split and single-ticket offers as separate products", () => {

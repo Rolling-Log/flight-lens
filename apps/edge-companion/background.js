@@ -66,8 +66,6 @@ function inboundIntent(intent) {
 }
 
 async function waitForTab(tabId, timeoutMs = 45_000) {
-  const current = await chrome.tabs.get(tabId);
-  if (current.status === "complete") return;
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => finish(new Error("TAB_LOAD_TIMEOUT")), timeoutMs);
     const changed = (changedId, info) => {
@@ -84,6 +82,10 @@ async function waitForTab(tabId, timeoutMs = 45_000) {
     };
     chrome.tabs.onUpdated.addListener(changed);
     chrome.tabs.onRemoved.addListener(removed);
+    // Subscribe before reading status, so a fast load cannot finish in between.
+    chrome.tabs.get(tabId).then((tab) => {
+      if (tab.status === "complete") finish();
+    }).catch((error) => finish(error));
   });
 }
 
@@ -92,14 +94,15 @@ async function focusTab(tabId) {
   if (tab?.windowId) await chrome.windows.update(tab.windowId, { focused: true }).catch(() => undefined);
 }
 
-async function collectJourney(tabId, platform, direction, intent) {
+async function collectJourney(tabId, platform, direction, intent, navigate = true) {
   const bookingUrl = buildUrl(platform, intent);
-  await chrome.tabs.update(tabId, { url: bookingUrl, active: false });
   try {
+    if (navigate) await chrome.tabs.update(tabId, { url: bookingUrl, active: false });
     await waitForTab(tabId);
     const result = await chrome.tabs.sendMessage(tabId, {
       type: "FLIGHT_LENS_COLLECT",
       platform,
+      intent,
     });
     const normalized = {
       direction,
@@ -107,6 +110,7 @@ async function collectJourney(tabId, platform, direction, intent) {
       bookingUrl: result?.bookingUrl || bookingUrl,
       fetchedAt: result?.fetchedAt || new Date().toISOString(),
       cards: Array.isArray(result?.cards) ? result.cards : [],
+      ...(result?.coverage ? { coverage: result.coverage } : {}),
       ...(result?.errorCode ? { errorCode: result.errorCode } : {}),
     };
     if (["login_required", "captcha_required"].includes(normalized.state)) {
@@ -125,20 +129,30 @@ async function collectJourney(tabId, platform, direction, intent) {
   }
 }
 
-async function runPlatform(platform, intent) {
-  const firstUrl = buildUrl(platform, intent);
-  const tab = await chrome.tabs.create({ url: firstUrl, active: false });
+async function runPlatform(platform, intent, ownerTabId) {
+  const pendingKey = `pending:${ownerTabId}:${platform}:${JSON.stringify(intent)}`;
+  const stored = (await chrome.storage.session.get(pendingKey))[pendingKey];
+  const pending = stored && Date.now() - stored.savedAt < 30 * 60_000 ? stored : null;
+  let tab = pending ? await chrome.tabs.get(pending.tabId).catch(() => null) : null;
+  const resumed = Boolean(tab);
+  if (!tab) tab = await chrome.tabs.create({ url: buildUrl(platform, intent), active: false });
   if (!tab.id) throw new Error("TAB_CREATE_FAILED");
-  const journeys = [];
+  const journeys = resumed ? pending.journeys.filter((journey) => ["success", "empty"].includes(journey.state)) : [];
   let keepTab = false;
   try {
-    const outbound = await collectJourney(tab.id, platform, "outbound", intent);
-    journeys.push(outbound);
-    keepTab = ["login_required", "captcha_required"].includes(outbound.state);
-    if (intent.tripType === "round_trip" && intent.returnDate && !keepTab) {
-      const inbound = await collectJourney(tab.id, platform, "inbound", inboundIntent(intent));
-      journeys.push(inbound);
-      keepTab = ["login_required", "captcha_required"].includes(inbound.state);
+    if (!journeys.some((journey) => journey.direction === "outbound")) {
+      journeys.push(await collectJourney(tab.id, platform, "outbound", intent, resumed));
+    }
+    keepTab = journeys.some((journey) => ["login_required", "captcha_required"].includes(journey.state));
+    if (intent.tripType === "round_trip" && intent.returnDate && !keepTab &&
+        !journeys.some((journey) => journey.direction === "inbound")) {
+      journeys.push(await collectJourney(tab.id, platform, "inbound", inboundIntent(intent)));
+      keepTab = journeys.some((journey) => ["login_required", "captcha_required"].includes(journey.state));
+    }
+    if (keepTab) {
+      await chrome.storage.session.set({ [pendingKey]: { tabId: tab.id, journeys, savedAt: Date.now() } });
+    } else {
+      await chrome.storage.session.remove(pendingKey);
     }
     return { platform, journeys };
   } finally {
@@ -146,14 +160,25 @@ async function runPlatform(platform, intent) {
   }
 }
 
-async function searchAll(intent) {
+async function searchAll(intent, requestedPlatforms, sender, requestId) {
   const domestic = MAINLAND_CODES.has(intent.origin.code) && MAINLAND_CODES.has(intent.destination.code);
-  const applicablePlatforms = domestic ? PLATFORMS : ["ctrip"];
+  const eligible = domestic ? PLATFORMS : ["ctrip"];
+  const applicablePlatforms = Array.isArray(requestedPlatforms)
+    ? eligible.filter((platform) => requestedPlatforms.includes(platform)) : eligible;
+  const publish = async (result) => {
+    if (!sender.tab?.id) return;
+    await chrome.tabs.sendMessage(sender.tab.id, {
+      type: "FLIGHT_LENS_SEARCH_PROGRESS", requestId,
+      payload: { protocolVersion: "1", extensionVersion: EXTENSION_VERSION, results: [result] },
+    }).catch(() => undefined);
+  };
   const results = await Promise.all(applicablePlatforms.map(async (platform) => {
     try {
-      return await runPlatform(platform, intent);
+      const result = await runPlatform(platform, intent, sender.tab?.id);
+      await publish(result);
+      return result;
     } catch (error) {
-      return {
+      const result = {
         platform,
         journeys: [{
           direction: "outbound",
@@ -164,6 +189,8 @@ async function searchAll(intent) {
           errorCode: `${platform.toUpperCase()}_COMPANION_${error?.message || "FAILED"}`,
         }],
       };
+      await publish(result);
+      return result;
     }
   }));
   const payload = { protocolVersion: "1", extensionVersion: EXTENSION_VERSION, results };
@@ -171,13 +198,13 @@ async function searchAll(intent) {
   return payload;
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "FLIGHT_LENS_PING") {
-    sendResponse({ ok: true, payload: { extensionVersion: EXTENSION_VERSION } });
+    sendResponse({ ok: true, payload: { extensionVersion: EXTENSION_VERSION, capabilities: ["incremental", "platform_retry"] } });
     return false;
   }
   if (message?.type === "FLIGHT_LENS_SEARCH" && message.payload?.intent) {
-    searchAll(message.payload.intent)
+    searchAll(message.payload.intent, message.payload.platforms, sender, message.requestId)
       .then((payload) => sendResponse({ ok: true, payload }))
       .catch((error) => sendResponse({
         ok: false,

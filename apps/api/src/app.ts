@@ -32,18 +32,8 @@ import {
 } from "@flight-lens/database";
 import {
   analyzePriceTrend,
+  summarizeSearch,
   assessPriceJudgment,
-  applyIntentConstraints,
-  applyAdversarialComparability,
-  deduplicateOffers,
-  disclosureStatement,
-  rankByBestBaggage,
-  rankByFewestStops,
-  rankByLowestComparablePrice,
-  rankByLowestSplitPrice,
-  rankRecommended,
-  rankByRefundFlexibility,
-  rankByShortestDuration,
   planBoundedSearch,
 } from "@flight-lens/domain";
 import Fastify, { type FastifyInstance } from "fastify";
@@ -122,20 +112,6 @@ async function persistAuditWithin(
   }
 }
 
-function coverage(reports: ConnectorReport[]) {
-  const applicableReports = reports.filter((report) => report.state !== "unsupported_query");
-  const successfulSources = applicableReports.filter((report) =>
-    ["success", "empty"].includes(report.state),
-  ).length;
-  const timedOutSources = applicableReports.filter((report) => report.state === "timeout").length;
-  return {
-    plannedSources: applicableReports.length,
-    successfulSources,
-    failedSources: applicableReports.length - successfulSources - timedOutSources,
-    timedOutSources,
-    statement: disclosureStatement(reports),
-  };
-}
 
 async function runSearch(
   intent: SearchIntent,
@@ -170,69 +146,9 @@ async function runSearch(
     }],
   );
   const reports = [...executions.map((execution) => execution.report), ...unsupportedReports];
-  const normalized = applyIntentConstraints(
-    deduplicateOffers(executions.flatMap((execution) => execution.result.offers)),
-    intent,
-  );
-  const reviewed = applyAdversarialComparability(normalized, reports);
-  const cheapest = rankByLowestComparablePrice(reviewed);
-  const splitCheapest = rankByLowestSplitPrice(reviewed);
-  const recommended = rankRecommended(reviewed);
-  const shortest = rankByShortestDuration(reviewed);
-  const fewestStops = rankByFewestStops(reviewed);
-  const bestBaggage = rankByBestBaggage(reviewed);
-  const mostFlexible = rankByRefundFlexibility(reviewed);
-  const marketPriceInsights = executions.flatMap(
-    (execution) => execution.result.marketPriceInsights ?? [],
-  );
-  const primaryInsight = marketPriceInsights.find((insight) =>
-    insight.currency === "CNY" &&
-    insight.originCode === intent.origin.code &&
-    insight.destinationCode === intent.destination.code &&
-    insight.departureDate === intent.departureDate &&
-    insight.returnDate === (intent.returnDate ?? null) &&
-    insight.tripType === intent.tripType &&
-    insight.cabin === intent.cabin &&
-    insight.adults === intent.adults,
-  );
-  const lowestCurrent = cheapest[0];
-  const currentAmountMinor = primaryInsight?.lowestPriceMinor ??
-    lowestCurrent?.totalPriceCny?.amountMinor ??
-    (lowestCurrent?.totalPrice.currency === "CNY" ? lowestCurrent.totalPrice.amountMinor : null) ??
-    null;
-  const currentPriceBasis = primaryInsight?.lowestPriceMinor !== null && primaryInsight?.lowestPriceMinor !== undefined
-    ? "listed_only" as const
-    : lowestCurrent
-      ? lowestCurrent.purchaseMode === "split_ticket"
-        ? "split_ticket" as const
-        : lowestCurrent.priceVerificationStatus === "listed_only"
-          ? "listed_only" as const
-          : "verified_all_in" as const
-      : null;
-  const priceJudgment = assessPriceJudgment({
-    currentAmountMinor,
-    currentPriceBasis,
-    currency: currentAmountMinor === null ? null : "CNY",
-    intent,
-    ...(primaryInsight ? { marketInsight: primaryInsight } : {}),
-  });
-
-  return {
-    requestId,
-    intent,
-    offers: reviewed,
-    connectorReports: reports,
-    marketPriceInsights,
-    priceJudgment,
-    lowestComparableOfferId: cheapest[0]?.id ?? null,
-    lowestSplitOfferId: splitCheapest[0]?.id ?? null,
-    recommendedOfferId: recommended[0]?.id ?? null,
-    shortestOfferId: shortest[0]?.id ?? null,
-    fewestStopsOfferId: fewestStops[0]?.id ?? null,
-    bestBaggageOfferId: bestBaggage[0]?.id ?? null,
-    mostFlexibleOfferId: mostFlexible[0]?.id ?? null,
-    disclosure: coverage(reports),
-  };
+  return summarizeSearch(intent,
+    executions.flatMap((execution) => execution.result.offers), reports,
+    executions.flatMap((execution) => execution.result.marketPriceInsights ?? []), requestId);
 }
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
@@ -841,6 +757,24 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         },
       });
     }
+  });
+
+  // This route maps personal observations only. It must never spend provider
+  // credits or publish client-supplied quotes to shared price history.
+  app.post("/v1/searches/companion", {
+    bodyLimit: 4 * 1024 * 1024,
+    config: { rateLimit: { max: 24, timeWindow: "1 minute" } },
+  }, async (request, reply) => {
+    const parsed = companionSearchRequestSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ error: { code: "INVALID_COMPANION_SEARCH", message: "浏览器搜索证据不完整或不合法。" } });
+    const { intent, companion } = parsed.data;
+    if (intent.departureDate < now().toISOString().slice(0, 10)) {
+      return reply.status(400).send({ error: { code: "SEARCH_DATE_IN_PAST", message: "出发日期不能早于今天。" } });
+    }
+    if (intent.flexibleDays !== 0) return reply.status(422).send({ error: { code: "V1_SCOPE_UNSUPPORTED", message: "浏览器补查当前仅支持固定日期。" } });
+    const result = await runSearch(intent, withCompanionConnectors([], companion.results, intent), config.connectorTimeoutMs, { maxRetries: 0, cacheTtlMs: 0, staleIfErrorMs: 0 });
+    reply.header("cache-control", "private, no-store");
+    return reply.send(searchResponseSchema.parse({ ...result, audit: { configured: false, persisted: false } }));
   });
 
   app.post("/v1/searches", {

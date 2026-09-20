@@ -7,6 +7,7 @@ import {
   type PriceTrend,
   type SearchIntent,
   type SearchPlan,
+  type SearchResponse,
 } from "@flight-lens/contracts";
 import { mean, median, quantileSorted } from "simple-statistics";
 
@@ -419,7 +420,16 @@ export function deduplicateOffers(offers: readonly Offer[]): Offer[] {
       .normalize("NFKC")
       .toLocaleLowerCase("en-US")
       .replace(/[\s\p{P}\p{S}]+/gu, "")}`;
-    const key = `${offerFingerprint(offer)}::${sellerIdentity}::${offer.purchaseMode ?? "single_ticket"}`;
+    // A seller may offer several fares for the same flight. Unknown product
+    // identity across channels is not evidence that the quotes are equivalent.
+    const product = JSON.stringify([
+      offer.connectorId, offer.sourceOfferId, offer.environment,
+      offer.purchaseMode ?? "single_ticket", offer.totalPrice.currency,
+      offer.fareBrand ?? null, offer.baggage, offer.refundable, offer.changeable,
+      [...offer.eligibility].sort(), offer.priceVerificationStatus ?? null,
+      offer.priceComponents.map(({ kind, required }) => [kind, required]),
+    ]);
+    const key = `${offerFingerprint(offer)}::${sellerIdentity}::${product}`;
     const current = byFingerprintAndSeller.get(key);
     const offerPrice = offer.totalPriceCny?.amountMinor ?? offer.totalPrice.amountMinor;
     const currentPrice =
@@ -732,12 +742,101 @@ export function disclosureStatement(reports: readonly ConnectorReport[]): string
   const applicable = reports.filter((report) => report.state !== "unsupported_query");
   const success = applicable.filter((report) => ["success", "empty"].includes(report.state)).length;
   const timeout = applicable.filter((report) => report.state === "timeout").length;
-  const failed = applicable.length - success - timeout;
+  const pending = applicable.filter((report) => ["pending", "searching"].includes(report.state)).length;
+  const failed = applicable.length - success - timeout - pending;
   const partial = reports.filter(
     (report) => report.errorCode === "PARTIAL_DATE_PROBE_FAILURE",
   ).length;
   const cached = reports.filter((report) =>
     report.notes.some((note) => note.startsWith("CACHE_")),
   ).length;
-  return `本次计划检索 ${applicable.length} 个适用来源，成功核验 ${success} 个，${timeout} 个超时，${failed} 个失败${unsupported ? `；另有 ${unsupported} 个来源不适用当前条件，未计入覆盖率` : ""}${partial ? `，其中 ${partial} 个来源仅完成部分日期探测` : ""}${cached ? `，${cached} 个来源使用了已明确标记的缓存结果` : ""}。最低价仅代表成功返回且价格口径可比的来源。`;
+  return `本次计划检索 ${applicable.length} 个适用入口，成功返回 ${success} 个，${pending} 个进行中，${timeout} 个超时，${failed} 个失败${unsupported ? `；另有 ${unsupported} 个入口不适用当前条件，未计入覆盖率` : ""}${partial ? `，其中 ${partial} 个入口仅完成部分日期探测` : ""}${cached ? `，${cached} 个入口使用了已明确标记的缓存结果` : ""}。同平台不同入口分别记录；成功返回不代表报价完整或全价已核验。`;
+}
+
+
+function coverage(reports: ConnectorReport[]) {
+  const applicableReports = reports.filter((report) => report.state !== "unsupported_query");
+  const successfulSources = applicableReports.filter((report) =>
+    ["success", "empty"].includes(report.state),
+  ).length;
+  const timedOutSources = applicableReports.filter((report) => report.state === "timeout").length;
+  const pendingSources = applicableReports.filter((report) => ["pending", "searching"].includes(report.state)).length;
+  return {
+    plannedSources: applicableReports.length,
+    successfulSources,
+    failedSources: applicableReports.length - successfulSources - timedOutSources - pendingSources,
+    timedOutSources,
+    pendingSources,
+    statement: disclosureStatement(reports),
+  };
+}
+
+
+export function summarizeSearch(
+  intent: SearchIntent,
+  offers: readonly Offer[],
+  reports: ConnectorReport[],
+  marketPriceInsights: MarketPriceInsight[],
+  requestId: string,
+): Omit<SearchResponse, "audit"> {
+  const normalized = applyIntentConstraints(
+    deduplicateOffers(offers),
+    intent,
+  );
+  const reviewed = applyAdversarialComparability(normalized, reports);
+  const cheapest = rankByLowestComparablePrice(reviewed);
+  const splitCheapest = rankByLowestSplitPrice(reviewed);
+  const recommended = rankRecommended(reviewed);
+  const shortest = rankByShortestDuration(reviewed);
+  const fewestStops = rankByFewestStops(reviewed);
+  const bestBaggage = rankByBestBaggage(reviewed);
+  const mostFlexible = rankByRefundFlexibility(reviewed);
+  const primaryInsight = marketPriceInsights.find((insight) =>
+    insight.currency === "CNY" &&
+    insight.originCode === intent.origin.code &&
+    insight.destinationCode === intent.destination.code &&
+    insight.departureDate === intent.departureDate &&
+    insight.returnDate === (intent.returnDate ?? null) &&
+    insight.tripType === intent.tripType &&
+    insight.cabin === intent.cabin &&
+    insight.adults === intent.adults,
+  );
+  const lowestCurrent = cheapest[0];
+  const currentAmountMinor = primaryInsight?.lowestPriceMinor ??
+    lowestCurrent?.totalPriceCny?.amountMinor ??
+    (lowestCurrent?.totalPrice.currency === "CNY" ? lowestCurrent.totalPrice.amountMinor : null) ??
+    null;
+  const currentPriceBasis = primaryInsight?.lowestPriceMinor !== null && primaryInsight?.lowestPriceMinor !== undefined
+    ? "listed_only" as const
+    : lowestCurrent
+      ? lowestCurrent.purchaseMode === "split_ticket"
+        ? "split_ticket" as const
+        : lowestCurrent.priceVerificationStatus === "listed_only"
+          ? "listed_only" as const
+          : "verified_all_in" as const
+      : null;
+  const priceJudgment = assessPriceJudgment({
+    currentAmountMinor,
+    currentPriceBasis,
+    currency: currentAmountMinor === null ? null : "CNY",
+    intent,
+    ...(primaryInsight ? { marketInsight: primaryInsight } : {}),
+  });
+
+  return {
+    requestId,
+    intent,
+    offers: reviewed,
+    connectorReports: reports,
+    marketPriceInsights,
+    priceJudgment,
+    lowestComparableOfferId: cheapest[0]?.id ?? null,
+    lowestSplitOfferId: splitCheapest[0]?.id ?? null,
+    recommendedOfferId: recommended[0]?.id ?? null,
+    shortestOfferId: shortest[0]?.id ?? null,
+    fewestStopsOfferId: fewestStops[0]?.id ?? null,
+    bestBaggageOfferId: bestBaggage[0]?.id ?? null,
+    mostFlexibleOfferId: mostFlexible[0]?.id ?? null,
+    disclosure: coverage(reports),
+  };
 }

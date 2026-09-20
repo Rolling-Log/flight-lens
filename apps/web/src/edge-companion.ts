@@ -1,6 +1,7 @@
 import {
   companionSearchResultSchema,
   type CompanionSearchResult,
+  type CompanionPlatform,
   type SearchIntent,
 } from "@flight-lens/contracts";
 
@@ -13,12 +14,14 @@ type CompanionReply = {
   ok: boolean;
   payload?: unknown;
   errorCode?: string;
+  progress?: boolean;
 };
 
 function requestExtension(
   type: "PING" | "SEARCH",
   payload: unknown,
   timeoutMs: number,
+  onProgress?: (payload: unknown) => void,
 ): Promise<CompanionReply | null> {
   if (typeof window === "undefined") return Promise.resolve(null);
   const requestId = crypto.randomUUID();
@@ -33,7 +36,8 @@ function requestExtension(
         message.direction !== "to-page" ||
         message.requestId !== requestId
       ) return;
-      finish(message as CompanionReply);
+      if (message.progress) onProgress?.(message.payload);
+      else finish(message as CompanionReply);
     };
     const finish = (value: CompanionReply | null) => {
       window.clearTimeout(timer);
@@ -53,11 +57,30 @@ function requestExtension(
 
 export async function searchWithEdgeCompanion(
   intent: SearchIntent,
+  options: { platform?: CompanionPlatform; onResult?: (result: CompanionSearchResult) => void; onAvailable?: () => void } = {},
 ): Promise<CompanionSearchResult | null> {
   const ping = await requestExtension("PING", null, 350);
   if (!ping?.ok) return null;
-  const response = await requestExtension("SEARCH", { intent }, 100_000);
-  if (!response?.ok) return null;
+  const capabilities = (ping.payload as { capabilities?: string[] } | undefined)?.capabilities ?? [];
+  if (options.platform && !capabilities.includes("platform_retry")) {
+    throw new Error("请在 Edge 扩展管理页重新加载航探扩展，并刷新航探网页后再继续该来源。");
+  }
+  options.onAvailable?.();
+  const delivered = new Map<string, string>();
+  const deliver = (payload: unknown) => {
+    const parsed = companionSearchResultSchema.safeParse(payload);
+    if (!parsed.success) return;
+    for (const result of parsed.data.results) {
+      const signature = JSON.stringify(result);
+      if (delivered.get(result.platform) === signature) continue;
+      delivered.set(result.platform, signature);
+      options.onResult?.({ ...parsed.data, results: [result] });
+    }
+  };
+  const response = await requestExtension("SEARCH", { intent, ...(options.platform ? { platforms: [options.platform] } : {}) }, 240_000, deliver);
+  if (!response?.ok) throw new Error("部分浏览器来源未完成；已返回的结果已保留，可在来源详情中继续补查。");
   const parsed = companionSearchResultSchema.safeParse(response.payload);
-  return parsed.success ? parsed.data : null;
+  if (!parsed.success) throw new Error("浏览器来源返回了无法识别的结果，请重新加载扩展后重试。");
+  deliver(parsed.data);
+  return parsed.data;
 }

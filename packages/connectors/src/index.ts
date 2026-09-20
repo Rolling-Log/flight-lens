@@ -274,13 +274,16 @@ export async function executeConnector(
   policy: ConnectorExecutionPolicy = {},
 ): Promise<ConnectorExecution> {
   const maxRetries = Math.max(0, policy.maxRetries ?? 1);
-  const cacheTtlMs = Math.max(0, policy.cacheTtlMs ?? 60_000);
-  const staleIfErrorMs = Math.max(cacheTtlMs, policy.staleIfErrorMs ?? 300_000);
+  // Browser observations belong to the requesting session, including failures.
+  // Never read or populate the public cache with a personal observation.
+  const cacheable = connector.metadata.authorization !== "browser_session";
+  const cacheTtlMs = cacheable ? Math.max(0, policy.cacheTtlMs ?? 60_000) : 0;
+  const staleIfErrorMs = cacheable ? Math.max(cacheTtlMs, policy.staleIfErrorMs ?? 300_000) : 0;
   const cacheKey = executionCacheKey(connector, intent);
   const started = Date.now();
   const startedAt = new Date(started).toISOString();
-  const cacheEntry = executionCache.get(cacheKey);
-  if (cacheEntry && started - cacheEntry.cachedAt <= cacheTtlMs) {
+  const cacheEntry = cacheable ? executionCache.get(cacheKey) : undefined;
+  if (cacheTtlMs > 0 && cacheEntry && started - cacheEntry.cachedAt <= cacheTtlMs) {
     return cachedExecution(
       cacheEntry,
       started,
@@ -492,33 +495,16 @@ export function createConnectorRegistry(config: ConnectorRegistryConfig): Flight
 export function withCompanionConnectors(
   connectors: FlightConnector[],
   results: CompanionPlatformResult[],
-  intent: SearchIntent,
+  _intent: SearchIntent,
 ): FlightConnector[] {
-  const replacements = new Map<string, FlightConnector>(
-    results.flatMap((result) => {
-      const companionHasUsableEvidence = result.journeys.every((journey) =>
-        journey.state === "success" && journey.cards.length > 0
-      );
-      if (!companionHasUsableEvidence) return [];
-      const connector = new CompanionOtaConnector(result.platform, result);
-      return connectorApplicability(connector, intent).applicable
-        ? [[result.platform, connector] as const]
-        : [];
-    }),
-  );
-  const inserted = new Set<string>();
-  const merged = connectors.flatMap((connector) => {
-    const family = connector.metadata.inventoryFamily;
-    const replacement = family ? replacements.get(family) : undefined;
-    if (!replacement) return [connector];
-    if (inserted.has(family!)) return [];
-    inserted.add(family!);
-    return [replacement];
-  });
-  for (const [platform, connector] of replacements) {
-    if (!inserted.has(platform)) merged.push(connector);
+  // A platform is not a product identity. Keep API and browser evidence together,
+  // including empty/blocked attempts, and only replace a repeat of the same runner.
+  const merged = new Map(connectors.map((connector) => [connector.metadata.id, connector]));
+  for (const result of results) {
+    const connector = new CompanionOtaConnector(result.platform, result);
+    merged.set(connector.metadata.id, connector);
   }
-  return merged;
+  return [...merged.values()];
 }
 
 type AmadeusConfig = {

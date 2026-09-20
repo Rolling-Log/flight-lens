@@ -8,6 +8,12 @@ const ALLOWED_ORIGINS = new Set([
 ]);
 
 if (ALLOWED_ORIGINS.has(window.location.origin)) {
+  const activeRequests = new Set();
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.type !== "FLIGHT_LENS_SEARCH_PROGRESS" || !activeRequests.has(message.requestId)) return;
+    window.postMessage({ channel: CHANNEL, direction: "to-page", requestId: message.requestId,
+      ok: true, progress: true, payload: message.payload }, window.location.origin);
+  });
   window.addEventListener("message", (event) => {
     if (event.source !== window || event.origin !== window.location.origin) return;
     const message = event.data;
@@ -18,6 +24,7 @@ if (ALLOWED_ORIGINS.has(window.location.origin)) {
       !["PING", "SEARCH"].includes(message.type)
     ) return;
 
+    activeRequests.add(message.requestId);
     chrome.runtime.sendMessage({
       type: `FLIGHT_LENS_${message.type}`,
       requestId: message.requestId,
@@ -39,6 +46,6 @@ if (ALLOWED_ORIGINS.has(window.location.origin)) {
         ok: false,
         errorCode: "COMPANION_RUNTIME_UNAVAILABLE",
       }, window.location.origin);
-    });
+    }).finally(() => activeRequests.delete(message.requestId));
   });
 }

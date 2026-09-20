@@ -9,10 +9,11 @@
     "preview": "next start --hostname 127.0.0.1 --port 3000",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings=0",
-    "test": "node --import tsx --test tests/**/*.test.ts"
+    "test": "node --conditions=development --import tsx --test tests/**/*.test.ts"
   },
   "dependencies": {
     "@flight-lens/contracts": "workspace:*",
+    "@flight-lens/domain": "workspace:*",
     "@gsap/react": "^2.1.2",
     "better-auth": "1.6.27",
     "gsap": "^3.15.0",

@@ -22,7 +22,7 @@
       type: "CTRIP_BATCH_SEARCH_RESULT",
       pageUrl: location.href,
       fetchedAt,
-      cards: [...cards.values()].slice(0, 50),
+      cards: [...cards.values()].slice(0, 500),
     }, location.origin);
   }
 

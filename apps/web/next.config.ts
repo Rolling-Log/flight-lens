@@ -31,7 +31,7 @@ const nextConfig: NextConfig = {
       },
     ];
   },
-  transpilePackages: ["@flight-lens/contracts"],
+  transpilePackages: ["@flight-lens/contracts", "@flight-lens/domain"],
 };
 
 export default nextConfig;

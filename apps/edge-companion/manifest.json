@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "航探 Edge Companion",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "在用户自己的 Edge 会话中核验携程、去哪儿、同程和飞猪公开机票价格。",
   "permissions": ["tabs", "scripting", "storage"],
   "host_permissions": [

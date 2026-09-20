@@ -38,6 +38,9 @@ export function resultSourceStatus(
   if (offers.some((offer) => offer.environment === "sandbox")) {
     return { label: "Sandbox 来源 · 不代表可购买库存", productionStyle: false };
   }
+  if (reports.some((report) => ["pending", "searching"].includes(report.state))) {
+    return { label: "来源正在查询 · 结果陆续返回", productionStyle: false };
+  }
   if (reports.some((report) => report.state === "timeout")) {
     return { label: "来源超时 · 未返回报价", productionStyle: false };
   }

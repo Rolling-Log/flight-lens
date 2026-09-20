@@ -80,7 +80,7 @@ window.addEventListener("message", (event) => {
     message?.channel !== CTRIP_NETWORK_CHANNEL ||
     message?.type !== "CTRIP_BATCH_SEARCH_RESULT" || message?.pageUrl !== location.href
   ) return;
-  for (const card of Array.isArray(message.cards) ? message.cards.slice(0, 50) : []) {
+  for (const card of Array.isArray(message.cards) ? message.cards.slice(0, 500) : []) {
     if (validStructuredCard(card)) ctripStructuredCards.set(ctripCardKey(card), card);
   }
   if (typeof message.fetchedAt === "string") ctripStructuredFetchedAt = message.fetchedAt;
@@ -118,7 +118,7 @@ function cardsFor(selectors) {
     try {
       const matches = [...document.querySelectorAll(selector)]
         .filter((element) => element.getClientRects().length > 0);
-      if (matches.length) return matches.slice(0, 50);
+      if (matches.length) return matches.slice(0, 500);
     } catch {
       // Ignore stale selectors and try the next verified candidate.
     }
@@ -155,7 +155,7 @@ function actionCardRoots() {
   return roots.filter((candidate, index, items) =>
     items.indexOf(candidate) === index &&
     !items.some((other, otherIndex) => otherIndex !== index && candidate.contains(other))
-  ).slice(0, 50);
+  ).slice(0, 500);
 }
 
 function fallbackCard(card) {
@@ -180,9 +180,9 @@ function fallbackCard(card) {
 function blockingState() {
   const url = location.href.toLowerCase();
   const body = text(document.body).toLowerCase();
-  const hasLoginForm = Boolean(document.querySelector(
+  const hasLoginForm = [...document.querySelectorAll(
     "input[type='password'], input[autocomplete='current-password']",
-  ));
+  )].some((element) => element.getClientRects().length > 0);
   if (
     url.includes("login") || url.includes("passport") ||
     /请先登录|登录后查看|账号登录|手机号登录/.test(body) || hasLoginForm
@@ -200,7 +200,7 @@ function extract(platform) {
   const candidateCards = [...selectedCards, ...actionCardRoots()].filter((candidate, index, items) =>
     items.indexOf(candidate) === index &&
     !items.some((other, otherIndex) => otherIndex !== index && candidate.contains(other))
-  ).slice(0, 50);
+  ).slice(0, 500);
   const domCards = candidateCards.map((card) => {
     const fallback = fallbackCard(card);
     let flightNumberText = text(first(card, selectors.flightNumber));
@@ -231,15 +231,15 @@ function extract(platform) {
   return [
     ...structured,
     ...domCards.filter((card) => !structuredKeys.has(ctripCardKey(card))),
-  ].slice(0, 50);
+  ].slice(0, 500);
 }
 
-async function collect(platform) {
+async function collectPage(platform, previousSignature = null, budgetMs = 28_000) {
   const startedAt = Date.now();
   if (platform === "ctrip") requestCtripStructuredCards();
   let stableCount = 0;
-  let lastCount = -1;
-  while (Date.now() - startedAt < 28_000) {
+  let lastSignature = null;
+  while (Date.now() - startedAt < budgetMs) {
     const blocked = blockingState();
     if (blocked) {
       return {
@@ -251,9 +251,10 @@ async function collect(platform) {
       };
     }
     const cards = extract(platform);
-    if (cards.length > 0 && cards.length === lastCount) stableCount += 1;
+    const signature = JSON.stringify(cards);
+    if (cards.length > 0 && signature !== previousSignature && signature === lastSignature) stableCount += 1;
     else stableCount = 0;
-    lastCount = cards.length;
+    lastSignature = signature;
     if (cards.length > 0 && stableCount >= 2) {
       return {
         state: "success",
@@ -282,6 +283,53 @@ async function collect(platform) {
     fetchedAt: new Date().toISOString(),
     cards: [],
     errorCode: `${platform.toUpperCase()}_COMPANION_PAGE_CHANGED`,
+  };
+}
+
+function nextPageControl() {
+  return [...document.querySelectorAll("a, button, [role='button']")].find((element) =>
+    element.getClientRects().length > 0 && /^下一页(?:\s*[>›»])?$/.test(text(element)) &&
+    !element.disabled && element.getAttribute("aria-disabled") !== "true" &&
+    !/(?:^|[\s_-])disabled(?:$|[\s_-])/.test(element.className || "")
+  );
+}
+
+async function collect(platform) {
+  const deadline = Date.now() + 55_000;
+  let page = await collectPage(platform);
+  if (page.state !== "success") return page;
+  const cards = new Map(page.cards.map((card) => [JSON.stringify(card), card]));
+  let pagesVisited = 1;
+  let reason = "UNVERIFIED_SCOPE";
+  // Qunar searches cities. Traverse its result pages before airport filtering,
+  // retaining an explicit partial status whenever the search budget is exhausted.
+  if (platform === "qunar") {
+    reason = "CITY_SCOPE_POST_FILTER";
+    const seenPages = new Set();
+    while (nextPageControl()) {
+      if (cards.size >= 500 || pagesVisited >= 30 || Date.now() >= deadline - 1500) {
+        reason = "SEARCH_BUDGET_REACHED";
+        break;
+      }
+      const signature = JSON.stringify(page.cards);
+      if (seenPages.has(signature)) { reason = "PAGINATION_STALLED"; break; }
+      seenPages.add(signature);
+      nextPageControl().click();
+      const next = await collectPage(platform, signature, Math.min(10_000, deadline - Date.now()));
+      if (next.state !== "success") { reason = `PAGINATION_${next.state.toUpperCase()}`; break; }
+      page = next;
+      pagesVisited += 1;
+      for (const card of page.cards) {
+        if (cards.size >= 500) { reason = "SEARCH_BUDGET_REACHED"; break; }
+        cards.set(JSON.stringify(card), card);
+      }
+    }
+  }
+  // Even reaching the last visible page cannot prove that every seller/product
+  // was expanded. List coverage and all-platform price coverage are different.
+  const partial = reason.startsWith("PAGINATION_") || reason === "SEARCH_BUDGET_REACHED" || cards.size >= 500;
+  return { ...page, state: "success", cards: [...cards.values()],
+    coverage: { status: partial ? "partial" : "unknown", pagesVisited, reason },
   };
 }
 

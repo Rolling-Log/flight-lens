@@ -39,6 +39,33 @@ const validIntent = {
 } as const;
 const fixedNow = () => new Date("2026-07-30T00:00:00.000Z");
 
+test("companion-only retries preserve failures without calling paid sources or shared history", async () => {
+  let providerCalls = 0;
+  let persisted = 0;
+  const provider = readinessConnector("public-api", "purchase_handoff", "ctrip");
+  provider.search = async () => { providerCalls += 1; return { offers: [] }; };
+  const app = await buildApp({ config, connectors: [provider], now: fixedNow,
+    auditStore: { persist: async () => { persisted += 1; }, close: async () => {} },
+  });
+  try {
+    const response = await app.inject({ method: "POST", url: "/v1/searches/companion", payload: {
+      intent: validIntent,
+      companion: { protocolVersion: "1", extensionVersion: "0.2.0", results: [{ platform: "ctrip", journeys: [{
+        direction: "outbound", state: "login_required", bookingUrl: "https://flights.ctrip.com/online/list/",
+        fetchedAt: fixedNow().toISOString(), cards: [],
+      }] }] },
+    } });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().connectorReports[0].state, "login_required");
+    assert.equal(response.json().disclosure.failedSources, 1);
+    assert.equal(response.headers["cache-control"], "private, no-store");
+    assert.equal(providerCalls, 0);
+    assert.equal(persisted, 0);
+    const invalid = await app.inject({ method: "POST", url: "/v1/searches/companion", payload: { intent: validIntent } });
+    assert.equal(invalid.statusCode, 400);
+  } finally { await app.close(); }
+});
+
 test("redacts auth tokens and all query values from request logs", () => {
   assert.equal(safeRequestPath("/api/auth/verify-email?token=secret&callbackURL=https%3A%2F%2Fexample.test"), "/api/auth/verify-email");
   assert.equal(safeRequestPath("/health"), "/health");
@@ -399,7 +426,7 @@ test("excludes structurally unsupported connectors from planned coverage", async
   await app.close();
 });
 
-test("uses Edge companion evidence instead of the duplicate server connector", async () => {
+test("legacy combined searches keep independent server and Edge evidence", async () => {
   let serverSearched = false;
   const serverConnector: FlightConnector = {
     metadata: {
@@ -455,8 +482,8 @@ test("uses Edge companion evidence instead of the duplicate server connector", a
     },
   });
   assert.equal(response.statusCode, 200);
-  assert.equal(serverSearched, false);
-  assert.equal(response.json().connectorReports[0].connectorId, "ctrip-edge-companion");
+  assert.equal(serverSearched, true);
+  assert.deepEqual(response.json().connectorReports.map((report: { connectorId: string }) => report.connectorId), ["ctrip-server", "ctrip-edge-companion"]);
   assert.equal(response.json().offers[0].connectorId, "ctrip-edge-companion");
   assert.equal(response.json().offers[0].totalPrice.amountMinor, 129_900);
   assert.equal(response.json().offers[0].priceVerificationStatus, "provider_response_verified");

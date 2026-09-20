@@ -5,7 +5,10 @@ import type {
   Offer,
   SearchIntent,
   SearchResponse,
+  CompanionPlatform,
+  ConnectorReport,
 } from "@flight-lens/contracts";
+import { summarizeSearch } from "@flight-lens/domain";
 import { resolveLocation, searchMarket } from "@flight-lens/contracts";
 import Image from "next/image";
 import {
@@ -39,6 +42,7 @@ import {
 } from "react";
 import { resolveApiBase } from "../src/api-base";
 import { searchWithEdgeCompanion } from "../src/edge-companion";
+import { mergeSearchResults } from "../src/search-results";
 import { LocationCombobox } from "../src/location-combobox";
 import { resultSourceStatus } from "../src/result-source-status";
 import { isOfferVisible } from "../src/offer-visibility";
@@ -324,6 +328,7 @@ async function apiRequest<T>(path: string, body: unknown): Promise<T> {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(90_000),
   });
   const payload = (await response.json()) as T & {
     error?: { code?: string; message?: string };
@@ -419,6 +424,14 @@ function dayOffset(departureAt: string, arrivalAt: string): string {
 }
 
 function reportNote(note: string): string {
+  if (note.startsWith("BROWSER_COVERAGE:")) {
+    const [, direction, status, pages, reason] = note.split(":");
+    const scope = status === "partial" ? "未读完结果" : "尚未确认全部产品覆盖";
+    const detail = reason === "CITY_SCOPE_POST_FILTER" ? "，按城市查询后匹配指定机场" :
+      reason === "SEARCH_BUDGET_REACHED" ? "，已达到本轮采集上限" : "";
+    return `${direction === "inbound" ? "返程" : "去程"}已读取 ${pages} 页，${scope}${detail}`;
+  }
+  if (note === "COMPANION_RETRY_AVAILABLE") return "本次结果未完整返回，可单独重试此来源";
   if (note.startsWith("FLEXIBLE_DATE_THREE_POINT_PROBE:")) {
     return `三点日期探测：${note.split(":").slice(1).join(":")}`;
   }
@@ -467,7 +480,7 @@ function reportNote(note: string): string {
     return "去程与返程分别实时检索，按两张单程票组合";
   }
   if (note.endsWith("_EDGE_COMPANION_SESSION")) {
-    return "由本机 Edge 登录会话实时核验";
+    return "由本机 Edge 会话采集，完整性与费用证据单独披露";
   }
   return note;
 }
@@ -522,6 +535,8 @@ export default function Home() {
   const [connectorMeta, setConnectorMeta] = useState<ConnectorMeta[]>([]);
   const [busy, setBusy] = useState<BusyState>("idle");
   const [searchProgress, setSearchProgress] = useState<SearchProgressState>({ percent: 0, label: "准备检索" });
+  const searchGeneration = useRef(0);
+  useEffect(() => () => { searchGeneration.current += 1; }, []);
   const [selectedOffer, setSelectedOffer] = useState<Offer | null>(null);
   const [showCoverage, setShowCoverage] = useState(false);
   const [coverageOrigin, setCoverageOrigin] = useState(emptyLiquidOrigin);
@@ -836,6 +851,8 @@ export default function Home() {
   }
 
   function changeQuery(value: string) {
+    searchGeneration.current += 1;
+    setBusy("idle");
     setQuery(value);
     setParseResult(null);
     setResult(null);
@@ -899,37 +916,90 @@ export default function Home() {
       searchIntent = intent;
     }
     if (!searchIntent) return;
-    const searchStartedAt = performance.now();
+    const generation = ++searchGeneration.current;
     setBusy("searching");
     setSearchProgress({ percent: 8, label: "正在规划适用来源" });
     setError("");
     setResult(null);
-    try {
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      setSearchProgress({ percent: 24, label: "正在读取本机来源" });
-      const companion = await searchWithEdgeCompanion(searchIntent);
-      setSearchProgress({ percent: 56, label: "本机来源已返回" });
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      setSearchProgress({ percent: 68, label: "正在核验云端来源" });
-      const response = await apiRequest<SearchResponse>(
-        "/v1/searches",
-        companion ? { intent: searchIntent, companion } : searchIntent,
-      );
-      setSearchProgress({ percent: 94, label: "正在整理可比报价" });
-      setResult(response);
-      setSelectedOffer(null);
-      setSearchProgress({ percent: 100, label: "检索完成" });
-      const remainingDisplayTime = Math.max(0, 520 - (performance.now() - searchStartedAt));
-      if (remainingDisplayTime > 0) {
-        await new Promise((resolve) => window.setTimeout(resolve, remainingDisplayTime));
+    const queryIntent = searchIntent;
+    let accumulated: SearchResponse | null = null;
+    let presented = false;
+    setSelectedOffer(null);
+    const mappings: Promise<void>[] = [];
+    const errors: string[] = [];
+    const accept = (response: SearchResponse) => {
+      if (generation !== searchGeneration.current) return;
+      accumulated = mergeSearchResults(accumulated, response);
+      setResult(accumulated);
+      if (!presented) {
+        setActiveView("results");
+        setNavigationSplit(false);
+        presented = true;
       }
-      setActiveView("results");
-      setNavigationSplit(false);
-      window.scrollTo({ top: 0 });
+      setSearchProgress({ percent: 50, label: "结果陆续返回，正在补查其他来源" });
+    };
+    const statusResponse = (reports: ConnectorReport[]): SearchResponse => ({
+      ...summarizeSearch(queryIntent, [], reports, [], crypto.randomUUID()),
+      audit: { configured: false, persisted: false },
+    });
+    const failure = (cause: unknown) => { errors.push(cause instanceof Error ? cause.message : "部分来源请求失败。"); };
+    setSearchProgress({ percent: 15, label: "接口与浏览器正在并行搜索" });
+    // Start the cloud request before extension discovery or any page navigation.
+    const cloud = apiRequest<SearchResponse>("/v1/searches", queryIntent).then(accept).catch((cause) => {
+      failure(cause);
+      const now = new Date().toISOString();
+      accept(statusResponse([{ connectorId: "cloud-search", connectorName: "云端搜索服务", state: "unavailable",
+        startedAt: now, finishedAt: now, durationMs: 0, offerCount: 0, retryable: true,
+        errorCode: "CLOUD_SEARCH_REQUEST_FAILED", notes: ["云端请求未完成，本机报价仍可返回"],
+      }]));
+    });
+    const browser = searchWithEdgeCompanion(queryIntent, {
+      onAvailable: () => {
+        const now = new Date().toISOString();
+        const platforms = searchMarket(queryIntent.origin, queryIntent.destination) === "domestic_cn"
+          ? edgeCompanionSources : edgeCompanionSources.slice(0, 1);
+        accept(statusResponse(platforms.map((source) => ({
+          connectorId: source.id, connectorName: source.name, state: "searching", startedAt: now,
+          finishedAt: now, durationMs: 0, offerCount: 0, retryable: false, notes: [],
+        }))));
+      },
+      onResult: (companion) => {
+        if (generation !== searchGeneration.current) return;
+        mappings.push(apiRequest<SearchResponse>("/v1/searches/companion", { intent: queryIntent, companion }).then(accept).catch(failure));
+      },
+    }).catch(failure);
+    await Promise.all([cloud, browser]);
+    await Promise.all(mappings);
+    if (generation !== searchGeneration.current) return;
+    // An interrupted bridge or mapping request must not leave sources spinning forever.
+    const latest = accumulated as SearchResponse | null;
+    const unfinished = latest?.connectorReports.filter((report) => ["pending", "searching"].includes(report.state)) ?? [];
+    if (unfinished.length) accept(statusResponse(unfinished.map((report) => ({ ...report,
+      state: "unavailable", finishedAt: new Date().toISOString(), retryable: true,
+      errorCode: "COMPANION_RESULT_INCOMPLETE", notes: ["COMPANION_RETRY_AVAILABLE"],
+    }))));
+    if (errors.length) setError([...new Set(errors)].join("；"));
+    setSearchProgress({ percent: 100, label: "本轮检索结束，未完成来源可单独重试" });
+    setBusy("idle");
+  }
+
+  async function retryCompanion(platform: CompanionPlatform) {
+    if (!result || busy !== "idle") return;
+    const generation = searchGeneration.current;
+    const queryIntent = result.intent;
+    setBusy("searching");
+    setError("");
+    setSearchProgress({ percent: 25, label: "正在继续该来源，其他报价已保留" });
+    try {
+      const companion = await searchWithEdgeCompanion(queryIntent, { platform });
+      if (!companion) throw new Error("未连接本机扩展，请重新加载扩展并刷新网页。");
+      const response = await apiRequest<SearchResponse>("/v1/searches/companion", { intent: queryIntent, companion });
+      if (generation !== searchGeneration.current) return;
+      setResult((previous) => mergeSearchResults(previous, response));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "搜索失败，请稍后重试。");
+      if (generation === searchGeneration.current) setError(cause instanceof Error ? cause.message : "补查失败，其他来源结果已保留。");
     } finally {
-      setBusy("idle");
+      if (generation === searchGeneration.current) setBusy("idle");
     }
   }
 
@@ -1288,6 +1358,8 @@ export default function Home() {
 
       {activeView === "results" && (result || (error && busy === "idle")) && (
         <section className="results-section revealed" id="results" aria-live="polite">
+          {busy === "searching" && <p role="status"><span className="spinner" /> {searchProgress.label}</p>}
+          {result && error && <p className="field-error" role="alert">{error}</p>}
           <div className="section-heading">
             <div>
               <div className="eyebrow"><span /> 航班检索结果</div>
@@ -1881,7 +1953,8 @@ export default function Home() {
             <button className="modal-close" onClick={() => setShowCoverage(false)} aria-label="关闭"><ArrowLeft size={19} /></button>
             <div className="eyebrow"><Radar size={14} /> 来源覆盖中心</div>
             <h2 id="coverage-title">来源数量不等于可信度</h2>
-            <p id="coverage-description">来源只有在合法配置、实际响应、字段完整并通过价格校验后，才计入本次检索覆盖。超时和失败会单独披露。</p>
+            <p id="coverage-description">分别记录每个查询入口的返回、等待登录和失败状态。返回报价不代表已查全或已核验全价，同平台的接口与浏览器结果会合并比较。</p>
+            {error && <p className="field-error" role="alert">{error}</p>}
             {result && (
               <section className="current-coverage" aria-label="本次搜索覆盖详情">
                 <div className="current-coverage-heading">
@@ -1895,6 +1968,12 @@ export default function Home() {
                     <li key={report.connectorId}>
                       <span><b>{report.connectorName}</b><small>{report.durationMs}ms · {report.offerCount} 个 Offer</small>{report.notes.map((note) => <small key={note}>{reportNote(note)}</small>)}</span>
                       <strong className={`source-state state-${report.state}`}>{connectorStateLabel(report.state)}</strong>
+                      {report.connectorId.endsWith("-edge-companion") && !["pending", "searching", "unsupported_query"].includes(report.state) && (
+                        <button type="button" className="secondary-button" disabled={busy !== "idle"}
+                          onClick={() => void retryCompanion(report.connectorId.replace("-edge-companion", "") as CompanionPlatform)}>
+                          {["login_required", "captcha_required"].includes(report.state) ? "已完成登录／验证，继续" : "重新查询此来源"}
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>
