@@ -12,6 +12,12 @@
 - 数据库：Neon Postgres；
 - 包管理：pnpm workspace。
 
+当前在线开发版：<https://flight-lens-staging.netlify.app/>。Netlify 的 Production branch
+和 Render Blueprint 同步分支使用 `main`；API 部署分支由 `render.yaml` 固定为 `main`。
+推送成功后还需确认两端部署成功，不能以 GitHub 已更新代替线上验收。
+发布核对方式见 [Staging Runbook](docs/STAGING_RUNBOOK.md)，下一阶段的具体工作见
+[真实全价实施计划](docs/IMPLEMENTATION_PLAN_2026-09-20.md)。
+
 ## 本地开发
 
 需要 Node.js 22 和 pnpm 11.9.0（与 CI 一致）。仓库提供 `.nvmrc`；Windows 已验证 Node 22.23.2。

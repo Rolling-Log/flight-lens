@@ -1,5 +1,6 @@
 [build]
   command = "pnpm build:web"
+  publish = "apps/web/.next"
 
 [build.environment]
   NODE_VERSION = "22.22.0"

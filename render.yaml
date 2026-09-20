@@ -2,6 +2,7 @@ services:
   - type: web
     name: flight-lens-api
     runtime: node
+    branch: main
     plan: free
     buildCommand: pnpm install --frozen-lockfile && pnpm build:api
     startCommand: pnpm --filter @flight-lens/api start

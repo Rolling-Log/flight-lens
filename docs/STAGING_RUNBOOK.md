@@ -2,6 +2,40 @@
 
 本清单用于 Netlify Web、Render API 与 Neon Postgres 的隔离预发布环境。Production 不复用 Staging 数据库、密钥或域名。
 
+## 当前在线开发版与发布分支（2026-09-20）
+
+现有 `flight-lens-staging` 是用户查看新版的在线开发站点。Netlify 控制台称其主域名发布
+为 Production context，这不代表产品已通过下文的正式发布验收。
+
+| 项目 | 当前配置 |
+| --- | --- |
+| 仓库 | `Rolling-Log/flight-lens` |
+| 网页 | `https://flight-lens-staging.netlify.app` |
+| Netlify Site ID | `162a29e7-e986-4d02-9653-c841d25aae3e` |
+| Netlify Production branch | `main`，自动发布开启 |
+| Netlify Base / Package | 仓库根目录 / `apps/web` |
+| Netlify Build / Publish | `pnpm build:web` / `apps/web/.next`，由 `netlify.toml` 保存 |
+| 网页 API 构建变量 | `NEXT_PUBLIC_API_BASE_URL=https://flight-lens-api.onrender.com` |
+| Render API | `flight-lens-api`，`srv-d9u0nsm417fc73ff7fv0` |
+| Render Blueprint | `exs-d9u0kr1t0dsc73c9cejg`，同步分支 `main` |
+| API 源码分支 | `render.yaml` 中显式指定 `main` |
+
+本轮定位到：Netlify 原来跟踪 `codex/v2-development`，API 服务跟踪
+`codex/v3-development`，Blueprint 仍跟踪 `codex/v2-development`。因此只推送 `main`
+不能更新线上。后续不要为修复此问题向旧分支强推，也不要上传本机构建（可能嵌入 localhost API）。
+
+每次发布验收：
+
+1. 推送前通过项目要求的校验；确认 GitHub `main` 是预期提交。
+2. Netlify Deploys 中确认 `Production: main @<SHA>` 状态为 **Published**，且不是旧的固定预览链接。
+3. 从主域名打开网页，完成需求解析、来源弹窗和一次受控查询；不能只检查 HTTP 200。
+4. 读取 API `/health` 的 `revision`，核对 Render 的成功部署提交；检查账户与数据库状态、CORS。
+5. 记录两端 Deploy ID 和 SHA。若两端先后完成，兼容性未验证前不把发布判定为完成。
+6. 失败时保留构建日志，回滚到前后端兼容的已验证部署；新环境变量或数据库变更需另行核对。
+
+现有自动部署尚不等于“CI 成功后才发布”的原子发布门禁；统一门禁和在线冒烟测试列入
+实施计划 M0。账户限流还需实际验证受信代理配置，不得为了部署方便恢复无条件信任转发头。
+
 ## 0. 前置条件
 
 - 候选提交在 `develop` 或专用 release 分支；
