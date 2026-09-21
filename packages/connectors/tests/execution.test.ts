@@ -92,6 +92,31 @@ test("maps valid browser offers beyond the old thirty-card cutoff", () => {
   assert.equal(offers.at(-1)?.segments[0]?.flightNumber, "3044");
 });
 
+test("preserves digit-leading airline codes without matching inside longer identifiers", () => {
+  const card = personalObservation(700).journeys[0]!.cards[0]!;
+  const query = { ...intent, origin: { kind: "airport" as const, code: "XIY" }, destination: { kind: "airport" as const, code: "NNG" } };
+  for (const [label, carrier, number] of [["3U5160", "3U", "5160"], ["9C6688", "9C", "6688"], ["四川航空 3U 5160", "3U", "5160"], ["MU5120", "MU", "5120"]]) {
+    const [offer] = mapDomCards([{ ...card, flightNumberText: label! }], "ctrip", query, "code", "https://flights.ctrip.com/online/list/");
+    assert.equal(offer?.segments[0]?.marketingCarrier, carrier);
+    assert.equal(offer?.segments[0]?.flightNumber, number);
+  }
+  for (const label of ["X3U5160", "3U51600", "123456"]) {
+    assert.equal(mapDomCards([{ ...card, flightNumberText: label }], "ctrip", query, "bad-code", "https://flights.ctrip.com/online/list/").length, 0);
+  }
+});
+
+test("Qunar transfer and layover labels cannot enter nonstop results", () => {
+  const card = personalObservation(540).journeys[0]!.cards[0]!;
+  const query = { ...intent, directOnly: true, maxStops: 0, origin: { kind: "airport" as const, code: "XIY" }, destination: { kind: "airport" as const, code: "NNG" } };
+  for (const label of ["转 济南", "转青岛", "停留4小时45分钟", "中转", "转机"]) {
+    const [offer] = mapDomCards([{ ...card, cardText: `山东航空 SC7604 ${label}` }], "qunar", query, "transfer", "https://flight.qunar.com/");
+    assert.equal(offer?.legs[0]?.stopCount, 1);
+    assert.ok(offer?.incomparabilityReasons.some((reason) => /STOP/.test(reason)));
+  }
+  const [direct] = mapDomCards([{ ...card, cardText: "四川航空 3U5160 共享 实际乘坐东航MU5120 直飞" }], "qunar", query, "direct", "https://flight.qunar.com/");
+  assert.equal(direct?.legs[0]?.stopCount, 0);
+});
+
 test("maps SerpApi price insights without issuing a second search", () => {
   const insight = mapSerpApiPriceInsights({
     search_parameters: { currency: "CNY" },

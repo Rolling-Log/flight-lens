@@ -319,7 +319,7 @@ function priceMinor(value: unknown): number | undefined {
 }
 
 function flightParts(value: string): { carrier: string; number: string } | undefined {
-  const match = value.toUpperCase().match(/([A-Z][A-Z0-9])\s*(\d{3,4})(?!\d)/);
+  const match = value.toUpperCase().match(/(?:^|[^A-Z0-9])((?:[A-Z][A-Z0-9]|[0-9][A-Z]))\s*(\d{3,4})(?![A-Z0-9])/);
   return match ? { carrier: match[1]!, number: match[2]! } : undefined;
 }
 
@@ -584,7 +584,7 @@ export function mapDomCards(
     const segmentId = `${platform}:${requestId}:${index}:segment`;
     const legId = `${platform}:${requestId}:${index}:leg`;
     const totalMinor = perAdultMinor * intent.adults;
-    const stops = /中转|转机|转\d+次/.test(card.cardText) ? 1 : 0;
+    const stops = /中转|转机|转\d+次|(?:^|\s)转\s*[\u4e00-\u9fff]|停留\s*\d+\s*(?:小时|分钟)/.test(card.cardText) ? 1 : 0;
     const origin = airportRefFromText(card.departureAirport, intent.origin);
     const destination = airportRefFromText(card.arrivalAirport, intent.destination);
     const breakdown = card.priceBreakdown;
