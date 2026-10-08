@@ -53,7 +53,7 @@ test("normalizes current Ctrip batchSearch evidence without retaining the raw re
         priceList: [{ cabin: "Y", adultPrice: 450, adultTax: 50 }],
       }],
     },
-  }, "https://flights.ctrip.com/online/list/oneway-pek-sha?cabin=y");
+  }, "https://flights.ctrip.com/online/list/oneway-pek-sha?depdate=2026-09-10&cabin=y");
 
   assert.equal(cards.length, 1);
   assert.equal(cards[0].flightNumberText, "MU5102");

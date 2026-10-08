@@ -22,7 +22,14 @@ After changing any extension source file, return to `edge://extensions` and clic
 on Flight Lens Edge Companion before running another acceptance search. Refreshing the website
 alone does not restart the extension service worker or register new content scripts.
 
-Version 0.2.0 streams each platform result independently and supports retrying one platform.
+Version 0.2.2 streams each platform result independently and supports retrying one platform.
+It preserves Ctrip fare restrictions and next-day arrivals, rejects responses for a different date,
+clears structured evidence when the source URL changes, and includes Zhengzhou, Sanya, Haikou,
+and Urumqi in domestic source searches. Qunar's scheduled web-service closure is disclosed
+without treating the future announcement as an already completed shutdown.
+Structured and DOM fares stay separate products: only flight-level stop evidence is shared;
+a conditional DOM fare never adds its eligibility restrictions to a different public fare.
+Reload the unpacked extension after upgrading, then refresh the Flight Lens page.
 After signing in, return to Flight Lens → Sources and choose **已完成登录／验证，继续**.
 Pending login tabs and completed round-trip legs are retained for 30 minutes in extension
 session storage, scoped to the initiating Flight Lens tab and exact search conditions.

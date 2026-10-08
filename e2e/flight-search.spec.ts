@@ -7,7 +7,7 @@ test("cloud results arrive before browser completion and login retry only search
   let cloudCalls = 0;
   await page.route("**/v1/searches", async (route) => { cloudCalls += 1; await route.continue(); });
   await page.addInitScript(() => {
-    const host = window as typeof window & { finishCompanion?: () => void; companionRequests?: { platforms?: string[] }[] };
+    const host = window as typeof window & { finishCompanion?: () => void; finishRetry?: () => void; companionRequests?: { platforms?: string[] }[] };
     host.companionRequests = [];
     window.addEventListener("message", (event) => {
       const message = event.data;
@@ -20,7 +20,7 @@ test("cloud results arrive before browser completion and login retry only search
         { direction: "outbound", state: retry ? "empty" : "login_required", bookingUrl: "https://flights.ctrip.com/online/list/", fetchedAt: new Date().toISOString(), cards: [] },
         ...(retry ? [{ direction: "inbound", state: "empty", bookingUrl: "https://flights.ctrip.com/online/list/", fetchedAt: new Date().toISOString(), cards: [] }] : []),
       ] }] };
-      if (retry) reply(result);
+      if (retry) host.finishRetry = () => reply(result);
       else host.finishCompanion = () => reply(result);
     });
   });
@@ -40,11 +40,93 @@ test("cloud results arrive before browser completion and login retry only search
   // Later source replies must not clear the quote the user is already reading.
   await expect(page.getByRole("region", { name: pvgNrtRouteName })).toBeVisible();
   await retry.click();
+  const coverage = page.getByRole("region", { name: "本次搜索覆盖详情" });
+  await expect(coverage).toContainText("1 个进行中");
+  await expect(coverage.getByText("需登录", { exact: true })).toHaveCount(0);
+  await expect(coverage.getByText("检索中", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: pvgNrtRouteName })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => typeof (window as typeof window & { finishRetry?: () => void }).finishRetry)).toBe("function");
+  await page.evaluate(() => (window as typeof window & { finishRetry?: () => void }).finishRetry?.());
   await expect(page.getByRole("button", { name: "重新查询此来源" })).toBeEnabled();
+  await expect(coverage).toContainText("0 个进行中");
   expect(cloudCalls).toBe(1);
   const requests = await page.evaluate(() => (window as typeof window & { companionRequests?: { platforms?: string[] }[] }).companionRequests);
   expect(requests).toHaveLength(2);
   expect(requests?.[1]?.platforms).toEqual(["ctrip"]);
+});
+
+test("failed browser result mapping ends pending state and can recover without rerunning cloud search", async ({ page }) => {
+  let cloudCalls = 0;
+  let mappingCalls = 0;
+  await page.route("**/v1/searches", async (route) => { cloudCalls += 1; await route.continue(); });
+  await page.route("**/v1/searches/companion", async (route) => {
+    if (++mappingCalls === 2) await route.fulfill({ status: 503, json: { message: "fixture mapping unavailable" } });
+    else await route.continue();
+  });
+  await page.addInitScript(() => {
+    window.addEventListener("message", (event) => {
+      const message = event.data;
+      if (message?.channel !== "flight-lens-edge-companion" || message.direction !== "to-extension") return;
+      const retry = message.payload?.platforms?.[0] === "ctrip";
+      const payload = message.type === "PING"
+        ? { extensionVersion: "0.2.0", capabilities: ["incremental", "platform_retry"] }
+        : { protocolVersion: "1", extensionVersion: "0.2.0", results: [{ platform: "ctrip", journeys: [
+          { direction: "outbound", state: retry ? "empty" : "login_required", bookingUrl: "https://flights.ctrip.com/online/list/", fetchedAt: new Date().toISOString(), cards: [] },
+          ...(retry ? [{ direction: "inbound", state: "empty", bookingUrl: "https://flights.ctrip.com/online/list/", fetchedAt: new Date().toISOString(), cards: [] }] : []),
+        ] }] };
+      window.postMessage({ channel: message.channel, direction: "to-page", requestId: message.requestId, ok: true, payload }, location.origin);
+    });
+  });
+  await page.goto("/");
+  await page.getByRole("tab", { name: "精确筛选" }).click();
+  await page.getByRole("button", { name: "开始检索" }).click();
+  await expect(page.getByRole("article").first()).toBeVisible();
+  const count = await page.getByRole("article").count();
+  await page.getByRole("button", { name: "来源", exact: true }).click();
+  await page.getByRole("button", { name: "已完成登录／验证，继续" }).click();
+  const coverage = page.getByRole("region", { name: "本次搜索覆盖详情" });
+  await expect(coverage.getByText("不可用", { exact: true })).toBeVisible();
+  await expect(coverage).toContainText("0 个进行中");
+  await expect(coverage).toContainText("1 个失败");
+  await expect(page.getByRole("article")).toHaveCount(count);
+  await page.getByRole("button", { name: "重新查询此来源" }).click();
+  await expect(coverage.getByText("无结果", { exact: true })).toBeVisible();
+  await expect(coverage).toContainText("0 个失败");
+  await expect(page.getByRole("article")).toHaveCount(count);
+  expect(cloudCalls).toBe(1);
+  expect(mappingCalls).toBe(3);
+});
+
+test("an empty cloud reply remains provisional while a browser source is still searching", async ({ page }) => {
+  await page.route("**/v1/searches", async (route) => {
+    const response = await route.fetch({ url: `http://127.0.0.1:${process.env.PLAYWRIGHT_API_PORT ?? 4000}/v1/searches` });
+    const result = await response.json();
+    result.offers = [];
+    result.connectorReports = result.connectorReports.map((report: object) => ({ ...report, state: "empty", offerCount: 0 }));
+    await route.fulfill({ response, json: result });
+  });
+  await page.addInitScript(() => {
+    window.addEventListener("message", (event) => {
+      const message = event.data;
+      if (message?.channel !== "flight-lens-edge-companion" || message.direction !== "to-extension") return;
+      const reply = (payload: unknown) => window.postMessage({ channel: message.channel, direction: "to-page", requestId: message.requestId, ok: true, payload }, location.origin);
+      if (message.type === "PING") { reply({ extensionVersion: "0.2.0", capabilities: ["incremental", "platform_retry"] }); return; }
+      (window as typeof window & { finishEmptySearch?: () => void }).finishEmptySearch = () => reply({
+        protocolVersion: "1", extensionVersion: "0.2.0", results: [{ platform: "ctrip", journeys: [
+          { direction: "outbound", state: "empty", bookingUrl: "https://flights.ctrip.com/online/list/", fetchedAt: new Date().toISOString(), cards: [] },
+          { direction: "inbound", state: "empty", bookingUrl: "https://flights.ctrip.com/online/list/", fetchedAt: new Date().toISOString(), cards: [] },
+        ] }],
+      });
+    });
+  });
+  await page.goto("/");
+  await page.getByRole("tab", { name: "精确筛选" }).click();
+  await page.getByRole("button", { name: "开始检索" }).click();
+  await expect(page.getByTestId("empty-search-results")).toContainText("搜索仍在进行");
+  await expect(page.getByTestId("empty-search-results")).not.toContainText("已完成核验");
+  await expect.poll(() => page.evaluate(() => typeof (window as typeof window & { finishEmptySearch?: () => void }).finishEmptySearch)).toBe("function");
+  await page.evaluate(() => (window as typeof window & { finishEmptySearch?: () => void }).finishEmptySearch?.());
+  await expect(page.getByTestId("empty-search-results")).toContainText("已响应的来源没有返回可显示报价");
 });
 
 test("missing bridge is visible and reconnect preserves cloud results without another cloud search", async ({ page }) => {

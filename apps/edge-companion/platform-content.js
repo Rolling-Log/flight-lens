@@ -50,6 +50,7 @@ const PLATFORM_SELECTORS = {
 const CTRIP_NETWORK_CHANNEL = "flight-lens-ctrip-network";
 const ctripStructuredCards = new Map();
 let ctripStructuredFetchedAt = null;
+let ctripStructuredPageUrl = location.href;
 
 const FLIGHT_NUMBER_PATTERN = /(?:^|[^A-Z0-9])([A-Z0-9]{2})\s?(\d{3,4})(?![A-Z0-9])/i;
 const TIME_PATTERN = /(?:^|[^\d])([0-2]?\d:[0-5]\d)(?!\d)/g;
@@ -70,7 +71,9 @@ function validStructuredCard(card) {
 }
 
 function ctripCardKey(card) {
-  return `${card.flightNumberText.toUpperCase()}-${card.departureTime}-${card.arrivalTime}`;
+  const flight = card.flightNumberText.match(FLIGHT_NUMBER_PATTERN);
+  const flightNumber = flight ? `${flight[1]}${flight[2]}` : card.flightNumberText;
+  return `${flightNumber.toUpperCase()}-${card.departureTime}-${card.arrivalTime}`;
 }
 
 window.addEventListener("message", (event) => {
@@ -80,6 +83,11 @@ window.addEventListener("message", (event) => {
     message?.channel !== CTRIP_NETWORK_CHANNEL ||
     message?.type !== "CTRIP_BATCH_SEARCH_RESULT" || message?.pageUrl !== location.href
   ) return;
+  if (ctripStructuredPageUrl !== location.href) {
+    ctripStructuredCards.clear();
+    ctripStructuredFetchedAt = null;
+    ctripStructuredPageUrl = location.href;
+  }
   for (const card of Array.isArray(message.cards) ? message.cards.slice(0, 500) : []) {
     if (validStructuredCard(card)) ctripStructuredCards.set(ctripCardKey(card), card);
   }
@@ -194,7 +202,29 @@ function blockingState() {
   return null;
 }
 
+function serviceNotice(platform) {
+  if (platform !== "qunar") return null;
+  const body = text(document.body);
+  const notice = body.match(/网页(?:版)?[^。！]{0,100}(?:停止|终止|下线)[^。！]{0,100}/)?.[0] || "";
+  const scheduled = notice.match(/将于\s*(\d{1,2})月\s*(\d{1,2})日.{0,20}(?:停止|终止|下线)/);
+  if (scheduled) return `SERVICE_SUNSET_SCHEDULED_${scheduled[1].padStart(2, "0")}_${scheduled[2].padStart(2, "0")}`;
+  return /(?:已停止|已终止|已下线|不再提供)/.test(notice) ? "WEB_SERVICE_ENDED" : null;
+}
+
+function withServiceNotice(result, notice) {
+  if (!notice) return result;
+  return { ...result,
+    coverage: { status: "unknown", pagesVisited: result.state === "success" ? 1 : 0, reason: notice },
+    ...(result.errorCode && notice !== "WEB_SERVICE_ENDED" ? { errorCode: `${result.errorCode}_${notice}` } : {}),
+  };
+}
+
 function extract(platform) {
+  if (platform === "ctrip" && ctripStructuredPageUrl !== location.href) {
+    ctripStructuredCards.clear();
+    ctripStructuredFetchedAt = null;
+    ctripStructuredPageUrl = location.href;
+  }
   const selectors = PLATFORM_SELECTORS[platform];
   const selectedCards = cardsFor(selectors.cards);
   const candidateCards = [...selectedCards, ...actionCardRoots()].filter((candidate, index, items) =>
@@ -227,10 +257,18 @@ function extract(platform) {
   );
   if (platform !== "ctrip" || ctripStructuredCards.size === 0) return domCards;
   const structured = [...ctripStructuredCards.values()];
-  const structuredKeys = new Set(structured.map(ctripCardKey));
+  const domStopKeys = new Set(domCards.filter((card) => {
+    const positive = card.cardText.replace(/无经停|不经停|无需中转|不中转|无中转|经停\s*0\s*次|0\s*次经停|0\s*次中转|转\s*0\s*次/g, "");
+    return /经停|中转|转机|转\s*[1-9]\d*\s*次|(?:^|\s)转\s*[\u4e00-\u9fff]|停留\s*\d+\s*(?:小时|分钟)/.test(positive);
+  }).map(ctripCardKey));
   return [
-    ...structured,
-    ...domCards.filter((card) => !structuredKeys.has(ctripCardKey(card))),
+    ...structured.map((card) => {
+      // Stops describe the flight. Fare eligibility describes a product, and
+      // equal flight numbers, times or prices do not prove product identity.
+      return domStopKeys.has(ctripCardKey(card))
+        ? { ...card, cardText: `经停 ${card.cardText}`.slice(0, 20_000) } : card;
+    }),
+    ...domCards,
   ].slice(0, 500);
 }
 
@@ -240,15 +278,20 @@ async function collectPage(platform, previousSignature = null, budgetMs = 28_000
   let stableCount = 0;
   let lastSignature = null;
   while (Date.now() - startedAt < budgetMs) {
+    const notice = serviceNotice(platform);
+    if (notice === "WEB_SERVICE_ENDED") return withServiceNotice({
+      state: "unavailable", bookingUrl: location.href, fetchedAt: new Date().toISOString(),
+      cards: [], errorCode: "QUNAR_COMPANION_WEB_SERVICE_ENDED",
+    }, notice);
     const blocked = blockingState();
     if (blocked) {
-      return {
+      return withServiceNotice({
         state: blocked,
         bookingUrl: location.href,
         fetchedAt: new Date().toISOString(),
         cards: [],
         errorCode: `${platform.toUpperCase()}_COMPANION_${blocked.toUpperCase()}`,
-      };
+      }, notice);
     }
     const cards = extract(platform);
     const signature = JSON.stringify(cards);
@@ -256,34 +299,34 @@ async function collectPage(platform, previousSignature = null, budgetMs = 28_000
     else stableCount = 0;
     lastSignature = signature;
     if (cards.length > 0 && stableCount >= 2) {
-      return {
+      return withServiceNotice({
         state: "success",
         bookingUrl: location.href,
         fetchedAt: platform === "ctrip" && ctripStructuredFetchedAt
           ? ctripStructuredFetchedAt
           : new Date().toISOString(),
         cards,
-      };
+      }, notice);
     }
     const body = text(document.body);
     if (/暂无.{0,8}航班|没有.{0,8}航班|未查询到.{0,8}航班|无符合.{0,8}航班/.test(body)) {
-      return {
+      return withServiceNotice({
         state: "empty",
         bookingUrl: location.href,
         fetchedAt: new Date().toISOString(),
         cards: [],
-      };
+      }, notice);
     }
     if (platform === "ctrip" && Date.now() - startedAt < 3_000) requestCtripStructuredCards();
     await new Promise((resolve) => setTimeout(resolve, 700));
   }
-  return {
+  return withServiceNotice({
     state: "page_changed",
     bookingUrl: location.href,
     fetchedAt: new Date().toISOString(),
     cards: [],
     errorCode: `${platform.toUpperCase()}_COMPANION_PAGE_CHANGED`,
-  };
+  }, serviceNotice(platform));
 }
 
 function nextPageControl() {
@@ -298,6 +341,7 @@ async function collect(platform) {
   const deadline = Date.now() + 55_000;
   let page = await collectPage(platform);
   if (page.state !== "success") return page;
+  const noticeReason = page.coverage?.reason;
   const cards = new Map(page.cards.map((card) => [JSON.stringify(card), card]));
   let pagesVisited = 1;
   let reason = "UNVERIFIED_SCOPE";
@@ -329,7 +373,8 @@ async function collect(platform) {
   // was expanded. List coverage and all-platform price coverage are different.
   const partial = reason.startsWith("PAGINATION_") || reason === "SEARCH_BUDGET_REACHED" || cards.size >= 500;
   return { ...page, state: "success", cards: [...cards.values()],
-    coverage: { status: partial ? "partial" : "unknown", pagesVisited, reason },
+    coverage: { status: partial ? "partial" : "unknown", pagesVisited,
+      reason: noticeReason ? `${reason}_${noticeReason}` : reason },
   };
 }
 

@@ -4,6 +4,7 @@ const MAINLAND_CODES = new Set([
   "BJS", "PEK", "PKX", "TSN", "SHA", "PVG", "CAN", "SZX", "CTU", "TFU",
   "CKG", "HGH", "NKG", "WUH", "XIY", "NNG", "TAO", "XMN", "KMG", "CSX",
   "DLC", "SHE", "HRB", "CGQ", "TNA", "FOC", "WNZ", "NGB", "HFE", "KHN",
+  "CGO", "SYX", "HAK", "URC",
   "TYN", "SJW", "KWE", "LHW", "XNN", "INC", "HET", "LXA", "KWL", "ZUH",
   "WUX", "YNT", "JJN", "BHY", "DYG", "KHG", "JHG", "LJG",
 ]);
@@ -14,6 +15,7 @@ const CITY_NAMES = {
   CKG: "重庆", HGH: "杭州", NKG: "南京", WUH: "武汉",
   XIY: "西安", NNG: "南宁", TAO: "青岛", XMN: "厦门",
   KMG: "昆明", CSX: "长沙", DLC: "大连", TSN: "天津",
+  CGO: "郑州", SYX: "三亚", HAK: "海口", URC: "乌鲁木齐",
 };
 
 function cityName(location) {

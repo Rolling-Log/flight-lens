@@ -2,12 +2,21 @@
   const CHANNEL = "flight-lens-ctrip-network";
   const cards = new Map();
   let fetchedAt = null;
+  let cardsPageUrl = location.href;
+
+  function resetForCurrentPage() {
+    if (cardsPageUrl === location.href) return;
+    cards.clear();
+    fetchedAt = null;
+    cardsPageUrl = location.href;
+  }
 
   function isBatchSearch(url) {
     return typeof url === "string" && url.includes("/search/api/search/batchSearch");
   }
 
   function merge(payload) {
+    resetForCurrentPage();
     const normalized = FlightLensCtripResponse.normalize(payload, location.href);
     for (const card of normalized) {
       cards.set(`${card.flightNumberText}-${card.departureTime}-${card.arrivalTime}`, card);
@@ -17,6 +26,7 @@
   }
 
   function publish() {
+    resetForCurrentPage();
     window.postMessage({
       channel: CHANNEL,
       type: "CTRIP_BATCH_SEARCH_RESULT",

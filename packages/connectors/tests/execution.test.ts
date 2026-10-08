@@ -108,13 +108,15 @@ test("preserves digit-leading airline codes without matching inside longer ident
 test("Qunar transfer and layover labels cannot enter nonstop results", () => {
   const card = personalObservation(540).journeys[0]!.cards[0]!;
   const query = { ...intent, directOnly: true, maxStops: 0, origin: { kind: "airport" as const, code: "XIY" }, destination: { kind: "airport" as const, code: "NNG" } };
-  for (const label of ["转 济南", "转青岛", "停留4小时45分钟", "中转", "转机"]) {
+  for (const label of ["转 济南", "转青岛", "停留4小时45分钟", "中转", "转机", "经停 武汉", "经停1次", "转 1 次"]) {
     const [offer] = mapDomCards([{ ...card, cardText: `山东航空 SC7604 ${label}` }], "qunar", query, "transfer", "https://flight.qunar.com/");
     assert.equal(offer?.legs[0]?.stopCount, 1);
     assert.ok(offer?.incomparabilityReasons.some((reason) => /STOP/.test(reason)));
   }
   const [direct] = mapDomCards([{ ...card, cardText: "四川航空 3U5160 共享 实际乘坐东航MU5120 直飞" }], "qunar", query, "direct", "https://flight.qunar.com/");
   assert.equal(direct?.legs[0]?.stopCount, 0);
+  const [nonstop] = mapDomCards([{ ...card, cardText: "SC7604 无经停 不经停 无需中转" }], "qunar", query, "nonstop", "https://flight.qunar.com/");
+  assert.equal(nonstop?.legs[0]?.stopCount, 0);
 });
 
 test("maps SerpApi price insights without issuing a second search", () => {
@@ -345,6 +347,48 @@ test("companion tax proof survives the API contract and totals every adult", () 
     priceBreakdown: { ...card.priceBreakdown!, taxMinor: 0 },
   }).priceVerificationStatus, "provider_response_verified");
   assert.equal(map({ ...card, evidenceKind: "dom" }).priceVerificationStatus, "listed_only");
+});
+
+test("airport constraints cannot be satisfied by filling an unrecognized airport from the request", () => {
+  const card = {
+    cardText: "MU5102 直飞", flightNumberText: "MU5102", airlineName: "东方航空",
+    departureTime: "08:00", arrivalTime: "10:20", departureAirport: "PKX", arrivalAirport: "SHA T2",
+    priceText: "¥500", evidenceKind: "structured_response" as const,
+    priceBreakdown: { currency: "CNY" as const, baseFareMinor: 45000, taxMinor: 5000 },
+  };
+  const query = { ...intent, origin: { kind: "airport" as const, code: "PEK" }, destination: { kind: "airport" as const, code: "SHA" } };
+  const map = (departureAirport: string) => mapDomCards([{ ...card, departureAirport }], "ctrip", query, "airport-proof", "https://flights.ctrip.com/");
+  assert.equal(map("PKX")[0]?.segments[0]?.origin.code, "PKX");
+  assert.equal(map("PKX")[0]?.comparable, false);
+  assert.ok(map("PKX")[0]?.incomparabilityReasons.includes("ORIGIN_AIRPORT_CONFLICT"));
+  for (const label of ["待确认机场", "北京", "PEK / PKX", "蓉城机场"]) assert.equal(map(label).length, 0, label);
+  assert.equal(map("PEK T2")[0]?.comparable, true);
+  const [stop] = mapDomCards([{ ...card, departureAirport: "PEK", cardText: "MU5102 经停 武汉" }], "ctrip", { ...query, directOnly: true, maxStops: 0 }, "stop-proof", "https://flights.ctrip.com/");
+  assert.equal(stop?.comparable, false);
+  assert.ok(stop?.incomparabilityReasons.includes("MAX_STOPS_CONFLICT"));
+  const [conditional] = mapDomCards([{ ...card, departureAirport: "PEK", cardText: "MU5102 新客 专享" }], "ctrip", query, "eligibility-proof", "https://flights.ctrip.com/");
+  assert.equal(conditional?.comparable, false);
+  assert.ok(conditional?.incomparabilityReasons.includes("CONDITIONAL_PRICE"));
+});
+
+test("Ctrip response airport and date evidence is never replaced by the requested route", () => {
+  const flight = { flightNo: "MU5102", departureAirportName: "首都国际机场", arrivalAirportName: "虹桥国际机场", departureDateTime: "2026-10-22 08:00:00", arrivalDateTime: "2026-10-22 10:20:00" };
+  const query = { ...intent, departureDate: "2026-10-21", origin: { kind: "airport" as const, code: "PEK" }, destination: { kind: "airport" as const, code: "SHA" } };
+  const map = (value: typeof flight) => mapCtripBatchSearchPayload({ data: { flightItineraryList: [{ priceList: [{ adultPrice: 450, adultTax: 50 }], flightSegments: [{ flightList: [value] }] }] } }, query, "response-proof", "https://flights.ctrip.com/");
+  assert.equal(map(flight)[0]?.segments[0]?.origin.code, "PEK");
+  assert.equal(map(flight)[0]?.comparable, false);
+  assert.ok(map(flight)[0]?.incomparabilityReasons.includes("DEPARTURE_DATE_CONFLICT"));
+  assert.equal(map({ ...flight, departureAirportName: "未知机场" }).length, 0);
+});
+
+test("Ctrip structured stopovers obey a zero-stop limit even when directOnly is false", () => {
+  const query = { ...intent, departureDate: "2026-10-21", directOnly: false, maxStops: 0, origin: { kind: "airport" as const, code: "PEK" }, destination: { kind: "airport" as const, code: "SHA" } };
+  for (const evidence of [{ stopDescription: "经停武汉" }, { stopCount: 1 }, { stopInfo: { description: "停留45分钟" } }]) {
+    const [offer] = mapCtripBatchSearchPayload({ data: { flightItineraryList: [{ priceList: [{ adultPrice: 450, adultTax: 50 }], flightSegments: [{ flightList: [{ flightNo: "MU5102", departureAirportCode: "PEK", arrivalAirportCode: "SHA", departureDateTime: "2026-10-21 08:00:00", arrivalDateTime: "2026-10-21 10:20:00", ...evidence }] }] }] } }, query, "stopover-response", "https://flights.ctrip.com/");
+    assert.equal(offer?.legs[0]?.stopCount, 1);
+    assert.equal(offer?.comparable, false);
+    assert.ok(offer?.incomparabilityReasons.includes("MAX_STOPS_CONFLICT"));
+  }
 });
 
 test("combines two independently priced one-way results as a disclosed split ticket", () => {

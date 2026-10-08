@@ -42,7 +42,7 @@ import {
 } from "react";
 import { resolveApiBase } from "../src/api-base";
 import { searchWithEdgeCompanion, type CompanionConnection } from "../src/edge-companion";
-import { mergeSearchResults } from "../src/search-results";
+import { emptySearchMessage, finishUnfinishedSources, mergeSearchResults, replaceSourceReports, sourceServiceNotice } from "../src/search-results";
 import { LocationCombobox } from "../src/location-combobox";
 import { resultSourceStatus } from "../src/result-source-status";
 import { isOfferVisible } from "../src/offer-visibility";
@@ -427,8 +427,8 @@ function reportNote(note: string): string {
   if (note.startsWith("BROWSER_COVERAGE:")) {
     const [, direction, status, pages, reason] = note.split(":");
     const scope = status === "partial" ? "未读完结果" : "尚未确认全部产品覆盖";
-    const detail = reason === "CITY_SCOPE_POST_FILTER" ? "，按城市查询后匹配指定机场" :
-      reason === "SEARCH_BUDGET_REACHED" ? "，已达到本轮采集上限" : "";
+    const detail = reason?.includes("CITY_SCOPE_POST_FILTER") ? "，按城市查询后匹配指定机场" :
+      reason?.includes("SEARCH_BUDGET_REACHED") ? "，已达到本轮采集上限" : "";
     return `${direction === "inbound" ? "返程" : "去程"}已读取 ${pages} 页，${scope}${detail}`;
   }
   if (note === "COMPANION_RETRY_AVAILABLE") return "本次结果未完整返回，可单独重试此来源";
@@ -975,11 +975,7 @@ export default function Home() {
     if (generation !== searchGeneration.current) return;
     // An interrupted bridge or mapping request must not leave sources spinning forever.
     const latest = accumulated as SearchResponse | null;
-    const unfinished = latest?.connectorReports.filter((report) => ["pending", "searching"].includes(report.state)) ?? [];
-    if (unfinished.length) accept(statusResponse(unfinished.map((report) => ({ ...report,
-      state: "unavailable", finishedAt: new Date().toISOString(), retryable: true,
-      errorCode: "COMPANION_RESULT_INCOMPLETE", notes: ["COMPANION_RETRY_AVAILABLE"],
-    }))));
+    if (latest) setResult(finishUnfinishedSources(latest));
     if (errors.length) setError([...new Set(errors)].join("；"));
     setSearchProgress({ percent: 100, label: "本轮检索结束，未完成来源可单独重试" });
     setBusy("idle");
@@ -989,6 +985,17 @@ export default function Home() {
     if (!result || busy !== "idle") return;
     const generation = searchGeneration.current;
     const queryIntent = result.intent;
+    const sources = platform
+      ? edgeCompanionSources.filter((source) => source.id === `${platform}-edge-companion`)
+      : searchMarket(queryIntent.origin, queryIntent.destination) === "domestic_cn"
+        ? edgeCompanionSources : edgeCompanionSources.slice(0, 1);
+    const now = new Date().toISOString();
+    const reports: ConnectorReport[] = sources.map((source) => ({
+      connectorId: source.id, connectorName: source.name, state: "pending", startedAt: now,
+      finishedAt: now, durationMs: 0, offerCount: 0, retryable: false, notes: [],
+    }));
+    let accumulated = replaceSourceReports(result, reports);
+    setResult(accumulated);
     setBusy("searching");
     setError("");
     setSearchProgress({ percent: 25, label: "正在继续该来源，其他报价已保留" });
@@ -998,16 +1005,25 @@ export default function Home() {
     await searchWithEdgeCompanion(queryIntent, {
       platform,
       onConnection: (connection) => { if (generation === searchGeneration.current) setCompanionConnection(connection); },
+      onAvailable: () => {
+        if (generation !== searchGeneration.current) return;
+        accumulated = replaceSourceReports(accumulated, reports.map((report) => ({ ...report, state: "searching" })));
+        setResult(accumulated);
+      },
       onResult: (companion) => {
         if (generation !== searchGeneration.current) return;
         mappings.push(apiRequest<SearchResponse>("/v1/searches/companion", { intent: queryIntent, companion }).then((response) => {
-          if (generation === searchGeneration.current) setResult((previous) => mergeSearchResults(previous, response));
+          if (generation !== searchGeneration.current) return;
+          accumulated = mergeSearchResults(accumulated, response);
+          setResult(accumulated);
         }).catch(failure));
       },
     }).catch(failure);
     await Promise.all(mappings);
     if (generation !== searchGeneration.current) return;
+    setResult(finishUnfinishedSources(accumulated));
     if (errors.length) setError([...new Set(errors)].join("；"));
+    setSearchProgress({ percent: 100, label: "本轮补查结束，其他来源结果已保留" });
     setBusy("idle");
   }
 
@@ -1039,6 +1055,7 @@ export default function Home() {
   const sourceStatus = result
     ? resultSourceStatus(result.offers, result.connectorReports)
     : null;
+  const emptyMessage = result ? emptySearchMessage(result, busy === "searching") : null;
   const progressSources = plannedProgressSources(intent, connectorMeta);
   const activeNavigation = activeView === "search" ? "search" : "results";
   const navigationIsSplit = activeView === "results" && navigationSplit;
@@ -1598,9 +1615,9 @@ export default function Home() {
                 )}
 
                 {groupedOffers.length === 0 ? (
-                  <div className="empty-state">
-                    <b>来源已完成核验，但没有返回符合条件的报价</b>
-                    <p>这与来源失败不同；你可以调整日期、直飞或行李条件后重试。</p>
+                  <div className="empty-state" data-testid="empty-search-results">
+                    <b>{emptyMessage?.title}</b>
+                    <p>{emptyMessage?.description}</p>
                   </div>
                 ) : (
                   <div className="flight-list">
@@ -1986,9 +2003,9 @@ export default function Home() {
                 <ul className="coverage-modal-list">
                   {result.connectorReports.map((report) => (
                     <li key={report.connectorId}>
-                      <span><b>{report.connectorName}</b><small>{report.durationMs}ms · {report.offerCount} 个 Offer</small>{report.notes.map((note) => <small key={note}>{reportNote(note)}</small>)}</span>
+                      <span><b>{report.connectorName}</b><small>{report.durationMs}ms · {report.offerCount} 个 Offer</small>{report.notes.map((note) => <small key={note}>{reportNote(note)}</small>)}{sourceServiceNotice(report) && <small>{sourceServiceNotice(report)}</small>}</span>
                       <strong className={`source-state state-${report.state}`}>{connectorStateLabel(report.state)}</strong>
-                      {report.connectorId.endsWith("-edge-companion") && !["pending", "searching", "unsupported_query"].includes(report.state) && (
+                      {report.connectorId.endsWith("-edge-companion") && report.errorCode !== "QUNAR_COMPANION_WEB_SERVICE_ENDED" && !["pending", "searching", "unsupported_query"].includes(report.state) && (
                         <button type="button" className="secondary-button" disabled={busy !== "idle"}
                           onClick={() => void retryCompanion(report.connectorId.replace("-edge-companion", "") as CompanionPlatform)}>
                           {["login_required", "captcha_required"].includes(report.state) ? "已完成登录／验证，继续" : "重新查询此来源"}

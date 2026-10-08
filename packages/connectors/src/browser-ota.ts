@@ -323,9 +323,9 @@ function flightParts(value: string): { carrier: string; number: string } | undef
   return match ? { carrier: match[1]!, number: match[2]! } : undefined;
 }
 
-function safeCode(value: unknown, fallback: string): string {
+function safeCode(value: unknown): string | undefined {
   const candidate = string(value)?.toUpperCase();
-  return candidate && /^[A-Z]{3}$/.test(candidate) ? candidate : fallback;
+  return candidate && /^[A-Z]{3}$/.test(candidate) ? candidate : undefined;
 }
 
 function inferredMinutes(departureAt: string, arrivalAt: string): number {
@@ -342,20 +342,41 @@ function airportSearchKey(value: string): string {
 
 function airportRefFromText(
   value: string,
-  fallback: SearchIntent["origin"],
-): Offer["segments"][number]["origin"] {
+): Offer["segments"][number]["origin"] | undefined {
+  const airportOptions = locationOptions.filter((location) => location.kind === "airport");
+  const explicitCodes: string[] = value.toUpperCase().match(/\b[A-Z]{3}\b/g) ?? [];
+  const coded = airportOptions.filter((location) => explicitCodes.includes(location.code));
+  if (coded.length === 1) return { kind: "airport", code: coded[0]!.code, name: value };
+  if (coded.length > 1) return undefined;
   const haystack = airportSearchKey(value);
-  const match = locationOptions.find((location) => {
-    if (location.kind !== "airport") return false;
+  const matches = airportOptions.filter((location) => {
     const candidates = [location.airportNameZh, location.airportNameEn, ...location.aliases]
       .filter((candidate): candidate is string => Boolean(candidate))
       .map(airportSearchKey)
       .filter((candidate) => candidate.length >= 2);
     return candidates.some((candidate) => haystack.includes(candidate));
   });
-  return match
-    ? { kind: "airport", code: match.code, name: value }
-    : { kind: fallback.kind, code: fallback.code, name: value };
+  // A search airport is a constraint, never evidence of the observed airport.
+  return matches.length === 1
+    ? { kind: "airport", code: matches[0]!.code, name: value }
+    : undefined;
+}
+
+function hasStopLabel(value: string): boolean {
+  const positiveText = value.replace(/无经停|不经停|无需中转|不中转|无中转|经停\s*0\s*次|0\s*次经停|0\s*次中转|转\s*0\s*次/g, "");
+  return /经停|中转|转机|转\s*\d+\s*次|(?:^|\s)转\s*[\u4e00-\u9fff]|停留\s*\d+\s*(?:小时|分钟)/.test(positiveText);
+}
+
+function explicitStopCount(value: unknown): number {
+  if (typeof value === "string") return hasStopLabel(value) ? 1 : 0;
+  if (Array.isArray(value)) return Math.max(0, ...value.map(explicitStopCount));
+  const record = object(value);
+  if (!record) return 0;
+  const count = number(record.stopCount);
+  return Math.max(
+    count !== undefined && Number.isSafeInteger(count) && count >= 0 ? count : 0,
+    ...Object.values(record).map(explicitStopCount),
+  );
 }
 
 function filterReasons(
@@ -422,7 +443,11 @@ export function mapCtripBatchSearchPayload(
         const parts = flightParts(string(flight?.flightNo) ?? "");
         const departureAt = localDateTime(flight?.departureDateTime);
         const arrivalAt = localDateTime(flight?.arrivalDateTime);
-        if (!parts || !departureAt || !arrivalAt) return [];
+        const originCode = safeCode(flight?.departureAirportCode) ??
+          airportRefFromText(string(flight?.departureAirportName) ?? "")?.code;
+        const destinationCode = safeCode(flight?.arrivalAirportCode) ??
+          airportRefFromText(string(flight?.arrivalAirportName) ?? "")?.code;
+        if (!parts || !departureAt || !arrivalAt || !originCode || !destinationCode) return [];
         const segmentId = `ctrip:${requestId}:${itineraryIndex}:${legIndex}:${segmentIndex}`;
         legSegmentIds.push(segmentId);
         segments.push({
@@ -432,14 +457,14 @@ export function mapCtripBatchSearchPayload(
           flightNumber: parts.number,
           origin: {
             kind: "airport",
-            code: safeCode(flight?.departureAirportCode, intent.origin.code),
+            code: originCode,
             ...(string(flight?.departureAirportName)
               ? { name: string(flight?.departureAirportName)! }
               : {}),
           },
           destination: {
             kind: "airport",
-            code: safeCode(flight?.arrivalAirportCode, intent.destination.code),
+            code: destinationCode,
             ...(string(flight?.arrivalAirportName)
               ? { name: string(flight?.arrivalAirportName)! }
               : {}),
@@ -467,7 +492,10 @@ export function mapCtripBatchSearchPayload(
           airborne,
           durationMinutes(object(rawFlightSegment)?.duration) ?? airborne,
         ),
-        stopCount: Math.max(0, legSegments.length - 1),
+        stopCount: Math.max(
+          legSegments.length - 1 + flightList.reduce<number>((sum, flight) => sum + explicitStopCount(flight), 0),
+          explicitStopCount(rawFlightSegment),
+        ),
       });
     }
     if (legs.length === 0 || segments.length === 0) return [];
@@ -483,6 +511,7 @@ export function mapCtripBatchSearchPayload(
       Math.max(...legs.map((leg) => leg.stopCount)),
       JSON.stringify(rawItinerary),
     );
+    if (legs[0]!.departureAt.slice(0, 10) !== intent.departureDate) reasons.push("DEPARTURE_DATE_CONFLICT");
     if (!hasTaxBreakdown) reasons.push("PRICE_TAX_UNVERIFIED");
     const sourceOfferId = string(itinerary?.itineraryId) ?? segments
       .map((segment) => `${segment.marketingCarrier}${segment.flightNumber}-${segment.departureAt}`)
@@ -584,9 +613,10 @@ export function mapDomCards(
     const segmentId = `${platform}:${requestId}:${index}:segment`;
     const legId = `${platform}:${requestId}:${index}:leg`;
     const totalMinor = perAdultMinor * intent.adults;
-    const stops = /中转|转机|转\d+次|(?:^|\s)转\s*[\u4e00-\u9fff]|停留\s*\d+\s*(?:小时|分钟)/.test(card.cardText) ? 1 : 0;
-    const origin = airportRefFromText(card.departureAirport, intent.origin);
-    const destination = airportRefFromText(card.arrivalAirport, intent.destination);
+    const stops = hasStopLabel(card.cardText) ? 1 : 0;
+    const origin = airportRefFromText(card.departureAirport);
+    const destination = airportRefFromText(card.arrivalAirport);
+    if (!origin || !destination) return [];
     const breakdown = card.priceBreakdown;
     // A structured response is a transport, not proof that the fare includes tax.
     // Older companion versions omitted this evidence and must remain listed-only.

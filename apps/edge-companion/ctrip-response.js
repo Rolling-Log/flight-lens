@@ -19,7 +19,28 @@ var FlightLensCtripResponse = (() => {
   }
 
   function time(value) {
-    return string(value).match(/(?:T|\s)([0-2]\d:[0-5]\d)/)?.[1] || "";
+    return string(value).match(/(?:T|\s)((?:[01]\d|2[0-3]):[0-5]\d)/)?.[1] || "";
+  }
+
+  function date(value) {
+    return string(value).match(/^(\d{4}-\d{2}-\d{2})(?:T|\s)/)?.[1] || "";
+  }
+
+  function conditionLabels(value) {
+    return [...new Set((JSON.stringify(value) || "").match(/会员|新客|券后|专享|银行卡/g) || [])];
+  }
+
+  function hasStopEvidence(value) {
+    if (typeof value === "string") {
+      const positive = value.replace(/无经停|不经停|无需中转|不中转|无中转|经停\s*0\s*次|0\s*次经停|0\s*次中转|转\s*0\s*次/g, "");
+      return /经停|中转|转机|转\s*[1-9]\d*\s*次|(?:^|\s)转\s*[\u4e00-\u9fff]|停留\s*\d+\s*(?:小时|分钟)/.test(positive);
+    }
+    if (Array.isArray(value)) return value.some(hasStopEvidence);
+    const record = object(value);
+    if (!record) return false;
+    const count = typeof record.stopCount === "number" || typeof record.stopCount === "string"
+      ? Number(record.stopCount) : 0;
+    return (Number.isSafeInteger(count) && count > 0) || Object.values(record).some(hasStopEvidence);
   }
 
   function cabinCode(pageUrl) {
@@ -43,12 +64,16 @@ var FlightLensCtripResponse = (() => {
       if (!total || !Number.isSafeInteger(total)) return [];
       return [{
         amountMinor: total,
+        conditionLabels: conditionLabels(price),
         ...(base && tax !== null ? {
           priceBreakdown: { currency: "CNY", baseFareMinor: base, taxMinor: tax },
         } : {}),
       }];
     });
-    return candidates.sort((left, right) => left.amountMinor - right.amountMinor)[0] ?? null;
+    return candidates.sort((left, right) =>
+      Number(left.conditionLabels.length > 0) - Number(right.conditionLabels.length > 0) ||
+      left.amountMinor - right.amountMinor
+    )[0] ?? null;
   }
 
   function airportLabel(name, terminal) {
@@ -59,6 +84,9 @@ var FlightLensCtripResponse = (() => {
     const data = object(object(payload)?.data);
     const itineraries = array(data?.flightItineraryList);
     const requestedCabin = cabinCode(pageUrl);
+    let requestedDate;
+    try { requestedDate = new URL(pageUrl).searchParams.get("depdate"); } catch { return []; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedDate || "")) return [];
     return itineraries.flatMap((rawItinerary) => {
       const itinerary = object(rawItinerary);
       const flightSegments = array(itinerary?.flightSegments);
@@ -70,12 +98,17 @@ var FlightLensCtripResponse = (() => {
       const flightNumber = string(flight.flightNo) || string(itinerary?.itineraryId).split("_")[0];
       const departureTime = time(flight.departureDateTime);
       const arrivalTime = time(flight.arrivalDateTime);
+      const departureDate = date(flight.departureDateTime);
+      const arrivalDate = date(flight.arrivalDateTime);
+      const arrivalDays = (Date.parse(`${arrivalDate}T00:00:00Z`) - Date.parse(`${departureDate}T00:00:00Z`)) / 86_400_000;
       const departureAirport = airportLabel(flight.departureAirportName, flight.departureTerminal);
       const arrivalAirport = airportLabel(flight.arrivalAirportName, flight.arrivalTerminal);
       const price = priceFor(itinerary?.priceList, requestedCabin);
       if (
         !/^[A-Z0-9]{2}\d{3,4}$/i.test(flightNumber) ||
-        !departureTime || !arrivalTime || !departureAirport || !arrivalAirport || !price
+        !departureTime || !arrivalTime || !departureAirport || !arrivalAirport || !price ||
+        departureDate !== requestedDate || ![0, 1].includes(arrivalDays) ||
+        (arrivalDays === 0 && arrivalTime <= departureTime)
       ) return [];
       const airlineName = string(flight.marketAirlineName) || string(flight.airlineName);
       const priceText = `¥${price.amountMinor / 100}`;
@@ -87,7 +120,12 @@ var FlightLensCtripResponse = (() => {
           departureAirport,
           arrivalTime,
           arrivalAirport,
+          arrivalDays === 1 ? "+1天" : "",
+          hasStopEvidence(segment) ? "经停" : "",
           priceText,
+          ...price.conditionLabels,
+          ...conditionLabels({ ...itinerary, priceList: undefined, flightSegments: undefined }),
+          ...conditionLabels(segment),
         ].filter(Boolean).join(" "),
         flightNumberText: flightNumber,
         airlineName,
