@@ -1,8 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { ArrowDown, ArrowUpRight, Pause, Play, ShieldCheck, SlidersHorizontal, ScanLine } from "lucide-react";
+import { ArrowDown, ArrowUpRight, Pause, Play, Plane, ShieldCheck, SlidersHorizontal, ScanLine } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { preload } from "react-dom";
 import { LiquidGlassSurface } from "./liquid-glass-surface";
 import { GlassButton } from "./glass-control";
 
@@ -12,6 +13,8 @@ export function LandingHero({ onSearch, onCoverage }: {
   onSearch(): void;
   onCoverage(trigger: HTMLButtonElement): void;
 }) {
+  preload("/hero/boeing-707.glb", { as: "fetch", crossOrigin: "anonymous" });
+  preload("/hero/sky-environment.hdr", { as: "fetch", crossOrigin: "anonymous" });
   const [motionAllowed, setMotionAllowed] = useState(false);
   const [userPaused, setUserPaused] = useState(false);
   const [ready, setReady] = useState(false);
@@ -66,6 +69,11 @@ export function LandingHero({ onSearch, onCoverage }: {
             <button className="hero-search" onClick={onSearch} aria-haspopup="dialog">开始探索<ArrowUpRight size={16} aria-hidden="true" /></button>
           </LiquidGlassSurface>
         </div>
+      </div>
+      <div className="hero-loading" role="status" aria-live="polite" aria-hidden={ready || failed}
+        data-loading={!ready && !failed}>
+        <span className="hero-loading-orbit" aria-hidden="true"><Plane size={18} strokeWidth={1.5} /></span>
+        <span>{!ready && !failed ? "正在准备飞行画面" : ""}</span>
       </div>
       <div className="hero-baseline">
         <GlassButton className="video-toggle" disabled={failed || !ready || !motionAllowed} aria-label={playing ? "暂停飞机动画" : "播放飞机动画"}

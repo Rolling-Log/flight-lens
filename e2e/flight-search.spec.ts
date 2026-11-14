@@ -455,7 +455,7 @@ test("precise filters expose baggage allowance and custom red-eye controls", asy
   expect(body.redEyeWindow).toEqual({ start: "23:00", end: "07:00" });
 });
 
-test("compact price judgment and its history and alert drawer stay usable", async ({ page }) => {
+test("compact price judgment and its history and alert drawer stay usable", async ({ page }, testInfo) => {
   await page.goto("/");
   await page.getByRole("button", { name: "开始探索", exact: true }).click();
   await page.getByRole("tab", { name: "精确筛选" }).click();
@@ -502,6 +502,15 @@ test("compact price judgment and its history and alert drawer stay usable", asyn
   await expect(adaptiveNavigation).toHaveAttribute("data-split", "true");
   await page.waitForTimeout(600);
   await expect(page.locator(".controls-nav-root")).toHaveCSS("position", "absolute");
+  const dock = page.locator(".controls-nav-root");
+  await expect(dock.locator(".liquid-glass-panel .glass-control-lens")).toHaveCount(0);
+  await expect(dock.locator(".source-nav-button")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(dock.locator(".source-nav-button .glass-control-lens")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await page.screenshot({ path: testInfo.outputPath("split-navigation-light.png") });
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(dock.locator(".source-nav-button .glass-control-lens")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await page.screenshot({ path: testInfo.outputPath("split-navigation-dark.png") });
+  await page.emulateMedia({ colorScheme: "light" });
   const utilityRowWidths = await page
     .locator(".adaptive-navigation.is-split .nav-switcher button, .adaptive-navigation.is-split .source-nav-button, .adaptive-navigation.is-split .account-entry")
     .evaluateAll((elements) => elements.map((element) => Math.round(element.getBoundingClientRect().width)));

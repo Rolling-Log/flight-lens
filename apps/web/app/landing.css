@@ -57,6 +57,21 @@
 .hero-aircraft-3d:focus-visible:not([data-input="pointer"])::after { content: '方向键旋转 · Esc 复位'; position: absolute; left: 32px; bottom: 28px; padding: 9px 14px; border-bottom: 2px solid var(--action); border-radius: 8px; background: #edf8ffe6; color: var(--ink); font-size: 12px; pointer-events: none; }
 .hero-media[data-playing="true"] .hero-clouds i { animation-play-state: running; }
 .hero-fallback { position: absolute; inset: 0; background: url('/hero/boeing-707-poster.webp') center / cover no-repeat; }
+.hero-loading {
+  position: absolute; left: 50%; bottom: 88px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px; padding: 12px 18px;
+  border: 1px solid #ffffff66; border-radius: 28px; background: #ffffff9c;
+  color: var(--ink); font-size: 12px; white-space: nowrap; pointer-events: none;
+  transition: opacity 180ms ease-out, visibility 180ms;
+}
+.hero-loading[data-loading="false"] { opacity: 0; visibility: hidden; }
+.hero-loading-orbit { position: relative; display: grid; place-items: center; width: 32px; height: 32px; }
+.hero-loading-orbit::before {
+  content: ''; position: absolute; inset: 0; border: 1px solid #23485d24; border-top-color: currentColor;
+  border-radius: 50%; animation: hero-loading-turn 1.4s linear infinite;
+}
+.hero-loading[data-loading="false"] .hero-loading-orbit::before { animation: none; }
+@keyframes hero-loading-turn { to { transform: rotate(360deg); } }
 @keyframes cloud-passage {
   0%, 100% { transform: translate3d(calc(-1 * var(--cloud-travel-x)), calc(-1 * var(--cloud-travel-y)), 0); }
   50% { transform: translate3d(var(--cloud-travel-x), var(--cloud-travel-y), 0); }
@@ -175,6 +190,8 @@
   .search-dialog .trust-row svg { width: 12px; }
 }
 @media (prefers-reduced-motion: reduce) {
+  .hero-loading { transition: none; }
+  .hero-loading-orbit::before { animation: none; }
   .hero-media *, .hero-media *::before, .hero-media *::after { animation-play-state: paused !important; }
   .hero-action-glass { transition: none; }
   .hero-action-glass:hover, .hero-action-glass:active { transform: none; }

@@ -59,6 +59,7 @@ function createAircraft(host: HTMLDivElement, onReady: () => void, onError: () =
   const projected = new Vector3();
   let options: Options = { playing: false, visible: true, reducedMotion: true };
   let model: Group | undefined;
+  let firstFrameRendered = false;
   let disposed = false;
   let frame = 0;
   let lastTime = 0;
@@ -99,6 +100,11 @@ function createAircraft(host: HTMLDivElement, onReady: () => void, onError: () =
     lighting.update(aircraft.position);
     scene.updateMatrixWorld();
     renderer.render(scene, camera);
+    if (model && !firstFrameRendered) {
+      firstFrameRendered = true;
+      host.dataset.ready = "true";
+      onReady();
+    }
 
     // Low-frequency diagnostics also make the real WebGL interaction observable to tests.
     if (time - diagnosticTime > 120 || clock.mode !== host.dataset.motion || clock.mode !== "flight" || !options.playing) {
@@ -251,8 +257,6 @@ function createAircraft(host: HTMLDivElement, onReady: () => void, onError: () =
     fans = createAircraftFans(model);
     lights = createAircraftLights(model);
     aircraft.add(lights.group);
-    host.dataset.ready = "true";
-    onReady();
     invalidate();
   }, undefined, () => { if (!disposed) onError(); });
 

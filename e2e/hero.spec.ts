@@ -62,9 +62,33 @@ test("unavailable aircraft model keeps the local cover and search usable", async
   await page.goto("/");
   await expect(page.getByRole("button", { name: "播放飞机动画" })).toHaveText("静态背景");
   await expect(page.getByRole("button", { name: "播放飞机动画" })).toBeDisabled();
+  await expect(page.locator(".hero-loading")).toBeHidden();
   await expect(page.locator(".hero-fallback")).toHaveCSS("background-image", /boeing-707-poster/);
   await page.getByRole("button", { name: "开始探索", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "下一站，想去哪里？" })).toBeVisible();
+});
+
+test("slow aircraft loading gives feedback without blocking search and ends after rendering", async ({ page }, testInfo) => {
+  test.setTimeout(60000);
+  let releaseModel!: () => void;
+  const gate = new Promise<void>(resolve => { releaseModel = resolve; });
+  await page.route("**/hero/boeing-707.glb", async route => { await gate; await route.continue(); });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  const loading = page.locator(".hero-loading");
+  await expect(loading).toBeVisible();
+  await expect(loading).toContainText("正在准备飞行画面");
+  expect(await loading.evaluate(element => getComputedStyle(element.querySelector(".hero-loading-orbit")!, "::before").animationName)).toBe("hero-loading-turn");
+  await page.screenshot({ path: testInfo.outputPath("hero-loading.png") });
+  await page.getByRole("button", { name: "开始探索", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "下一站，想去哪里？" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect(await loading.evaluate(element => getComputedStyle(element.querySelector(".hero-loading-orbit")!, "::before").animationName)).toBe("none");
+  releaseModel();
+  await expect(page.locator(".hero-aircraft-3d")).toHaveAttribute("data-ready", "true", { timeout: 30000 });
+  await expect(loading).toBeHidden();
+  await expect(page.locator(".hero-fallback")).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("hero-glass-ready.png") });
 });
 
 test("WebGL drag returns to flight and preserves user pause", async ({ page }, testInfo) => {

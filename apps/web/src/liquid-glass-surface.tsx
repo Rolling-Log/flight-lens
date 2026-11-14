@@ -72,9 +72,8 @@ export function LiquidGlassSurface({
         {...config}
         {...(control ? controlGlassConfig : {})}
         className="liquid-glass-panel"
-      >
-        <div className={`liquid-glass-slot ${panelClassName}`.trim()} data-change-key={String(changeKey ?? "")}>{children}</div>
-      </GlassSurface>
+      />
+      <div className={`liquid-glass-slot ${panelClassName}`.trim()} data-change-key={String(changeKey ?? "")}>{children}</div>
     </div>
   );
 }

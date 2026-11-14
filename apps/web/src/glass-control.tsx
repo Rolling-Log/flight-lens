@@ -4,15 +4,14 @@ import type { ComponentPropsWithRef } from "react";
 import GlassSurface, { type GlassSurfaceConfig } from "./glass-surface";
 
 export const controlGlassConfig = {
-  borderRadius: 30, borderWidth: 0.08, backgroundOpacity: 0.1,
-  blur: 2, displace: 0, distortionScale: -36, brightness: 80, opacity: 0.9,
-  redOffset: 0, greenOffset: 2, blueOffset: 4, saturation: 1.25,
+  borderRadius: 30, borderWidth: 0.08, backgroundOpacity: 0,
+  blur: 2, displace: 0, distortionScale: -28, brightness: 50, opacity: 1,
+  redOffset: 0, greenOffset: 0, blueOffset: 0, saturation: 1,
   mixBlendMode: "screen",
 } satisfies Partial<GlassSurfaceConfig>;
 
 function GlassControlMaterial() {
   return <span className="glass-control-material" aria-hidden="true">
-    <span className="glass-control-tint" />
     <GlassSurface as="span" {...controlGlassConfig} width="100%" height="100%" className="glass-control-lens" />
   </span>;
 }
