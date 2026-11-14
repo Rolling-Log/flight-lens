@@ -1,50 +1,35 @@
 # 系统架构
 
+当前部署为 Netlify Web、Render API 与 Neon Postgres。运行配置以 `netlify.toml` 和 `render.yaml` 为准；早期 Railway 设计保留在历史 ADR 中。
+
 ```text
-Browser
-   ↓ HTTPS
-Netlify
-   └─ Next.js Web
-   ↓ HTTPS + restricted CORS
-Railway
-   └─ Fastify API
-      ├─ Intent Parser
-      ├─ Search Orchestrator
-      ├─ Connector Registry
-      ├─ Normalize / Deduplicate / Price
-      ├─ Adversarial Review
-      └─ Audit
-   ↓ pooled connection
-Neon Postgres
+用户浏览器
+  ├─ Netlify Next.js Web
+  │   ├─ 云端搜索 → Render Fastify API → 已配置的供应商接口
+  │   └─ 本机搜索 → Edge Companion → 用户已登录的平台网页
+  │                         └─ 观察结果 → API /v1/searches/companion
+  └─ Web 合并结果 → contracts 校验与 domain 价格、资格、去重规则
+
+Render API → Neon 搜索审计、账户及已启用的可选服务
 ```
 
-## V1 部署边界
+## 现有模块边界
 
-- Netlify 只承载 Web，不持有数据库、供应商或模型密钥；
-- 浏览器通过构建期注入的 `NEXT_PUBLIC_API_BASE_URL` 访问 Railway；
-- Railway 从仓库根目录构建共享 pnpm monorepo，并运行独立 Fastify 进程；
-- Fastify 默认监听 `::` 和 Railway 注入的 `PORT`；
-- Railway 使用 `/health` 作为部署健康检查；
-- Railway 仅允许 `WEB_ORIGINS` 中登记的 Netlify HTTPS Origin；
-- Neon Runtime 使用池化连接，Migration 使用独立直连连接。
+- `contracts` 定义查询、报价、证据及来源状态；前后端共用。
+- `domain` 执行价格计算、条件过滤、去重与排序，不依赖浏览器或模型。
+- `connectors` 负责来源访问与报价映射；未配置凭据的供应商不注册。
+- `edge-companion` 在本机访问用户会话。浏览器补查结果不进入公共报价缓存，也不触发新一轮云端付费查询。
+- `api` 承担校验、供应商凭据、执行预算与持久化；`web` 展示逐步返回的结果和来源状态。
+- Render 配置默认关闭服务端浏览器采集，保留已配置的 API 来源。当前存在的服务端浏览器实现与 Edge 采集逻辑将在执行入口收敛阶段一并评估。
 
-## 原则
+## 必须保留的约束
 
-- V1 使用模块化单体，不拆微服务；
-- 前端不持有供应商、数据库或 AI 密钥；
-- Connector 只返回统一契约；
-- 价格、过滤、去重、资格和排序使用确定性代码；
-- 搜索请求有全局时限，每个来源有独立时限；
-- 搜索返回覆盖报告，失败不被伪装成“无票”；
-- V1 不引入 Redis、对象存储或搜索引擎；
-- 进程内缓存和限流不被视为跨副本全局保护；
-- 供应商额度由 Connector 的账户级 fail-closed 门禁保护；
-- 外部航班 API 是数据源，不是本项目的部署平台；
-- 所有持久化变更通过 Migration；
-- Railway 收到 `SIGTERM` 或 `SIGINT` 时先关闭 Fastify 和数据库连接。
+价格金额使用整数分。票面价、合并税费、可选服务、附条件优惠与已核验全价保持区别。报价须匹配日期、机场、人数、舱位及产品；登录成功和读取成功都不能替代价格核验。
 
-## 环境
+每个来源有独立的超时、覆盖程度与失败原因。公共缓存不保存个人登录态报价。凭据只在对应本机或服务端环境使用，浏览器页面不包含供应商密钥。数据库结构变更通过 migration，历史数据映射不能当作废代码删除。
 
-- Development：本地 Web、本地 API 与 Neon 开发分支；
-- Staging：Netlify Staging、Railway Staging Service 与 Neon Staging 分支；
-- Production：正式 Tag 对应 Netlify、Railway 与 Neon Production 分支。
+## 下一步边界
+
+Ego Lite 尚未接入运行时。试点先用其本地浏览器能力读取低价候选的产品详情，再将有出处的观察结果交给既有契约和价格核心。Ego 的成功与否不能改变价格判断标准。
+
+具体范围、取舍和验收顺序见 [精简与全价搜索工作计划](docs/SIMPLIFICATION_PLAN_2026-10-29.md)。

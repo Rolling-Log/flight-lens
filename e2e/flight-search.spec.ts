@@ -1,6 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
+async function clickNavigation(page: Page, name: string) {
+  const button = page.getByRole("button", { name, exact: true });
+  if (!await button.isVisible()) await page.getByRole("button", { name: "打开导航" }).click();
+  await button.click();
+}
+
 const pvgNrtRouteName = /浦东国际机场.*PVG.*成田国际机场.*NRT/;
 
 test("cloud results arrive before browser completion and login retry only searches one platform", async ({ page }) => {
@@ -25,26 +31,27 @@ test("cloud results arrive before browser completion and login retry only search
     });
   });
   await page.goto("/");
+  await page.getByRole("button", { name: "开始探索", exact: true }).click();
   await page.getByRole("tab", { name: "精确筛选" }).click();
   await page.getByRole("button", { name: "开始检索" }).click();
   await expect.poll(() => cloudCalls).toBe(1);
   await expect(page.getByRole("article").first()).toBeVisible();
-  await expect(page.getByRole("status")).toContainText("结果陆续返回");
+  await expect(page.locator("#results").getByRole("status")).toContainText("结果陆续返回");
   await page.getByRole("article").first().getByRole("button", { name: "查看报价详情" }).click();
-  await expect(page.getByRole("region", { name: pvgNrtRouteName })).toBeVisible();
+  await expect(page.getByRole("region", { name: pvgNrtRouteName, includeHidden: true })).toBeVisible();
   await expect.poll(() => page.evaluate(() => typeof (window as typeof window & { finishCompanion?: () => void }).finishCompanion)).toBe("function");
   await page.evaluate(() => (window as typeof window & { finishCompanion?: () => void }).finishCompanion?.());
-  await page.getByRole("button", { name: "来源", exact: true }).click();
+  await clickNavigation(page, "来源");
   const retry = page.getByRole("button", { name: "已完成登录／验证，继续" });
   await expect(retry).toBeEnabled();
   // Later source replies must not clear the quote the user is already reading.
-  await expect(page.getByRole("region", { name: pvgNrtRouteName })).toBeVisible();
+  await expect(page.getByRole("region", { name: pvgNrtRouteName, includeHidden: true })).toBeVisible();
   await retry.click();
   const coverage = page.getByRole("region", { name: "本次搜索覆盖详情" });
   await expect(coverage).toContainText("1 个进行中");
   await expect(coverage.getByText("需登录", { exact: true })).toHaveCount(0);
   await expect(coverage.getByText("检索中", { exact: true })).toBeVisible();
-  await expect(page.getByRole("region", { name: pvgNrtRouteName })).toBeVisible();
+  await expect(page.getByRole("region", { name: pvgNrtRouteName, includeHidden: true })).toBeVisible();
   await expect.poll(() => page.evaluate(() => typeof (window as typeof window & { finishRetry?: () => void }).finishRetry)).toBe("function");
   await page.evaluate(() => (window as typeof window & { finishRetry?: () => void }).finishRetry?.());
   await expect(page.getByRole("button", { name: "重新查询此来源" })).toBeEnabled();
@@ -78,21 +85,22 @@ test("failed browser result mapping ends pending state and can recover without r
     });
   });
   await page.goto("/");
+  await page.getByRole("button", { name: "开始探索", exact: true }).click();
   await page.getByRole("tab", { name: "精确筛选" }).click();
   await page.getByRole("button", { name: "开始检索" }).click();
   await expect(page.getByRole("article").first()).toBeVisible();
   const count = await page.getByRole("article").count();
-  await page.getByRole("button", { name: "来源", exact: true }).click();
+  await clickNavigation(page, "来源");
   await page.getByRole("button", { name: "已完成登录／验证，继续" }).click();
   const coverage = page.getByRole("region", { name: "本次搜索覆盖详情" });
   await expect(coverage.getByText("不可用", { exact: true })).toBeVisible();
   await expect(coverage).toContainText("0 个进行中");
   await expect(coverage).toContainText("1 个失败");
-  await expect(page.getByRole("article")).toHaveCount(count);
+  await expect(page.getByRole("article", { includeHidden: true })).toHaveCount(count);
   await page.getByRole("button", { name: "重新查询此来源" }).click();
   await expect(coverage.getByText("无结果", { exact: true })).toBeVisible();
   await expect(coverage).toContainText("0 个失败");
-  await expect(page.getByRole("article")).toHaveCount(count);
+  await expect(page.getByRole("article", { includeHidden: true })).toHaveCount(count);
   expect(cloudCalls).toBe(1);
   expect(mappingCalls).toBe(3);
 });
@@ -120,6 +128,7 @@ test("an empty cloud reply remains provisional while a browser source is still s
     });
   });
   await page.goto("/");
+  await page.getByRole("button", { name: "开始探索", exact: true }).click();
   await page.getByRole("tab", { name: "精确筛选" }).click();
   await page.getByRole("button", { name: "开始检索" }).click();
   await expect(page.getByTestId("empty-search-results")).toContainText("搜索仍在进行");
@@ -133,11 +142,12 @@ test("missing bridge is visible and reconnect preserves cloud results without an
   let cloudCalls = 0;
   await page.route("**/v1/searches", async (route) => { cloudCalls += 1; await route.continue(); });
   await page.goto("/");
+  await page.getByRole("button", { name: "开始探索", exact: true }).click();
   await page.getByRole("tab", { name: "精确筛选" }).click();
   await page.getByRole("button", { name: "开始检索" }).click();
   await expect(page.getByRole("article").first()).toBeVisible();
   const count = await page.getByRole("article").count();
-  await page.getByRole("button", { name: "来源", exact: true }).click();
+  await clickNavigation(page, "来源");
   await expect(page.getByTestId("companion-connection")).toContainText("本机扩展未连接", { timeout: 8_000 });
   // Simulate a worker that only answers the second discovery attempt.
   await page.evaluate(() => {
@@ -157,7 +167,7 @@ test("missing bridge is visible and reconnect preserves cloud results without an
   await page.getByRole("button", { name: "重新连接并查询浏览器来源" }).click();
   await expect(page.getByTestId("companion-connection")).toContainText("本机扩展已连接 · 0.2.0");
   await expect(page.getByRole("button", { name: "已完成登录／验证，继续" })).toBeEnabled();
-  await expect(page.getByRole("article")).toHaveCount(count);
+  await expect(page.getByRole("article", { includeHidden: true })).toHaveCount(count);
   expect(cloudCalls).toBe(1);
 });
 
@@ -176,6 +186,7 @@ test("a lower list fare never inherits a verified-price badge from the same flig
     await route.fulfill({ response, json: result });
   });
   await page.goto("/");
+  await page.getByRole("button", { name: "开始探索", exact: true }).click();
   await page.getByRole("tab", { name: "精确筛选" }).click();
   await page.getByRole("button", { name: "开始检索" }).click();
   const card = page.getByRole("article").filter({ hasText: "列表价供应商" });
@@ -190,17 +201,17 @@ test("animated coverage dialog receives focus and traps keyboard navigation", as
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.goto("/");
   const trigger = page.getByRole("button", { name: "来源", exact: true });
-  await trigger.click();
+  await clickNavigation(page, "来源");
   const dialog = page.getByRole("dialog", { name: "来源数量不等于可信度" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "关闭" })).toBeFocused();
+  await expect(dialog.getByRole("button", { name: "关闭来源" })).toBeFocused();
   await page.keyboard.press("Shift+Tab");
   await expect(dialog.getByRole("button", { name: "我知道了" })).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(dialog.getByRole("button", { name: "关闭" })).toBeFocused();
+  await expect(dialog.getByRole("button", { name: "关闭来源" })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
-  await expect(trigger).toBeFocused();
+  await expect((await trigger.isVisible()) ? trigger : page.getByRole("button", { name: "打开导航" })).toBeFocused();
 });
 
 async function expectNoBlockingAccessibilityViolations(page: Page) {
@@ -216,6 +227,8 @@ test("initial, result, and coverage dialog states have no blocking accessibility
 }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
+  await expectNoBlockingAccessibilityViolations(page);
+  await page.getByRole("button", { name: "开始探索", exact: true }).click();
   await expectNoBlockingAccessibilityViolations(page);
 
   await page.getByRole("tab", { name: "精确筛选" }).click();
@@ -268,7 +281,7 @@ test("initial, result, and coverage dialog states have no blocking accessibility
   const coverageTrigger = page.getByRole("button", { name: /本次搜索覆盖：2\/2/ });
   await coverageTrigger.click();
   await expect(page.getByRole("dialog", { name: "来源数量不等于可信度" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "关闭" })).toBeFocused();
+  await expect(page.getByRole("button", { name: "关闭来源" })).toBeFocused();
   await expectNoBlockingAccessibilityViolations(page);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: "来源数量不等于可信度" })).toBeHidden();
@@ -293,10 +306,11 @@ test("React Bits GlassSurface initializes SVG displacement and keeps its built-i
     await expect(glass).toHaveAttribute("data-glass-state", /active|fallback/);
     if (await glass.getAttribute("data-glass-state") === "active") {
       await expect(glass.locator("canvas")).toHaveCount(0);
-      await expect(glass.locator('filter[id^="glass-filter-"]')).toHaveCount(1);
-      await expect(glass.locator("feDisplacementMap")).toHaveCount(3);
-      await expect(glass.locator(".glass-surface--svg")).toHaveCount(1);
-      const backdropFilter = await glass.locator(".glass-surface").evaluate(
+      const panel = glass.locator(":scope > .glass-surface");
+      await expect(panel.locator(':scope > svg filter[id^="glass-filter-"]')).toHaveCount(1);
+      await expect(panel.locator(":scope > svg feDisplacementMap")).toHaveCount(3);
+      await expect(panel).toHaveClass(/glass-surface--svg/);
+      const backdropFilter = await panel.evaluate(
         (element) => getComputedStyle(element).backdropFilter,
       );
       if (await glass.getAttribute("data-liquid-root") === "navigation-united") {
@@ -304,7 +318,7 @@ test("React Bits GlassSurface initializes SVG displacement and keeps its built-i
       } else {
         expect(backdropFilter).toBe("none");
       }
-      const boxShadow = await glass.locator(".glass-surface").evaluate(
+      const boxShadow = await panel.evaluate(
         (element) => getComputedStyle(element).boxShadow,
       );
       expect(boxShadow).not.toContain("56px");
@@ -326,7 +340,8 @@ test("React Bits GlassSurface initializes SVG displacement and keeps its built-i
       set: () => undefined,
     });
   });
-  await page.reload();
+  // External hero media must not delay assertions about the hydrated glass fallback.
+  await page.reload({ waitUntil: "domcontentloaded" });
   for (const glass of await navigationGlass.all()) {
     await expect(glass).toHaveAttribute("data-glass-state", "fallback");
     await expect(glass).toHaveAttribute("data-glass-fallback", "svg-filter-unsupported");
@@ -336,7 +351,7 @@ test("React Bits GlassSurface initializes SVG displacement and keeps its built-i
 test("account entry supports auth recovery and cross-device personal data without overflow", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("button", { name: "查看来源覆盖" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "来源", exact: true })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "来源", exact: true, includeHidden: true })).toHaveCount(1);
   const avatarFile = page.getByLabel("选择头像图片");
   await avatarFile.setInputFiles({
     name: "avatar.png",
@@ -346,6 +361,7 @@ test("account entry supports auth recovery and cross-device personal data withou
   await expect(page.getByRole("button", { name: "更换头像" }).getByAltText("个人头像")).toBeVisible();
   await page.getByRole("button", { name: "登录", exact: true }).click();
   const anonymousDialog = page.locator(".account-modal-auth");
+  await expect(page.getByRole("dialog", { name: "登录航探" })).toHaveAttribute("data-motion-state", "settled");
   await expect(anonymousDialog.getByLabel("邮箱")).toBeVisible();
   const loginBox = await anonymousDialog.boundingBox();
   await anonymousDialog.getByRole("tab", { name: "注册", exact: true }).click();
@@ -394,10 +410,23 @@ test("account entry supports auth recovery and cross-device personal data withou
   expect(box!.x).toBeGreaterThanOrEqual(0);
   expect(box!.x + box!.width).toBeLessThanOrEqual((await page.viewportSize())!.width);
   await expectNoBlockingAccessibilityViolations(page);
+  // Destructive actions use the same accessible material, but require a
+  // separate explicit confirmation. Cancel must preserve the account sheet.
+  await accountDialog.getByRole("button", { name: "删除账号", exact: true }).click();
+  const confirmation = page.getByRole("dialog", { name: "确定删除账号？" });
+  await expect(confirmation.getByRole("button", { name: "保留账号" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(confirmation).toBeHidden();
+  await expect(accountDialog).toBeVisible();
+  expect(await page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+  await page.keyboard.press("Escape");
+  await expect(accountDialog).toBeHidden();
+  expect(await page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
 });
 
 test("precise filters expose baggage allowance and custom red-eye controls", async ({ page }) => {
   await page.goto("/");
+  await page.getByRole("button", { name: "开始探索", exact: true }).click();
   await page.getByRole("tab", { name: "精确筛选" }).click();
   const modeTabs = page.getByRole("tablist", { name: "搜索方式" });
   await expect(modeTabs).toHaveAttribute("data-mode", "form");
@@ -428,6 +457,7 @@ test("precise filters expose baggage allowance and custom red-eye controls", asy
 
 test("compact price judgment and its history and alert drawer stay usable", async ({ page }) => {
   await page.goto("/");
+  await page.getByRole("button", { name: "开始探索", exact: true }).click();
   await page.getByRole("tab", { name: "精确筛选" }).click();
   await page.getByRole("button", { name: "开始检索" }).click();
   await expect(page.getByRole("heading", { name: pvgNrtRouteName })).toBeVisible();
@@ -437,10 +467,8 @@ test("compact price judgment and its history and alert drawer stay usable", asyn
   await expect(detailTrigger).toBeVisible();
   await detailTrigger.click();
   const drawer = page.getByRole("dialog", { name: "价格历史与提醒" });
-  const priceBackdrop = page.locator(".price-drawer-backdrop");
-  await expect(priceBackdrop).toHaveAttribute("data-motion-engine", "gsap-transform-map");
-  await expect(priceBackdrop).toHaveAttribute("data-motion-state", "settled");
-  await expect(priceBackdrop.locator(".liquid-morph")).toHaveCount(1);
+  await expect(drawer).toHaveAttribute("data-motion-state", "settled");
+  await expect(drawer.locator(".glass-dialog-shape")).toBeHidden();
   await expect(drawer.getByRole("button", { name: "90 天" })).toHaveClass(/selected/);
   await drawer.getByRole("button", { name: "30 天" }).click();
   await expect(drawer.getByRole("button", { name: "30 天" })).toHaveClass(/selected/);
@@ -450,7 +478,8 @@ test("compact price judgment and its history and alert drawer stay usable", asyn
   await drawer.getByRole("tab", { name: "价格提醒" }).click();
   await expect(drawer.getByLabel("目标可核验全价（人民币）")).toBeVisible();
   await expect(drawer.getByLabel("ntfy Topic")).toBeVisible();
-  await expect(drawer.getByText(/尚未配置服务端调度/)).toBeVisible();
+  await expect(drawer.getByText("暂时无法读取提醒，请关闭面板后重试。")).toBeVisible();
+  await expect(drawer.getByRole("button", { name: "创建提醒", exact: true })).toBeDisabled();
   await expectNoBlockingAccessibilityViolations(page);
   await page.keyboard.press("Escape");
   await expect(drawer).toBeHidden();
@@ -462,8 +491,8 @@ test("compact price judgment and its history and alert drawer stay usable", asyn
     return { duration: style.transitionDuration, timing: style.transitionTimingFunction };
   });
   expect(navSelectionMotion).toEqual({
-    duration: "0.25s",
-    timing: "cubic-bezier(0.77, 0, 0.175, 1)",
+    duration: "0.24s, 0.18s",
+    timing: "cubic-bezier(0.2, 0.8, 0.2, 1), cubic-bezier(0.2, 0.8, 0.2, 1)",
   });
   await expect(page.getByRole("button", { name: "价格中心", exact: true })).toHaveCount(0);
   await expect(navSwitcher).toHaveAttribute("data-active", "results");
@@ -485,7 +514,20 @@ test("compact price judgment and its history and alert drawer stay usable", asyn
     shortlist: document.querySelector(".shortlist-fab-root")?.getBoundingClientRect().width,
   }));
   expect(new Set(Object.values(capsuleWidths)).size).toBe(1);
-  await expect(page.locator(".shortlist-fab > svg")).toHaveCSS("color", "rgb(0, 102, 204)");
+  await expect(page.locator(".shortlist-fab > svg")).toHaveCSS("color", "rgb(48, 104, 135)");
+  // Floating tools must remain attached to the viewport after a long scroll,
+  // including short windows where the navigation occupies the right edge.
+  const viewport = page.viewportSize()!;
+  await page.setViewportSize({ width: viewport.width, height: 498 });
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const statusBefore = await detailTrigger.boundingBox();
+  await page.evaluate(() => window.scrollBy(0, -100));
+  await expect.poll(async () => (await detailTrigger.boundingBox())!.y).toBeCloseTo(statusBefore!.y, 0);
+  await detailTrigger.click();
+  await expect(drawer).toHaveAttribute("data-motion-state", "settled");
+  await page.keyboard.press("Escape");
+  await expect(drawer).toBeHidden();
+  await page.setViewportSize(viewport);
   await page.evaluate(() => window.scrollTo(0, Math.max(0, window.scrollY - 180)));
   await expect(adaptiveNavigation).toHaveAttribute("data-split", "true");
   await page.evaluate(() => window.scrollTo(0, 0));
@@ -507,6 +549,7 @@ test("agent input becomes an editable search and exposes source limits", async (
   page,
 }) => {
   await page.goto("/");
+  await page.getByRole("button", { name: "开始探索", exact: true }).click();
 
   await page.getByRole("button", { name: "开始检索" }).click();
   await expect(page.getByText("请确认已解析条件")).toBeVisible();
@@ -529,7 +572,7 @@ test("agent input becomes an editable search and exposes source limits", async (
   await expect(
     page.getByText("Sandbox 来源 · 不代表可购买库存", { exact: true }),
   ).toBeVisible();
-  await expect(page.getByText("2/2", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "本次搜索覆盖：2/2，查看详情" })).toBeVisible();
   await expect(page.getByText("+1", { exact: true }).first()).toBeVisible();
   await expect(
     page.getByText("共 2 个航班 · 2 个平台报价 · 1 个不符合条件的报价已隐藏"),
@@ -572,7 +615,7 @@ test("agent input becomes an editable search and exposes source limits", async (
   await expect(recommended.getByText("抓取时来源展示价")).toBeVisible();
 
   await recommended.getByRole("button", { name: "查看报价详情" }).click();
-  const detail = page.getByRole("region", { name: pvgNrtRouteName });
+  const detail = page.getByRole("region", { name: pvgNrtRouteName, includeHidden: true });
   await expect(
     detail.getByText(
       "此链接返回带本次条件的 Google Flights 结果页，不是该售卖方的精确报价落点；请重新选择相同行程并核验最终价格。",
@@ -591,6 +634,7 @@ test("an incomplete dialogue pre-fills known fields and leaves the missing date 
   page,
 }) => {
   await page.goto("/");
+  await page.getByRole("button", { name: "开始探索", exact: true }).click();
   const query = page.getByLabel("直接说出完整需求，解析后可在表单中检查");
   await query.fill("下个月广州飞新加坡，单程，1 位成人。");
   await page.getByRole("button", { name: "开始检索" }).click();
@@ -608,6 +652,7 @@ test("form edits remain authoritative after switching back to agent mode", async
   page,
 }) => {
   await page.goto("/");
+  await page.getByRole("button", { name: "开始探索", exact: true }).click();
   await page.getByRole("button", { name: "开始检索" }).click();
   await expect(page.getByText("请确认已解析条件")).toBeVisible();
 
@@ -634,6 +679,7 @@ test("form edits remain authoritative after switching back to agent mode", async
 
 test("location combobox supports Chinese and pinyin with keyboard selection", async ({ page }) => {
   await page.goto("/");
+  await page.getByRole("button", { name: "开始探索", exact: true }).click();
   await page.getByRole("tab", { name: "精确筛选" }).click();
   const origin = page.getByLabel("出发地", { exact: true });
   const destination = page.getByLabel("目的地", { exact: true });
@@ -651,7 +697,7 @@ test("location combobox supports Chinese and pinyin with keyboard selection", as
   expect(body.destination).toMatchObject({ kind: "city", code: "CTU" });
 
   await expect(page.getByRole("heading", { name: /北京.*BJS.*成都.*CTU/ })).toBeVisible();
-  await page.getByRole("button", { name: "搜索", exact: true }).click();
+  await clickNavigation(page, "搜索");
   await page.getByRole("tab", { name: "精确筛选" }).click();
   const nextOrigin = page.getByLabel("出发地", { exact: true });
   const nextDestination = page.getByLabel("目的地", { exact: true });

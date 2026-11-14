@@ -1,5 +1,8 @@
 "use client";
 
+import { GlassButton, GlassSelection } from "./glass-control";
+import { navigateTabs } from "./tab-navigation";
+
 import type {
   MarketPriceInsight,
   PriceAlert,
@@ -8,16 +11,10 @@ import type {
   SearchIntent,
 } from "@flight-lens/contracts";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { ChartNoAxesCombined, X } from "lucide-react";
 import { CartesianGrid, Line, LineChart, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { accountFetch } from "./account-api";
-import {
-  emptyLiquidOrigin,
-  liquidOriginFromElement,
-  useLiquidOverlayMotion,
-} from "./liquid-overlay-motion";
-import { LiquidGlassSurface } from "./liquid-glass-surface";
+import { GlassDialog } from "./glass-dialog";
 
 type PriceToolsProps = {
   apiBase: string;
@@ -33,26 +30,11 @@ const kindLabels = {
 } as const;
 
 const kindColors = {
-  verified_all_in: "#087f5b",
-  listed_only: "#1557d6",
+  verified_all_in: "var(--success)",
+  listed_only: "var(--action)",
   split_ticket: "#b54708",
 } as const;
 
-const workspaceGlassConfig = {
-  borderRadius: 20,
-  borderWidth: 0.04,
-  brightness: 94,
-  opacity: 0.66,
-  blur: 9,
-  displace: 0.2,
-  backgroundOpacity: 0.1,
-  saturation: 1.18,
-  distortionScale: -24,
-  redOffset: 0,
-  greenOffset: 2,
-  blueOffset: 4,
-  mixBlendMode: "screen",
-} as const;
 
 const levelDetails = [
   { id: "terrible", label: "拉完了", compact: "拉完", color: "#c44536", description: "明显高于历史常见价格" },
@@ -185,13 +167,10 @@ export function PriceTools({ apiBase, intent, marketPriceInsights, priceJudgment
   const [intervalMinutes, setIntervalMinutes] = useState(360);
   const [topic, setTopic] = useState("");
   const [message, setMessage] = useState("");
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [monitorAvailable, setMonitorAvailable] = useState<boolean | null>(null);
-  const [liquidOrigin, setLiquidOrigin] = useState(emptyLiquidOrigin);
+  const [alertsState, setAlertsState] = useState<"loading" | "ready" | "signed_out" | "unavailable">("loading");
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const backdropRef = useRef<HTMLDivElement>(null);
-  const drawerRef = useRef<HTMLDivElement>(null);
-  const morphRef = useRef<HTMLSpanElement>(null);
-  const closeRef = useRef<HTMLButtonElement>(null);
   const insight = marketPriceInsights.find((item) =>
     item.originCode === intent.origin.code &&
     item.destinationCode === intent.destination.code &&
@@ -202,14 +181,6 @@ export function PriceTools({ apiBase, intent, marketPriceInsights, priceJudgment
     item.adults === intent.adults,
   );
   const level = levelDetails.find((item) => item.id === priceJudgment.level);
-
-  useLiquidOverlayMotion({
-    open,
-    origin: liquidOrigin,
-    backdropRef,
-    panelRef: drawerRef,
-    morphRef,
-  });
 
   useEffect(() => {
     const controller = new AbortController();
@@ -222,42 +193,24 @@ export function PriceTools({ apiBase, intent, marketPriceInsights, priceJudgment
 
   useEffect(() => {
     if (!open || view !== "alerts") return;
-    accountFetch("/v2/alerts")
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error("alerts unavailable")))
-      .then((payload: { alerts: PriceAlert[]; delivery?: { serverSchedulingConfigured?: boolean } }) => {
+    const controller = new AbortController();
+    accountFetch("/v2/alerts", { signal: controller.signal })
+      .then((response) => {
+        if (response.status === 401) { setAlertsState("signed_out"); return null; }
+        if (!response.ok) throw new Error("alerts unavailable");
+        return response.json();
+      })
+      .then((payload: { alerts: PriceAlert[]; delivery?: { serverSchedulingConfigured?: boolean } } | null) => {
+        if (!payload) return;
         setAlerts(payload.alerts);
         setMonitorAvailable(payload.delivery?.serverSchedulingConfigured === true);
+        setAlertsState("ready");
       })
-      .catch(() => { setAlerts([]); setMonitorAvailable(false); });
+      .catch(() => {
+        if (!controller.signal.aborted) setAlertsState("unavailable");
+      });
+    return () => controller.abort();
   }, [apiBase, open, view]);
-
-  useEffect(() => {
-    if (!open) return;
-    const previousOverflow = document.body.style.overflow;
-    const trigger = triggerRef.current;
-    document.body.style.overflow = "hidden";
-    closeRef.current?.focus();
-    const keydown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setOpen(false);
-        return;
-      }
-      if (event.key !== "Tab" || !drawerRef.current) return;
-      const focusable = [...drawerRef.current.querySelectorAll<HTMLElement>("button, input, select, [href], [tabindex]:not([tabindex='-1'])")]
-        .filter((element) => !element.hasAttribute("disabled"));
-      const first = focusable[0];
-      const last = focusable.at(-1);
-      if (!first || !last) return;
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-      if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-    };
-    document.addEventListener("keydown", keydown);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener("keydown", keydown);
-      trigger?.focus();
-    };
-  }, [open]);
 
   const siteChartData = useMemo(() => buildHistoryChartData(history?.observations ?? [], historyDays), [history, historyDays]);
   const marketChartData = useMemo(() => buildMarketHistoryChartData(insight, historyDays), [historyDays, insight]);
@@ -271,9 +224,20 @@ export function PriceTools({ apiBase, intent, marketPriceInsights, priceJudgment
   const siteObservedDays = new Set((history?.observations ?? []).filter((item) => item.totalAmountCnyMinor !== null).map((item) => dayKey(item.observedAt))).size;
 
   function showDrawer(nextView: "history" | "alerts") {
-    if (triggerRef.current) setLiquidOrigin(liquidOriginFromElement(triggerRef.current));
     setView(nextView);
     setOpen(true);
+  }
+
+  async function runAlertAction(key: string, action: () => Promise<void>) {
+    setPendingAction(key);
+    setMessage("");
+    try {
+      await action();
+    } catch {
+      setMessage("连接失败，请检查网络后重试。");
+    } finally {
+      setPendingAction(null);
+    }
   }
 
   async function createAlert() {
@@ -295,7 +259,7 @@ export function PriceTools({ apiBase, intent, marketPriceInsights, priceJudgment
       headers: { "content-type": "application/json" },
       ...(action === "deleted" ? {} : { body: JSON.stringify({ status: action }) }),
     });
-    if (!response.ok) return;
+    if (!response.ok) { setMessage("提醒更新失败，请稍后重试。"); return; }
     setAlerts((current) => action === "deleted" ? current.filter((item) => item.id !== alert.id) : current.map((item) => item.id === alert.id ? { ...item, status: action } : item));
   }
 
@@ -319,41 +283,20 @@ export function PriceTools({ apiBase, intent, marketPriceInsights, priceJudgment
         </button>
       </section>
 
-      {open && typeof document !== "undefined" && createPortal(
-        <div
-          ref={backdropRef}
-          className="price-drawer-backdrop liquid-overlay-backdrop"
-          onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}
-        >
-          <span ref={morphRef} className="liquid-morph" aria-hidden="true" />
-          <div
-            ref={drawerRef}
-            className="price-drawer"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="price-drawer-title"
-          >
-            <LiquidGlassSurface
-              label="price-workspace"
-              className="workspace-glass-fill"
-              panelClassName="workspace-glass-panel"
-              config={workspaceGlassConfig}
-              changeKey={view}
-            >
-              <span aria-hidden="true" />
-            </LiquidGlassSurface>
+      <GlassDialog open={open} onClose={() => setOpen(false)} triggerRef={triggerRef} variant="drawer"
+        className="price-drawer" labelledBy="price-drawer-title">
             <header>
               <div><span>价格工具</span><h2 id="price-drawer-title">价格历史与提醒</h2></div>
-              <button ref={closeRef} className="price-drawer-close" onClick={() => setOpen(false)} aria-label="关闭价格工具"><X size={19} /></button>
+              <GlassButton className="price-drawer-close" onClick={() => setOpen(false)} aria-label="关闭价格工具"><X size={19} /></GlassButton>
             </header>
-            <div className="price-drawer-tabs" data-view={view} role="tablist" aria-label="价格工具视图">
-              <span className="price-tab-selection" aria-hidden="true" />
-              <button role="tab" aria-selected={view === "history"} className={view === "history" ? "selected" : ""} onClick={() => setView("history")}>历史与判断</button>
-              <button role="tab" aria-selected={view === "alerts"} className={view === "alerts" ? "selected" : ""} onClick={() => setView("alerts")}>价格提醒</button>
+            <div className="price-drawer-tabs" data-view={view} role="tablist" aria-label="价格工具视图" onKeyDown={navigateTabs}>
+              <GlassSelection className="price-tab-selection" />
+              <button id="price-tab-history" role="tab" aria-selected={view === "history"} aria-controls="price-history-panel" tabIndex={view === "history" ? 0 : -1} className={view === "history" ? "selected" : ""} onClick={() => setView("history")}>历史与判断</button>
+              <button id="price-tab-alerts" role="tab" aria-selected={view === "alerts"} aria-controls="price-alerts-panel" tabIndex={view === "alerts" ? 0 : -1} className={view === "alerts" ? "selected" : ""} onClick={() => setView("alerts")}>价格提醒</button>
             </div>
 
             {view === "history" ? (
-              <div className="price-history-detail">
+              <div className="price-history-detail" id="price-history-panel" role="tabpanel" aria-labelledby="price-tab-history">
                 <section className="judgment-detail">
                   <div><span>当前判断</span><strong style={{ color: level?.color }}>{level?.label ?? "暂无法判断"}</strong><small>{priceJudgment.explanation}</small></div>
                   <PriceLevelAxis judgment={priceJudgment} detailed />
@@ -364,7 +307,7 @@ export function PriceTools({ apiBase, intent, marketPriceInsights, priceJudgment
                   )}
                 </section>
                 <div className="history-range" aria-label="价格历史时间范围">
-                  {[30, 90, 180].map((days) => <button key={days} className={historyDays === days ? "selected" : ""} onClick={() => setHistoryDays(days)}>{days} 天</button>)}
+                  {[30, 90, 180].map((days) => <GlassButton key={days} className={historyDays === days ? "selected" : ""} aria-pressed={historyDays === days} onClick={() => setHistoryDays(days)}>{days} 天</GlassButton>)}
                 </div>
                 <section className="history-source-block">
                   <div className="history-source-head"><div><span>外部市场历史</span><h3>{insight?.sourceName ?? "暂无可靠历史数据"}</h3></div><small>过去 {historyDays} 天 · {externalObservedDays} 个观测日{insight && <><br />更新 {formatDateTime(insight.fetchedAt)}</>}</small></div>
@@ -376,9 +319,9 @@ export function PriceTools({ apiBase, intent, marketPriceInsights, priceJudgment
                           <XAxis dataKey="label" tick={{ fontSize: 9 }} minTickGap={35} />
                           <YAxis tick={{ fontSize: 9 }} width={48} tickFormatter={(value) => `¥${value}`} />
                           <Tooltip formatter={(value) => [`¥${Number(value).toLocaleString("zh-CN")}`, "来源展示价"]} />
-                          {insight.typicalPriceRangeMinor && <ReferenceArea y1={insight.typicalPriceRangeMinor[0] / 100} y2={insight.typicalPriceRangeMinor[1] / 100} fill="#1557d6" fillOpacity={0.08} />}
+                          {insight.typicalPriceRangeMinor && <ReferenceArea y1={insight.typicalPriceRangeMinor[0] / 100} y2={insight.typicalPriceRangeMinor[1] / 100} fill="var(--action)" fillOpacity={0.08} />}
                           {priceJudgment.quantilesMinor && <ReferenceLine y={priceJudgment.quantilesMinor.p50 / 100} stroke="#7a8798" strokeDasharray="4 4" />}
-                          <Line dataKey="market" name="外部市场历史" stroke="#1557d6" connectNulls={false} strokeWidth={2} dot={{ r: 2 }} isAnimationActive={false} />
+                          <Line dataKey="market" name="外部市场历史" stroke="var(--action)" connectNulls={false} strokeWidth={2} dot={{ r: 2 }} isAnimationActive={false} />
                         </LineChart>
                       </ResponsiveContainer>
                     </div>
@@ -403,34 +346,33 @@ export function PriceTools({ apiBase, intent, marketPriceInsights, priceJudgment
                 <p className="history-method">缺失日期留空；同日同来源取最低观测值。外部市场历史、本站观测和当前 Offer 分布始终分开呈现。</p>
               </div>
             ) : (
-              <div className="alert-workspace">
+              <div className="alert-workspace" id="price-alerts-panel" role="tabpanel" aria-labelledby="price-tab-alerts">
                 <div className="alert-form">
                   <label>目标可核验全价（人民币）<input type="number" min="1" value={targetCny} onChange={(event) => setTargetCny(Number(event.target.value))} /></label>
                   <label>检查频率<select value={intervalMinutes} onChange={(event) => setIntervalMinutes(Number(event.target.value))}><option value="60">每小时</option><option value="360">每 6 小时</option><option value="720">每 12 小时</option><option value="1440">每天</option></select></label>
                   <label>ntfy Topic<input value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="flight-lens-personal" /></label>
-                  <button onClick={createAlert} disabled={!topic || targetCny <= 0 || monitorAvailable !== true}>创建提醒</button>
+                  <GlassButton onClick={() => runAlertAction("create", createAlert)} aria-busy={pendingAction === "create"} disabled={pendingAction !== null || !topic.trim() || targetCny <= 0 || alertsState !== "ready" || monitorAvailable !== true}>{pendingAction === "create" ? "正在创建…" : "创建提醒"}</GlassButton>
                   {message && <span role="status">{message}</span>}
                 </div>
                 <p className={`alert-delivery-note ${monitorAvailable === false ? "unavailable" : ""}`}>
-                  {monitorAvailable === true
+                  {alertsState === "signed_out" ? "登录后可管理价格提醒。"
+                    : alertsState === "unavailable" ? "暂时无法读取提醒，请关闭面板后重试。"
+                    : monitorAvailable === true
                     ? "提醒由服务端定时检查，网页无需保持打开。达到目标的最低可核验全价后，通知会发送到你订阅的 ntfy Topic；免费托管休眠时不保证准点。"
                     : monitorAvailable === false
                       ? "当前环境尚未配置服务端调度，价格提醒不会运行，也不会发送通知。"
                       : "正在核对服务端调度状态…"}
                 </p>
                 <div className="alert-list">
-                  {alerts.length === 0 && <p>当前查询没有已配置的提醒。</p>}
+                  {alertsState === "ready" && alerts.length === 0 && <p>当前查询没有已配置的提醒。</p>}
                   {alerts.map((alert) => <article key={alert.id}>
                     <div><b>低于 {money(alert.targetAmountCnyMinor)}</b><small>渠道：ntfy / {alert.ntfyTopic}</small><small>状态：{alert.status === "active" ? "运行中" : "已暂停"} · 最近检查：{formatDateTime(alert.lastCheckedAt)}</small><small>下次计划：{formatDateTime(alert.nextCheckAt)}</small>{alert.lastErrorCode && <strong>上次失败：{alert.lastErrorCode}，可立即重试</strong>}</div>
-                    <div className="alert-actions"><button onClick={() => testAlert(alert)} disabled={alert.status !== "active"}>立即核验</button><button onClick={() => changeAlert(alert, alert.status === "active" ? "paused" : "active")}>{alert.status === "active" ? "暂停" : "恢复"}</button><button onClick={() => changeAlert(alert, "deleted")}>删除</button></div>
+                    <div className="alert-actions" aria-busy={pendingAction === alert.id}><GlassButton onClick={() => runAlertAction(alert.id, () => testAlert(alert))} disabled={pendingAction !== null || alert.status !== "active"}>立即核验</GlassButton><GlassButton disabled={pendingAction !== null} onClick={() => runAlertAction(alert.id, () => changeAlert(alert, alert.status === "active" ? "paused" : "active"))}>{alert.status === "active" ? "暂停" : "恢复"}</GlassButton><GlassButton disabled={pendingAction !== null} onClick={() => runAlertAction(alert.id, () => changeAlert(alert, "deleted"))}>删除</GlassButton></div>
                   </article>)}
                 </div>
               </div>
             )}
-          </div>
-        </div>,
-        document.body,
-      )}
+      </GlassDialog>
     </>
   );
 }

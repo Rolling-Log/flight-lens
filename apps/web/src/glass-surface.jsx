@@ -2,6 +2,7 @@
 import { useEffect, useState, useRef, useId } from 'react';
 
 const GlassSurface = ({
+  as: Element = 'div',
   children,
   width = 200,
   height = 80,
@@ -106,21 +107,7 @@ const GlassSurface = ({
     if (!containerRef.current) return;
 
     const resizeObserver = new ResizeObserver(() => {
-      setTimeout(updateDisplacementMap, 0);
-    });
-
-    resizeObserver.observe(containerRef.current);
-
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    const resizeObserver = new ResizeObserver(() => {
-      setTimeout(updateDisplacementMap, 0);
+      updateDisplacementMap();
     });
 
     resizeObserver.observe(containerRef.current);
@@ -167,17 +154,17 @@ const GlassSurface = ({
   };
 
   return (
-    <div
+    <Element
       ref={containerRef}
       className={`glass-surface ${svgSupported ? 'glass-surface--svg' : 'glass-surface--fallback'} ${className}`}
       style={containerStyle}
     >
-      <svg className="glass-surface__filter" xmlns="http://www.w3.org/2000/svg">
+      <svg className="glass-surface__filter" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
         <defs>
           <filter id={filterId} colorInterpolationFilters="sRGB" x="0%" y="0%" width="100%" height="100%">
             <feImage ref={feImageRef} x="0" y="0" width="100%" height="100%" preserveAspectRatio="none" result="map" />
 
-            <feDisplacementMap ref={redChannelRef} in="SourceGraphic" in2="map" id="redchannel" result="dispRed" />
+            <feDisplacementMap ref={redChannelRef} in="SourceGraphic" in2="map" result="dispRed" />
             <feColorMatrix
               in="dispRed"
               type="matrix"
@@ -192,7 +179,6 @@ const GlassSurface = ({
               ref={greenChannelRef}
               in="SourceGraphic"
               in2="map"
-              id="greenchannel"
               result="dispGreen"
             />
             <feColorMatrix
@@ -205,7 +191,7 @@ const GlassSurface = ({
               result="green"
             />
 
-            <feDisplacementMap ref={blueChannelRef} in="SourceGraphic" in2="map" id="bluechannel" result="dispBlue" />
+            <feDisplacementMap ref={blueChannelRef} in="SourceGraphic" in2="map" result="dispBlue" />
             <feColorMatrix
               in="dispBlue"
               type="matrix"
@@ -223,8 +209,8 @@ const GlassSurface = ({
         </defs>
       </svg>
 
-      <div className="glass-surface__content">{children}</div>
-    </div>
+      {children != null && <Element className="glass-surface__content">{children}</Element>}
+    </Element>
   );
 };
 

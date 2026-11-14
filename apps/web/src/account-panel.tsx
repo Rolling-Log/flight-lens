@@ -1,8 +1,11 @@
 "use client";
 
+import { GlassButton, GlassSelection } from "./glass-control";
+import { navigateTabs } from "./tab-navigation";
+
 import { useEffect, useRef, useState } from "react";
 import { Camera, Plane, X } from "lucide-react";
-import { createPortal } from "react-dom";
+import { GlassDialog } from "./glass-dialog";
 import Image from "next/image";
 import { accountFetch } from "./account-api";
 import { authClient } from "./auth-client";
@@ -17,22 +20,6 @@ type SavedItinerary = { id: string; name: string; itinerary: { seller?: { name?:
 const legacyOwnerKey = "flight-lens-owner-token";
 const legacyDecisionKey = "flight-lens-owner-migration-decision";
 const avatarStorageKey = "flight-lens-profile-avatar-v1";
-
-const accountActionGlassConfig = {
-  borderRadius: 24,
-  borderWidth: 0.05,
-  brightness: 92,
-  opacity: 0.72,
-  blur: 7,
-  displace: 0.25,
-  backgroundOpacity: 0.08,
-  saturation: 1.28,
-  distortionScale: -32,
-  redOffset: 0,
-  greenOffset: 3,
-  blueOffset: 6,
-  mixBlendMode: "screen",
-} as const;
 
 const authTitles: Record<AuthView, string> = {
   login: "登录航探",
@@ -59,6 +46,9 @@ function errorText(error: { message?: string; code?: string; status?: number; st
 export function AccountPanel() {
   const { data: session, isPending, refetch } = authClient.useSession();
   const [open, setOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteMessage, setDeleteMessage] = useState("");
   const [view, setView] = useState<AuthView>("login");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -79,12 +69,11 @@ export function AccountPanel() {
   const [hasPendingAnonymousData, setHasPendingAnonymousData] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState("");
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const dialogRef = useRef<HTMLElement>(null);
+  const deleteTriggerRef = useRef<HTMLButtonElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   function closePanel() {
     setOpen(false);
-    window.setTimeout(() => triggerRef.current?.focus(), 0);
   }
 
   useEffect(() => {
@@ -141,38 +130,6 @@ export function AccountPanel() {
     setAvatarUrl("");
     setMessage("已恢复默认飞机头像。");
   }
-
-  useEffect(() => {
-    if (!open) return;
-    const dialog = dialogRef.current;
-    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    ) ?? []).filter((element) => !element.hasAttribute("hidden"));
-    window.setTimeout(() => focusable()[0]?.focus(), 0);
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closePanel();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const items = focusable();
-      if (!items.length) return;
-      const first = items[0];
-      const last = items.at(-1);
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last?.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open]);
 
   useEffect(() => {
     if (!open || !session) return;
@@ -239,6 +196,8 @@ export function AccountPanel() {
           await refetch();
         }
       }
+    } catch {
+      setMessage("连接失败，请检查网络后重试。");
     } finally {
       setPassword("");
       setNewPassword("");
@@ -259,25 +218,30 @@ export function AccountPanel() {
         callbackURL: window.location.origin,
       });
       setMessage(error ? errorText(error, "验证邮件") : "验证邮件已重新发送，请检查收件箱和垃圾邮件。");
+    } catch {
+      setMessage("连接失败，请检查网络后重试。");
     } finally {
       setBusy(false);
     }
   }
 
   async function signOut() {
-    await authClient.signOut();
+    const { error } = await authClient.signOut();
+    if (error) return setMessage(errorText(error, "退出"));
     await refetch();
     setOpen(false);
   }
 
   async function revoke(token: string) {
-    await authClient.revokeSession({ token });
+    const { error } = await authClient.revokeSession({ token });
+    if (error) return setMessage(errorText(error, "撤销"));
     const { data } = await authClient.listSessions();
     setDevices((data ?? []) as DeviceSession[]);
   }
 
   async function signOutEverywhere() {
-    await authClient.revokeSessions();
+    const { error } = await authClient.revokeSessions();
+    if (error) return setMessage(errorText(error, "退出"));
     await refetch();
     setOpen(false);
   }
@@ -327,6 +291,7 @@ export function AccountPanel() {
   async function deleteItinerary(id: string) {
     const response = await accountFetch(`/v3/me/itineraries/${id}`, { method: "DELETE" });
     if (response.ok) setItineraries((current) => current.filter((item) => item.id !== id));
+    else setMessage("删除方案失败，请稍后重试。");
   }
 
   async function migrate(decision: "migrate" | "skip" | "delete") {
@@ -360,25 +325,46 @@ export function AccountPanel() {
   }
 
   async function deleteAccount() {
-    if (!window.confirm("永久删除账号、提醒和全部个人数据？公共去身份化价格观测不受影响。")) return;
-    const { error } = await authClient.deleteUser({ password, callbackURL: window.location.origin });
-    setPassword("");
-    if (error) return setMessage(errorText(error));
-    await refetch();
-    setOpen(false);
+    if (deleting) return;
+    setDeleting(true);
+    setDeleteMessage("");
+    try {
+      const { error } = await authClient.deleteUser({ password, callbackURL: window.location.origin });
+      setPassword("");
+      if (error) return setDeleteMessage(errorText(error));
+      await refetch();
+      setConfirmDelete(false);
+      setOpen(false);
+    } catch {
+      setDeleteMessage("删除未完成，请检查网络后重试。");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function runAccountAction(action: () => Promise<void>) {
+    setBusy(true);
+    setMessage("");
+    try {
+      await action();
+    } catch {
+      setMessage("连接失败，请检查网络后重试。");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
     <>
       <div className="account-entry">
-        <button ref={triggerRef} className="account-trigger" onClick={() => {
+        <GlassButton ref={triggerRef} className="account-trigger" onClick={() => {
           setDisplayName(session?.user.name ?? "");
           void refreshAnonymousDataState();
           setOpen(true);
         }}>
           {isPending ? "账号" : session ? session.user.name : "登录"}
-        </button>
-        <button
+        </GlassButton>
+        <GlassButton
           className="avatar-trigger"
           onClick={() => avatarInputRef.current?.click()}
           aria-label={avatarUrl ? "更换头像" : "上传头像"}
@@ -386,7 +372,7 @@ export function AccountPanel() {
         >
           {avatarUrl ? <Image src={avatarUrl} alt="个人头像" width={38} height={38} unoptimized /> : <Plane size={17} />}
           <span className="avatar-edit-badge" aria-hidden="true"><Camera size={9} /></span>
-        </button>
+        </GlassButton>
       </div>
       <input
         ref={avatarInputRef}
@@ -399,32 +385,31 @@ export function AccountPanel() {
           event.currentTarget.value = "";
         }}
       />
-      {open && typeof document !== "undefined" && createPortal(
-        <div className={`modal-backdrop account-modal-backdrop ${session ? "" : "account-auth-backdrop"}`} role="presentation" onMouseDown={closePanel}>
-          <section ref={dialogRef} className={`modal account-modal ${session ? "account-modal-profile" : "account-modal-auth"}`} role="dialog" aria-modal="true" aria-labelledby="account-title" onMouseDown={(event) => event.stopPropagation()}>
-            <button className="modal-close" onClick={closePanel} aria-label="关闭"><X size={19} /></button>
+      <GlassDialog open={open} onClose={closePanel} triggerRef={triggerRef}
+        className={`modal account-modal ${session ? "account-modal-profile" : "account-modal-auth"}`} labelledBy="account-title">
+            <GlassButton className="modal-close" onClick={closePanel} aria-label="关闭"><X size={19} /></GlassButton>
             <div className="account-modal-header">
               <div className="eyebrow"><span /> 账号与个人数据</div>
               <h2 id="account-title">{session ? session.user.name : authTitles[view]}</h2>
               <div className="account-avatar-settings">
                 <span className="account-avatar-preview">{avatarUrl ? <Image src={avatarUrl} alt="个人头像预览" width={96} height={96} unoptimized /> : <Plane size={38} />}</span>
                 <div className="account-avatar-actions">
-                  <button onClick={() => avatarInputRef.current?.click()}>{avatarUrl ? "更换头像" : "上传头像"}</button>
-                  {avatarUrl && <button onClick={removeAvatar}>恢复默认</button>}
+                  <GlassButton onClick={() => avatarInputRef.current?.click()}>{avatarUrl ? "更换头像" : "上传头像"}</GlassButton>
+                  {avatarUrl && <GlassButton onClick={removeAvatar}>恢复默认</GlassButton>}
                 </div>
               </div>
             </div>
             {!session ? (
               <>
-                <div className="account-tabs" data-view={view} role="tablist" aria-label="账号操作">
-                  <span className="account-tab-selection" aria-hidden="true" />
+                <div className="account-tabs" data-view={view} role="tablist" aria-label="账号操作" onKeyDown={navigateTabs}>
+                  <GlassSelection className="account-tab-selection" />
                   {(["login", "register", "forgot"] as const).map((item) => (
-                    <button key={item} role="tab" aria-selected={view === item} className={view === item ? "selected" : ""} onClick={() => { setView(item); setMessage(""); }}>
+                    <button key={item} id={`account-tab-${item}`} role="tab" aria-selected={view === item} aria-controls="account-form-panel" tabIndex={view === item ? 0 : -1} disabled={busy} className={view === item ? "selected" : ""} onClick={() => { setView(item); setMessage(""); }}>
                       {item === "login" ? "登录" : item === "register" ? "注册" : "找回密码"}
                     </button>
                   ))}
                 </div>
-                <div className="account-form-stage">
+                <div className="account-form-stage" id="account-form-panel" role="tabpanel" aria-labelledby={view === "reset" ? "account-title" : `account-tab-${view}`}>
                   <div key={view} className="account-form" data-view={view}>
                     {view === "register" && <label>显示名称<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" /></label>}
                     {view !== "reset" && <label>邮箱<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" /></label>}
@@ -434,32 +419,40 @@ export function AccountPanel() {
                       label="account-primary-action"
                       className="account-primary-glass"
                       panelClassName="account-primary-glass-panel"
-                      config={accountActionGlassConfig}
+                      control
                       changeKey={view}
                     >
-                      <button className="account-primary-button" disabled={busy} onClick={submitAuth}>{view === "register" ? "创建账号" : view === "forgot" ? "发送重置邮件" : view === "reset" ? "重置密码" : "登录"}</button>
+                      <button className="account-primary-button" disabled={busy} aria-busy={busy} onClick={submitAuth}>{busy ? <><span className="spinner" aria-hidden="true" />正在处理…</> : view === "register" ? "创建账号" : view === "forgot" ? "发送重置邮件" : view === "reset" ? "重置密码" : "登录"}</button>
                     </LiquidGlassSurface>
-                    {view === "register" && <button className="account-secondary-button" disabled={busy} onClick={resendVerificationEmail}>重新发送验证邮件</button>}
+                    {view === "register" && <GlassButton className="account-secondary-button" disabled={busy} onClick={resendVerificationEmail}>重新发送验证邮件</GlassButton>}
                   </div>
                 </div>
               </>
             ) : (
-              <div className="account-sections">
-                <section><b>账号</b><p>{session.user.email} · {session.user.emailVerified ? "邮箱已验证" : "邮箱待验证"}</p><label>显示名称<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" /></label><div className="account-actions"><button onClick={saveAccount}>保存账号设置</button><button onClick={signOut}>退出当前设备</button></div></section>
-                {hasPendingAnonymousData && <section><b>匿名数据</b><p>处理此浏览器此前保存的偏好和提醒。选择只会记录一次。</p><div className="account-actions"><button onClick={() => migrate("migrate")}>迁移</button><button onClick={() => migrate("skip")}>跳过</button><button onClick={() => migrate("delete")}>删除匿名数据</button></div></section>}
-                <section><b>偏好</b><label>常用航司<input value={preferredAirlines} onChange={(event) => setPreferredAirlines(event.target.value)} placeholder="MU, CA" /></label><label>常用机场<input value={preferredAirports} onChange={(event) => setPreferredAirports(event.target.value)} placeholder="PVG, SHA" /></label><button onClick={savePreferences}>保存偏好</button></section>
-                <section><b>通知</b><label><input type="checkbox" checked={emailEnabled} onChange={(event) => setEmailEnabled(event.target.checked)} /> 邮件通知</label><label><input type="checkbox" checked={pushEnabled} onChange={(event) => setPushEnabled(event.target.checked)} /> 推送通知</label><label>通知订阅标识<input value={topic} onChange={(event) => setTopic(event.target.value)} /></label><button onClick={saveNotifications}>保存通知设置</button></section>
+              <div className="account-sections" aria-busy={busy}>
+                <section><b>账号</b><p>{session.user.email} · {session.user.emailVerified ? "邮箱已验证" : "邮箱待验证"}</p><label>显示名称<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" /></label><div className="account-actions"><GlassButton disabled={busy} onClick={() => runAccountAction(saveAccount)}>保存账号设置</GlassButton><GlassButton disabled={busy} onClick={() => runAccountAction(signOut)}>退出当前设备</GlassButton></div></section>
+                {hasPendingAnonymousData && <section><b>匿名数据</b><p>处理此浏览器此前保存的偏好和提醒。选择只会记录一次。</p><div className="account-actions"><GlassButton disabled={busy} onClick={() => runAccountAction(() => migrate("migrate"))}>迁移</GlassButton><GlassButton disabled={busy} onClick={() => runAccountAction(() => migrate("skip"))}>跳过</GlassButton><GlassButton disabled={busy} onClick={() => runAccountAction(() => migrate("delete"))}>删除匿名数据</GlassButton></div></section>}
+                <section><b>偏好</b><label>常用航司<input value={preferredAirlines} onChange={(event) => setPreferredAirlines(event.target.value)} placeholder="MU, CA" /></label><label>常用机场<input value={preferredAirports} onChange={(event) => setPreferredAirports(event.target.value)} placeholder="PVG, SHA" /></label><GlassButton disabled={busy} onClick={() => runAccountAction(savePreferences)}>保存偏好</GlassButton></section>
+                <section><b>通知</b><label><input type="checkbox" checked={emailEnabled} onChange={(event) => setEmailEnabled(event.target.checked)} /> 邮件通知</label><label><input type="checkbox" checked={pushEnabled} onChange={(event) => setPushEnabled(event.target.checked)} /> 推送通知</label><label>通知订阅标识<input value={topic} onChange={(event) => setTopic(event.target.value)} /></label><GlassButton disabled={busy} onClick={() => runAccountAction(saveNotifications)}>保存通知设置</GlassButton></section>
                 <section><b>最近查询</b>{searches.length ? searches.slice(0, 8).map((item) => <div className="personal-row" key={item.id}><span>{item.intent.origin?.code} → {item.intent.destination?.code}<small>{item.intent.departureDate} · {new Date(item.createdAt).toLocaleString("zh-CN")}</small></span></div>) : <p>登录后的查询会在这里跨设备恢复。</p>}</section>
-                <section><b>收藏方案</b>{itineraries.length ? itineraries.map((item) => <div className="personal-row" key={item.id}><span>{item.name}<small>{item.itinerary.seller?.name ?? "来源待核验"} · {new Date(item.updatedAt).toLocaleString("zh-CN")}</small></span><button onClick={() => deleteItinerary(item.id)}>删除</button></div>) : <p>在搜索结果中收藏方案后会显示在这里。</p>}</section>
-                <section><b>设备会话</b>{devices.map((device) => <div className="device-row" key={device.token}><span>{device.userAgent || "未知设备"}<small>{new Date(device.createdAt).toLocaleString("zh-CN")}</small></span><button onClick={() => revoke(device.token)}>撤销</button></div>)}<button onClick={signOutEverywhere}>退出全部设备</button></section>
-                <section><b>数据管理</b><div className="account-actions"><button onClick={exportData}>导出数据</button></div><label>删除账号前输入密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label><button className="danger-button" onClick={deleteAccount}>删除账号</button></section>
+                <section><b>收藏方案</b>{itineraries.length ? itineraries.map((item) => <div className="personal-row" key={item.id}><span>{item.name}<small>{item.itinerary.seller?.name ?? "来源待核验"} · {new Date(item.updatedAt).toLocaleString("zh-CN")}</small></span><GlassButton disabled={busy} onClick={() => runAccountAction(() => deleteItinerary(item.id))}>删除</GlassButton></div>) : <p>在搜索结果中收藏方案后会显示在这里。</p>}</section>
+                <section><b>设备会话</b>{devices.map((device) => <div className="device-row" key={device.token}><span>{device.userAgent || "未知设备"}<small>{new Date(device.createdAt).toLocaleString("zh-CN")}</small></span><GlassButton disabled={busy} onClick={() => runAccountAction(() => revoke(device.token))}>撤销</GlassButton></div>)}<GlassButton disabled={busy} onClick={() => runAccountAction(signOutEverywhere)}>退出全部设备</GlassButton></section>
+                <section><b>数据管理</b><div className="account-actions"><GlassButton disabled={busy} onClick={() => runAccountAction(exportData)}>导出数据</GlassButton></div><label>删除账号前输入密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label><GlassButton ref={deleteTriggerRef} disabled={busy} className="danger-button" onClick={() => { setDeleteMessage(""); setConfirmDelete(true); }}>删除账号</GlassButton></section>
               </div>
             )}
-            <div className="account-message-slot">{message && <p className="account-message" role="status">{message}</p>}</div>
-          </section>
-        </div>,
-        document.body,
-      )}
+            <div className="account-message-slot">{(message || (busy && session)) && <p className="account-message" role="status">{busy ? "正在处理…" : message}</p>}</div>
+      </GlassDialog>
+      <GlassDialog open={open && confirmDelete} onClose={() => setConfirmDelete(false)} triggerRef={deleteTriggerRef}
+        className="modal confirmation-modal" labelledBy="delete-account-title" describedBy="delete-account-description">
+        <p className="section-kicker">ACCOUNT & PRIVACY</p>
+        <h2 id="delete-account-title">确定删除账号？</h2>
+        <p id="delete-account-description">账号、提醒和全部个人数据将被永久删除，无法恢复。公共去身份化价格观测不受影响。</p>
+        {deleteMessage && <p className="field-error" role="alert">{deleteMessage}</p>}
+        <div className="confirmation-actions">
+          <GlassButton className="secondary-button" onClick={() => setConfirmDelete(false)}>保留账号</GlassButton>
+          <GlassButton className="danger-button" disabled={deleting} onClick={deleteAccount}>{deleting ? "正在删除…" : "永久删除"}</GlassButton>
+        </div>
+      </GlassDialog>
     </>
   );
 }

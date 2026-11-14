@@ -16,7 +16,12 @@
 和 Render Blueprint 同步分支使用 `main`；API 部署分支由 `render.yaml` 固定为 `main`。
 推送成功后还需确认两端部署成功，不能以 GitHub 已更新代替线上验收。
 发布核对方式见 [Staging Runbook](docs/STAGING_RUNBOOK.md)，下一阶段的具体工作见
-[真实全价实施计划](docs/IMPLEMENTATION_PLAN_2026-09-20.md)。
+[精简与全价搜索工作计划](docs/SIMPLIFICATION_PLAN_2026-10-29.md)。
+
+当前优先级是稳定找到并核验低价产品。账户、历史、提醒等既有功能暂不扩展；
+列表价发现、产品全价核验和最低价排序必须分开验收。Ego Lite 先用于本机核验试点，
+通过同条件对照后再决定是否替换 Edge 执行入口。当前文件清理记录见
+[工作区清理报告](docs/WORKSPACE_CLEANUP_2026-10-29.md)。
 
 ## 本地开发
 

@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import "../src/GlassSurface.css";
 import "./globals.css";
+import "./landing.css";
+import "./interaction-system.css";
+import "./glass-controls.css";
 
 export const metadata: Metadata = {
   title: "航探 Flight Lens｜中国航线透明比价",

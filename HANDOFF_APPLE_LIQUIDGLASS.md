@@ -1,5 +1,8 @@
 # Flight Lens 前端实现交接
 
+> 这是 Mac 阶段的历史交接记录。以下本地路径、分支和未发布状态不代表当前项目。
+> 当前入口见 [README](README.md)，接续工作见 [精简计划](docs/SIMPLIFICATION_PLAN_2026-10-29.md)。
+
 ## 当前状态
 
 - 工作目录：`/Users/hanyang/Desktop/flights-meta-search-apple-ui`

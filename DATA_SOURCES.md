@@ -58,7 +58,7 @@
 | Wego Affiliate Flights | 暂不接入 | 生产 API 当前要求年费，测试 Key 最长两周；V1 尚未证明足以承担该固定成本的用户价值，已移除 Connector 和申请材料 | 只有在授权允许多源比较、用户价值已验证且预算获批后重审 |
 | Travelpayouts / Aviasales Search API | 拒绝接入 | 2025-11-01 起的新 Search API 要求已有 50,000 MAU，且官方使用规则禁止与其他航班元搜索 API 合并；与本产品核心冲突 | 不接入；Data API 也不能伪装成实时可购买价格 |
 | Kiwi.com Tequila | 暂不接入 | 2024 年起新合作改为邀请制，只面向与其战略匹配的选定合作方 | 仅在取得明确邀请与允许多源比较的合同后重审 |
-| Amadeus Self-Service Flight Offers | 停止作为新接入目标 | Self-Service 入口已无法用于本项目完成新账号接入；代码不再注册到应用运行时 | 由 PKFARE 替代，历史 Connector 仅保留参考 |
+| Amadeus Self-Service Flight Offers | 停止作为新接入目标 | Self-Service 入口已无法用于本项目完成新账号接入；代码不再注册到应用运行时 | PKFARE 为核验候选；未注册的旧 Connector 已移除，历史实现可从 Git 恢复 |
 | Duffel Flights API | 生产核验候选；Connector 与固定响应测试已完成 | 只有 `duffel_live_` token 才标记为生产；Test mode 不是真实时刻/价格，标准流程要求接入方继续创建订单 | 完成账户与 live mode 审核；仅作核验，不进入可购买最低价 |
 | PKFARE Flight Buyer API | 已选为 Amadeus 替代核验候选 | 官方披露接入中国航信、Amadeus、Sabre、Travelport、航司直连与第三方供应，但面向 B2B 搜索、预订和出票 | 完成买家注册与商务权限；取得正式文档和凭据后实现，只核验不出票 |
 

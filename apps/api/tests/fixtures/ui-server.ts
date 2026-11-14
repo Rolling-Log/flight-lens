@@ -30,7 +30,6 @@ const config: ApiConfig = {
     skyscannerBaseUrl: "https://partners.api.skyscanner.net",
     serpApiBaseUrl: "https://serpapi.com",
     serpApiMonthlyCreditCap: 200,
-    amadeusBaseUrl: "https://test.api.amadeus.com",
     duffelBaseUrl: "https://api.duffel.com",
   },
 };

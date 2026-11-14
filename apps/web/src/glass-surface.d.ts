@@ -21,7 +21,8 @@ export type GlassSurfaceConfig = {
 };
 
 declare function GlassSurface(props: Partial<GlassSurfaceConfig> & {
-  children: ReactNode;
+  children?: ReactNode;
+  as?: "div" | "span";
   className?: string;
   style?: CSSProperties;
 }): ReactNode;

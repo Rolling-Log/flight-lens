@@ -42,19 +42,19 @@ export function LocationCombobox({ label, value, onChange, onValidityChange }: P
             if (event.key === "ArrowDown") { event.preventDefault(); setOpen(true); setActiveIndex((index) => Math.min(Math.max(0, options.length - 1), index + 1)); }
             else if (event.key === "ArrowUp") { event.preventDefault(); setActiveIndex((index) => Math.max(0, index - 1)); }
             else if (event.key === "Enter" && open && options[activeIndex]) { event.preventDefault(); choose(options[activeIndex]); }
-            else if (event.key === "Escape") setOpen(false);
+            else if (event.key === "Escape" && open) { event.preventDefault(); event.stopPropagation(); setOpen(false); }
           }}
-          onBlur={() => window.setTimeout(() => setOpen(false), 120)} />
-        {open && <ul id={`${id}-listbox`} role="listbox" className="location-options">
+          onBlur={() => setOpen(false)} />
+        <ul id={`${id}-listbox`} role="listbox" className="location-options" hidden={!open} inert={!open}>
           {options.length === 0 ? <li className="location-empty">未找到匹配地点</li> : options.map((option, index) => (
             <li id={`${id}-option-${index}`} key={`${option.kind}-${option.code}`} role="option" aria-selected={index === activeIndex}
-              className={index === activeIndex ? "active" : ""} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(option)}>
+              className={index === activeIndex ? "active" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => choose(option)}>
               <span>{option.kind === "city" ? option.cityNameZh : option.airportNameZh}</span>
               <small>{option.kind === "city" ? `所有机场 · ${option.airportCodes.join(" / ")}` : `${option.cityNameZh} · ${option.code}`}</small>
               <b>{option.code}</b>
             </li>
           ))}
-        </ul>}
+        </ul>
       </div>
       {!valid && <small className="location-error">请从候选列表选择城市或机场</small>}
     </div>

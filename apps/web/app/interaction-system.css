@@ -1,0 +1,167 @@
+/* Flight Lens interaction system. Shells float; reading surfaces stay quiet.
+   Modal geometry: glass-dialog.tsx, critical spring (no overshoot).
+   Controls: 160ms. Menus: 180ms. Local view changes: 240ms. */
+:root {
+  --motion-control: 160ms;
+  --motion-menu: 180ms;
+  --motion-view: 240ms;
+  --motion-layout: 400ms;
+  --ease-out: cubic-bezier(.2, .8, .2, 1);
+  --ease-in-out: cubic-bezier(.4, 0, .2, 1);
+  --ease-drawer: cubic-bezier(.2, .8, .2, 1);
+  --glass-fill: linear-gradient(145deg, #ffffffed, #e5f3fbe8 58%, #d9edf9ed);
+  --glass-edge: #ffffffd9;
+  --glass-shadow: 0 1px 0 #fff inset, 0 -1px 0 #91b9cf40 inset, 0 24px 80px #345f7a29;
+  --control-fill: linear-gradient(150deg, #ffffffbc, #e5f4fc9c);
+}
+html { scrollbar-gutter: stable; }
+
+.glass-dialog-host {
+  position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none;
+  margin: 0; padding: 24px; border: 0; background: transparent; color: var(--ink);
+  overflow: hidden; isolation: isolate; --dialog-reveal: 0;
+}
+.glass-dialog-host[open] { display: grid; place-items: center; }
+.glass-dialog-host::backdrop { background: transparent; }
+.glass-dialog-host::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: #345e7b30; backdrop-filter: blur(10px) saturate(1.08);
+  opacity: var(--dialog-reveal);
+}
+.glass-dialog-host.glass-dialog-drawer { place-items: center end; }
+.glass-dialog-panel, .glass-dialog-shape {
+  border: 1px solid var(--glass-edge); border-radius: 30px;
+  background: var(--glass-fill); box-shadow: var(--glass-shadow);
+}
+.glass-dialog-panel {
+  position: relative; inset: auto; z-index: 1; margin: 0; min-width: 0;
+  max-width: 100%; max-height: calc(100dvh - 48px); overflow: auto;
+  overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #96bbd0 transparent;
+  backdrop-filter: blur(24px) saturate(1.2);
+}
+.glass-dialog-shape {
+  position: fixed; z-index: 2; display: block; pointer-events: none;
+  transform-origin: 0 0; opacity: 0;
+}
+.glass-dialog-host:is([data-motion-state="opening"], [data-motion-state="closing"]) .glass-dialog-shape { will-change: transform, opacity; }
+.glass-dialog-host:is([data-motion-state="opening"], [data-motion-state="closing"]) .glass-dialog-panel { will-change: opacity, transform; }
+.glass-dialog-host[data-motion-state="settled"] .glass-dialog-shape { visibility: hidden; }
+.glass-dialog-panel.search-dialog { overflow: hidden; }
+.glass-dialog-panel.account-modal-auth { min-height: 0; height: min(700px, calc(100dvh - 48px)); overflow: auto; }
+.account-modal-header, .account-tabs, .account-message-slot { flex-shrink: 0; }
+.glass-dialog-panel.price-drawer { width: min(1040px, 100%); height: min(800px, calc(100dvh - 48px)); }
+.glass-dialog-panel :is(.modal-close, .search-dialog-close, .price-drawer-close) {
+  width: 44px; height: 44px; min-height: 44px; flex: 0 0 44px;
+  border: 1px solid var(--glass-edge); background: var(--control-fill);
+  box-shadow: 0 1px 0 #fff inset, 0 2px 6px #345f7a0d;
+  border-radius: 50%; color: var(--ink); backdrop-filter: blur(12px);
+}
+.coverage-modal > .modal-close { left: auto; right: 20px; }
+.coverage-modal > :is(.eyebrow, h2, #coverage-description) { margin-left: 0; }
+.modal > .eyebrow, .modal > h2 { padding-right: 48px; }
+.modal > h2 { font-weight: 500; letter-spacing: -.035em; }
+.price-drawer > header { background: #edf7fce8; }
+
+/* Every control responds on press. Layout/rotation transforms remain intact. */
+button, a, input, select, textarea {
+  transition: color var(--motion-control) var(--ease-out), background-color var(--motion-control) var(--ease-out),
+    border-color var(--motion-control) var(--ease-out), box-shadow var(--motion-control) var(--ease-out);
+}
+button:enabled:active, a:active { filter: brightness(.96); }
+:is(.modal-close, .search-dialog-close, .price-drawer-close, .back-button):hover { background-color: var(--tile); }
+:is(.primary-button, .secondary-button, .modal-primary-button, .account-actions button, .alert-form button, .shortlist-actions button, .shortlist-actions a) {
+  border-radius: 24px;
+}
+:is(.secondary-button, .back-button, .shortlist-actions button, .shortlist-actions a, .account-actions button, .account-sections button, .account-avatar-settings button, .alert-actions button) {
+  border-color: var(--line); background: var(--control-fill); color: var(--action);
+}
+:is(.secondary-button, .back-button, .shortlist-actions button, .shortlist-actions a, .account-actions button, .account-sections button, .account-avatar-settings button, .alert-actions button):hover { background-color: var(--tile); }
+.account-sections .danger-button { color: var(--danger); }
+.account-sections .danger-button:hover { background: #fff0ee; }
+.sort-tabs button.selected, .trip-switch button.selected { background: var(--sky); color: var(--on-sky); }
+.mode-tabs, .trip-switch, .price-drawer-tabs, .account-tabs { background: #cfe7f470; border-color: var(--line); }
+.price-drawer-tabs button { color: var(--muted); }
+.nav-selection, .mode-selection, .account-tab-selection, .price-tab-selection { transition: transform var(--motion-view) var(--ease-out), opacity var(--motion-menu) var(--ease-out); }
+:is(input:not([type="checkbox"]), select, textarea):focus-visible { border-color: var(--action-focus); }
+
+/* Popovers are lighter than workspaces and always grow from their anchor edge. */
+.price-sort-menu, .location-options, .adaptive-navigation.mobile-menu-open:not(.is-split) .topbar-controls nav {
+  background: var(--glass-fill); border: 1px solid var(--glass-edge); border-radius: 18px;
+  box-shadow: 0 1px 0 #fff inset, 0 12px 32px #345f7a20;
+  backdrop-filter: blur(20px); transform-origin: top left;
+  opacity: 1; transform: none;
+  transition: opacity var(--motion-menu) var(--ease-out), transform var(--motion-menu) var(--ease-out), display var(--motion-menu) allow-discrete;
+}
+.price-sort-menu[hidden], .location-options[hidden] { display: none; opacity: 0; transform: translateY(-4px) scale(.98); pointer-events: none; }
+@starting-style {
+  .price-sort-menu:not([hidden]), .location-options:not([hidden]), .adaptive-navigation.mobile-menu-open:not(.is-split) .topbar-controls nav { opacity: 0; transform: translateY(-4px) scale(.98); }
+}
+.adaptive-navigation.mobile-menu-open:not(.is-split) .topbar-controls nav { transform-origin: top right; }
+.location-option:hover, .location-option[aria-selected="true"], .sort-tabs .price-sort-option:hover { background: var(--tile); }
+@keyframes glass-view-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.account-form, .price-history-detail, .alert-workspace, .quote-detail { animation: glass-view-enter var(--motion-view) var(--ease-out) backwards; }
+/* A transform on this section would turn its fixed tools into scrolling children. */
+@keyframes glass-page-enter { from { opacity: 0; } to { opacity: 1; } }
+.results-section { animation: glass-page-enter var(--motion-view) var(--ease-out) backwards; }
+
+/* The same sky palette continues through results, details, account and tools. */
+.results-section, .quote-detail { background: linear-gradient(160deg, var(--canvas), var(--parchment)); }
+.flight-list { display: grid; gap: 14px; background: transparent; border: 0; }
+.flight-card { border: 1px solid var(--line-soft); border-radius: 24px; background: #ffffffc9; overflow: hidden; }
+.flight-meta { background: #eef7fc9c; }
+.quote-detail-grid { border: 1px solid var(--line); border-radius: 24px; overflow: hidden; background: #ffffffa8; }
+.source-table > div, .current-coverage, .coverage-modal-list li, .history-source-block, .judgment-detail, .account-sections > section { border-color: var(--line-soft); background: #ffffff9e; border-radius: 18px; }
+.history-empty { background: var(--parchment); }
+.coverage-modal > p, .shortlist-modal > p, .alert-form label { color: var(--muted); }
+.account-form-stage { flex: 0 0 auto; }
+.account-sections { gap: 12px; background: transparent; }
+.alert-list { gap: 12px; background: transparent; }
+.alert-list > p, .alert-list article { margin: 0; padding: 20px; border: 1px solid var(--line-soft); border-radius: 18px; background: #ffffff9e; }
+.alert-list > p { color: var(--muted); }
+.result-toolbar { background: #edf7fcf0; }
+.confirmation-modal { width: min(480px, 100%); }
+.confirmation-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+.confirmation-actions button { min-height: 44px; padding: 0 20px; border-radius: 24px; border: 1px solid var(--line); }
+.confirmation-actions .danger-button { background: #fff1ef; }
+
+@media (max-height: 560px) {
+  .result-status-stack {
+    left: var(--floating-edge); right: auto;
+    width: calc(var(--utility-capsule-width) * 2 + 10px);
+    grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;
+  }
+}
+@media (max-width: 640px) {
+  .adaptive-navigation:not(.is-split) .topbar-controls nav {
+    transition: opacity var(--motion-menu) var(--ease-out), transform var(--motion-menu) var(--ease-out), display var(--motion-menu) allow-discrete;
+  }
+  .adaptive-navigation:not(.mobile-menu-open):not(.is-split) .topbar-controls nav { opacity: 0; transform: translateY(-4px) scale(.98); pointer-events: none; }
+  .glass-dialog-host { padding: 12px 8px; }
+  .glass-dialog-host[open], .glass-dialog-host.glass-dialog-drawer { place-items: center; }
+  .glass-dialog-panel { max-height: calc(100dvh - 24px); border-radius: 24px; }
+  .glass-dialog-panel.modal { padding: 26px 20px 20px; }
+  .glass-dialog-panel.price-drawer { position: relative; height: calc(100dvh - 24px); }
+  .glass-dialog-panel.account-modal-auth { width: min(560px, 100%); padding: 26px 20px 20px; }
+  .glass-dialog-panel.search-dialog { width: 100%; }
+  .modal > h2 { font-size: 27px; }
+  .price-drawer-tabs { width: calc(100% - 40px); margin-inline: 20px; }
+  .price-history-detail, .alert-workspace { padding: 20px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root { --motion-layout: 0ms; }
+  *, *::before, *::after { scroll-behavior: auto !important; }
+  .price-sort-menu, .location-options, .adaptive-navigation.mobile-menu-open .topbar-controls nav,
+  .account-form, .price-history-detail, .alert-workspace, .quote-detail, .results-section { animation: none; }
+  .price-sort-menu, .location-options, .adaptive-navigation:not(.is-split) .topbar-controls nav { transition: none; transform: none; }
+  .nav-selection, .mode-selection, .account-tab-selection, .price-tab-selection { transition: none; }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  :root { --glass-fill: var(--pearl); --control-fill: var(--canvas); --glass-edge: var(--line); }
+  .glass-dialog-panel, .glass-dialog-host::before, .price-sort-menu, .location-options { backdrop-filter: none; }
+  .glass-surface { backdrop-filter: none !important; background: var(--pearl); }
+}
+@media (pointer: coarse) {
+  .trip-switch button, .price-sort-option, .history-range button, .account-tabs button, .price-drawer-tabs button { min-height: 44px; }
+  .account-tabs, .price-drawer-tabs { min-height: 54px; }
+  .adaptive-navigation:not(.is-split) .topbar-controls nav button { min-height: 44px; }
+}

@@ -9,7 +9,7 @@
 | 购买交接 | 2 | SerpApi Google Flights、同程实时页面 | 已在同次本地查询成功；同程价格仍需来源页复核 |
 | 生产核验 | 2 | Duffel Flights、PKFARE Buyer API | Duffel 仅 Test mode；PKFARE 等买家账号与合作权限 |
 
-Skyscanner Partner Portal 无法完成登录，当前不再阻塞 V1。Amadeus Self-Service 已停止作为新接入目标。两套 Connector 代码可以保留用于未来正式授权，但没有凭据时不注册到运行时。
+Skyscanner Partner Portal 无法完成登录，当前不再阻塞 V1。Amadeus Self-Service 已停止作为新接入目标。Skyscanner Connector 按凭据注册；未注册的 Amadeus Connector 已于 2026-10-29 移除，历史实现仍可从 Git 恢复。
 
 只有 production 配置和真实查询才计数。Duffel Test、固定响应测试、缓存价格和只有代码没有凭据的来源都不能证明实时价格。
 

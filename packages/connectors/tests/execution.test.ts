@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { companionCardSchema, type SearchIntent } from "@flight-lens/contracts";
 import {
-  AmadeusConnector,
-  amadeusEnvironment,
   clearConnectorExecutionCache,
   combineSplitTicketOffers,
   CompanionOtaConnector,
@@ -17,7 +15,6 @@ import {
   mapCtripBatchSearchPayload,
   mapDomCards,
   mapFlyAiFlightPayload,
-  mapAmadeusOffer,
   mapDuffelOffer,
   mapFlightApiSearchPayload,
   mapSerpApiBookingPayload,
@@ -156,23 +153,6 @@ test("rejects malformed or non-CNY SerpApi price insights", () => {
     price_insights: { lowest_price: "500", typical_price_range: [1_000] },
   }, intent), undefined);
 });
-
-const amadeusOffer = {
-  id: "amadeus-offer-1",
-  price: { grandTotal: "1200.00", base: "1000.00", currency: "CNY" },
-  itineraries: [{
-    duration: "PT3H",
-    segments: [{
-      id: "amadeus-segment-1",
-      carrierCode: "MU",
-      number: "523",
-      departure: { iataCode: "PVG", at: "2026-08-24T09:00:00+08:00" },
-      arrival: { iataCode: "NRT", at: "2026-08-24T13:00:00+09:00" },
-      duration: "PT3H",
-      aircraft: { code: "320" },
-    }],
-  }],
-};
 
 const duffelOffer = {
   id: "duffel-offer-1",
@@ -542,71 +522,10 @@ test("bounds FlightAPI calls per process and never probes credits in health", as
   );
 });
 
-test("marks only explicit Amadeus and Duffel live credentials as production", () => {
-  assert.equal(amadeusEnvironment("https://api.amadeus.com"), "production");
-  assert.equal(amadeusEnvironment("https://test.api.amadeus.com"), "sandbox");
-  assert.equal(amadeusEnvironment("https://amadeus.proxy.invalid"), "sandbox");
+test("marks only explicit Duffel live credentials as production", () => {
   assert.equal(duffelEnvironment("duffel_live_configured"), "production");
   assert.equal(duffelEnvironment("duffel_test_configured"), "sandbox");
   assert.equal(duffelEnvironment("unknown-token-format"), "sandbox");
-});
-
-test("maps Amadeus production fares as verification-only evidence", () => {
-  const offers = mapAmadeusOffer(amadeusOffer, "production", "request-amadeus");
-
-  assert.equal(offers.length, 1);
-  assert.equal(offers[0]?.environment, "production");
-  assert.equal(offers[0]?.totalPrice.amountMinor, 120_000);
-  assert.equal(offers[0]?.seller.deepLink, undefined);
-  assert.equal(offers[0]?.refundable, null);
-  assert.equal(offers[0]?.comparable, false);
-  assert.deepEqual(offers[0]?.incomparabilityReasons, ["NO_PURCHASE_HANDOFF"]);
-});
-
-test("sends a bounded Amadeus Flight Offers request and reuses its OAuth token", async (t) => {
-  const originalFetch = globalThis.fetch;
-  const requestedUrls: URL[] = [];
-  t.after(() => {
-    globalThis.fetch = originalFetch;
-  });
-  globalThis.fetch = async (input) => {
-    const url = new URL(
-      typeof input === "string"
-        ? input
-        : input instanceof URL
-          ? input.href
-          : input.url,
-    );
-    requestedUrls.push(url);
-    if (url.pathname === "/v1/security/oauth2/token") {
-      return new Response(JSON.stringify({ access_token: "access", expires_in: 900 }), {
-        status: 200,
-      });
-    }
-    return new Response(JSON.stringify({ data: [amadeusOffer] }), {
-      status: 200,
-      headers: { "ama-request-id": "ama-request-1" },
-    });
-  };
-
-  const connector = new AmadeusConnector({
-    clientId: "client",
-    clientSecret: "secret",
-    baseUrl: "https://test.api.amadeus.com",
-  });
-  const context = { requestId: "request-amadeus", signal: new AbortController().signal };
-  const first = await connector.search(intent, context);
-  await connector.search(intent, context);
-
-  const offerRequest = requestedUrls.find((url) =>
-    url.pathname === "/v2/shopping/flight-offers",
-  );
-  assert.equal(requestedUrls.filter((url) => url.pathname.includes("oauth2")).length, 1);
-  assert.equal(offerRequest?.searchParams.get("originLocationCode"), "PVG");
-  assert.equal(offerRequest?.searchParams.get("destinationLocationCode"), "NRT");
-  assert.equal(offerRequest?.searchParams.get("max"), "50");
-  assert.equal(first.providerRequestId, "ama-request-1");
-  assert.equal(first.offers[0]?.environment, "sandbox");
 });
 
 test("maps and requests Duffel offers without promoting test data to live", async (t) => {

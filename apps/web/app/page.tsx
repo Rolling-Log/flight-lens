@@ -1,5 +1,7 @@
 "use client";
 
+import { GlassButton, GlassLink, GlassSelection } from "../src/glass-control";
+
 import type {
   IntentParseResponse,
   Offer,
@@ -21,6 +23,7 @@ import {
   Heart,
   Info,
   Luggage,
+  Menu,
   Plane,
   Radar,
   Search,
@@ -31,7 +34,6 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { createPortal } from "react-dom";
 import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -50,11 +52,9 @@ import { PriceTools } from "../src/v2-panel";
 import { AccountPanel } from "../src/account-panel";
 import { accountFetch } from "../src/account-api";
 import { LiquidGlassSurface } from "../src/liquid-glass-surface";
-import {
-  emptyLiquidOrigin,
-  liquidOriginFromElement,
-  useLiquidOverlayMotion,
-} from "../src/liquid-overlay-motion";
+import { LandingHero } from "../src/landing-hero";
+import { SearchWorkspace } from "../src/search-workspace";
+import { GlassDialog } from "../src/glass-dialog";
 
 type Mode = "agent" | "form";
 type WorkspaceView = "search" | "results" | "detail";
@@ -147,22 +147,6 @@ const navGlassConfig = {
   mixBlendMode: "screen",
 } as const;
 
-const actionGlassConfig = {
-  borderRadius: 28,
-  borderWidth: 0.05,
-  brightness: 92,
-  opacity: 0.72,
-  blur: 7,
-  displace: 0.25,
-  backgroundOpacity: 0.06,
-  saturation: 1.28,
-  distortionScale: -34,
-  redOffset: 0,
-  greenOffset: 3,
-  blueOffset: 6,
-  mixBlendMode: "screen",
-} as const;
-
 const summaryGlassConfig = {
   borderRadius: 18,
   borderWidth: 0.04,
@@ -185,22 +169,6 @@ const toolbarGlassConfig = {
   backgroundOpacity: 0.18,
   saturation: 1.35,
   distortionScale: -20,
-} as const;
-
-const statusGlassConfig = {
-  borderRadius: 31,
-  borderWidth: 0.05,
-  brightness: 92,
-  opacity: 0.7,
-  blur: 7,
-  displace: 0.25,
-  backgroundOpacity: 0.04,
-  saturation: 1.24,
-  distortionScale: -30,
-  mixBlendMode: "screen",
-  redOffset: 0,
-  greenOffset: 2,
-  blueOffset: 5,
 } as const;
 
 function apiBase(): string {
@@ -517,6 +485,8 @@ function offerFingerprint(offer: Offer): string {
 
 export default function Home() {
   const [activeView, setActiveView] = useState<WorkspaceView>("search");
+  const [showSearch, setShowSearch] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("agent");
   const [query, setQuery] = useState(
     () => `${dateFromToday(30)} 上海去东京，${dateFromToday(35)} 返回，1 位成人，经济舱，预算 3000 元，不坐红眼航班。`,
@@ -540,7 +510,6 @@ export default function Home() {
   useEffect(() => () => { searchGeneration.current += 1; }, []);
   const [selectedOffer, setSelectedOffer] = useState<Offer | null>(null);
   const [showCoverage, setShowCoverage] = useState(false);
-  const [coverageOrigin, setCoverageOrigin] = useState(emptyLiquidOrigin);
   const [navigationSplit, setNavigationSplit] = useState(false);
   const [navigationMaterialUnited, setNavigationMaterialUnited] = useState(true);
   const [shortlist, setShortlist] = useState<Offer[]>(() => {
@@ -554,34 +523,11 @@ export default function Home() {
     }
   });
   const [showShortlist, setShowShortlist] = useState(false);
-  const [shortlistOrigin, setShortlistOrigin] = useState(emptyLiquidOrigin);
   const [error, setError] = useState("");
   const [locationValidity, setLocationValidity] = useState({ origin: true, destination: true });
-  const coverageDialogRef = useRef<HTMLElement>(null);
-  const coverageBackdropRef = useRef<HTMLDivElement>(null);
-  const coverageMorphRef = useRef<HTMLSpanElement>(null);
   const coverageTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const shortlistDialogRef = useRef<HTMLElement>(null);
-  const shortlistBackdropRef = useRef<HTMLDivElement>(null);
-  const shortlistMorphRef = useRef<HTMLSpanElement>(null);
   const shortlistTriggerRef = useRef<HTMLButtonElement | null>(null);
   const priceSortMenuRef = useRef<HTMLDivElement>(null);
-
-  useLiquidOverlayMotion({
-    open: showCoverage,
-    origin: coverageOrigin,
-    backdropRef: coverageBackdropRef,
-    panelRef: coverageDialogRef,
-    morphRef: coverageMorphRef,
-  });
-
-  useLiquidOverlayMotion({
-    open: showShortlist,
-    origin: shortlistOrigin,
-    backdropRef: shortlistBackdropRef,
-    panelRef: shortlistDialogRef,
-    morphRef: shortlistMorphRef,
-  });
 
   useEffect(() => {
     const controller = new AbortController();
@@ -601,7 +547,10 @@ export default function Home() {
       }
     };
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setShowPriceSortMenu(false);
+      if (event.key === "Escape") {
+        setShowPriceSortMenu(false);
+        priceSortMenuRef.current?.querySelector<HTMLButtonElement>(".price-sort-trigger")?.focus();
+      }
     };
 
     document.addEventListener("pointerdown", handlePointerDown);
@@ -632,86 +581,11 @@ export default function Home() {
     };
   }, [activeView]);
 
-  useEffect(() => {
-    if (!showCoverage) return;
-    const dialog = coverageDialogRef.current;
-    if (!dialog) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const focusableSelector =
-      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-    const focusable = Array.from(
-      dialog.querySelectorAll<HTMLElement>(focusableSelector),
-    );
-    focusable[0]?.focus();
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setShowCoverage(false);
-        return;
-      }
-      if (event.key !== "Tab" || focusable.length === 0) return;
-      const first = focusable[0]!;
-      const last = focusable.at(-1)!;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener("keydown", handleKeyDown);
-      coverageTriggerRef.current?.focus();
-    };
-  }, [showCoverage]);
-
   function openCoverage(trigger: HTMLButtonElement) {
     coverageTriggerRef.current = trigger;
-    setCoverageOrigin(liquidOriginFromElement(trigger));
     setShowShortlist(false);
     setShowCoverage(true);
   }
-
-  useEffect(() => {
-    if (!showShortlist) return;
-    const dialog = shortlistDialogRef.current;
-    if (!dialog) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const selector = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
-    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(selector));
-    focusable[0]?.focus();
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setShowShortlist(false);
-        return;
-      }
-      if (event.key !== "Tab" || !focusable.length) return;
-      const first = focusable[0]!;
-      const last = focusable.at(-1)!;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener("keydown", handleKeyDown);
-      shortlistTriggerRef.current?.focus();
-    };
-  }, [showShortlist]);
 
   function updateShortlist(next: Offer[]) {
     setShortlist(next);
@@ -727,7 +601,6 @@ export default function Home() {
 
   function openShortlist(trigger: HTMLButtonElement) {
     shortlistTriggerRef.current = trigger;
-    setShortlistOrigin(liquidOriginFromElement(trigger));
     setShowCoverage(false);
     setShowShortlist(true);
   }
@@ -933,8 +806,10 @@ export default function Home() {
       accumulated = mergeSearchResults(accumulated, response);
       setResult(accumulated);
       if (!presented) {
+        setShowSearch(false);
         setActiveView("results");
         setNavigationSplit(false);
+        window.scrollTo({ top: 0 });
         presented = true;
       }
       setSearchProgress({ percent: 50, label: "结果陆续返回，正在补查其他来源" });
@@ -1063,7 +938,7 @@ export default function Home() {
   useEffect(() => {
     const timer = window.setTimeout(
       () => setNavigationMaterialUnited(!navigationIsSplit),
-      navigationIsSplit ? 0 : 520,
+      navigationIsSplit ? 0 : 400,
     );
     return () => window.clearTimeout(timer);
   }, [navigationIsSplit]);
@@ -1074,10 +949,17 @@ export default function Home() {
     window.scrollTo({ top: 0 });
   }
 
+  function openSearch() {
+    setNavigationSplit(false);
+    setMobileMenuOpen(false);
+    setActiveView("search");
+    setShowSearch(true);
+  }
+
   return (
-    <main className={navigationIsSplit ? "navigation-split" : undefined}>
+    <main className={`${activeView === "search" ? "landing-page" : "workspace-page"} ${navigationIsSplit ? "navigation-split" : ""}`}>
       <div
-        className={`adaptive-navigation ${navigationIsSplit ? "is-split" : "is-united"} ${navigationMaterialUnited && !navigationIsSplit ? "material-united" : ""}`}
+        className={`adaptive-navigation ${mobileMenuOpen ? "mobile-menu-open" : ""} ${navigationIsSplit ? "is-split" : "is-united"} ${navigationMaterialUnited && !navigationIsSplit ? "material-united" : ""}`}
         data-split={navigationIsSplit}
       >
         <LiquidGlassSurface
@@ -1098,7 +980,7 @@ export default function Home() {
           config={navGlassConfig}
           changeKey={`${activeView}-${navigationIsSplit}`}
         >
-          <button className="brand" onClick={() => { setNavigationSplit(false); setActiveView("search"); }} aria-label="航探首页">
+          <button className="brand" onClick={() => { setNavigationSplit(false); setShowSearch(false); setMobileMenuOpen(false); setActiveView("search"); window.scrollTo({ top: 0 }); }} aria-label="航探首页">
             <span className="brand-mark"><Image src="/flight-lens-logo.svg" alt="" width={30} height={30} priority /></span>
             <span>航探 <small>Flight Lens</small></span>
           </button>
@@ -1112,29 +994,25 @@ export default function Home() {
           changeKey={`${activeView}-${Boolean(result)}-${navigationIsSplit}`}
         >
           <header className="topbar-controls">
-            <nav aria-label="主导航">
+            <GlassButton className="mobile-nav-toggle" aria-label={mobileMenuOpen ? "关闭导航" : "打开导航"} aria-expanded={mobileMenuOpen} aria-controls="primary-navigation" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>{mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}</GlassButton>
+            <nav id="primary-navigation" aria-label="主导航" onKeyDown={(event) => { if (event.key === "Escape") { setMobileMenuOpen(false); document.querySelector<HTMLButtonElement>(".mobile-nav-toggle")?.focus(); } }}>
               <div className="nav-switcher" data-active={activeNavigation}>
-                <span className="nav-selection" aria-hidden="true" />
-                <button className={activeNavigation === "search" ? "active" : ""} onClick={() => { setNavigationSplit(false); setActiveView("search"); }}><Search size={14} />搜索</button>
-                <button className={activeNavigation === "results" ? "active" : ""} onClick={() => { if (result) { setNavigationSplit(false); setActiveView("results"); } }} disabled={!result}><SlidersHorizontal size={14} />结果</button>
+                <GlassSelection className="nav-selection" />
+                <button className={activeNavigation === "search" ? "active" : ""} onClick={openSearch}><Search size={14} />搜索</button>
+                <button className={activeNavigation === "results" ? "active" : ""} onClick={() => { if (result) { setNavigationSplit(false); setMobileMenuOpen(false); setActiveView("results"); window.scrollTo({ top: 0 }); } }} disabled={!result}><SlidersHorizontal size={14} />结果</button>
               </div>
-              <button className="source-nav-button" onClick={(event) => openCoverage(event.currentTarget)}><Radar size={14} />来源</button>
+              <GlassButton className="source-nav-button" onClick={(event) => { setMobileMenuOpen(false); openCoverage(event.currentTarget); }}><Radar size={14} />来源</GlassButton>
             </nav>
             <AccountPanel />
           </header>
         </LiquidGlassSurface>
       </div>
 
-      {activeView === "search" && <section className="hero" id="top">
-        <div className="eyebrow"><Plane size={14} /> 行程工作台</div>
-        <h1>今天要飞去哪里？</h1>
-        <p className="hero-copy">
-          说出完整需求，或逐项设置航线、日期与偏好。检索前你始终可以检查每一项条件。
-        </p>
-
+      {activeView === "search" && <LandingHero onSearch={openSearch} onCoverage={openCoverage} />}
+      <SearchWorkspace open={activeView === "search" && showSearch} onClose={() => setShowSearch(false)}>
         <div className="search-shell" id="search">
           <div className="mode-tabs" data-mode={mode} role="tablist" aria-label="搜索方式">
-            <span className="mode-selection" aria-hidden="true" />
+            <GlassSelection className="mode-selection" />
             <button id="search-tab-agent" className={mode === "agent" ? "selected" : ""} onClick={() => setMode("agent")} onKeyDown={handleModeTabKeyDown} role="tab" aria-selected={mode === "agent"} aria-controls="search-panel-agent" tabIndex={mode === "agent" ? 0 : -1}>
               <span className="spark">✦</span> 对话找票
             </button>
@@ -1154,9 +1032,9 @@ export default function Home() {
                 disabled={busy !== "idle"}
               />
               <div className="prompt-row">
-                <button onClick={() => changeQuery(`${dateFromToday(14)} 北京到成都，${dateFromToday(16)} 返回，1 位成人，预算 2500 元。`)}>周末往返</button>
-                <button onClick={() => changeQuery(`${dateFromToday(30)} 上海飞东京，${dateFromToday(35)} 返回，1 位成人，直飞，不坐红眼航班。`)}>国际直飞</button>
-                <button onClick={() => changeQuery(`${dateFromToday(21)} 广州飞新加坡，单程，1 位成人，允许中转 1 次。`)}>国际单程</button>
+                <GlassButton onClick={() => changeQuery(`${dateFromToday(14)} 北京到成都，${dateFromToday(16)} 返回，1 位成人，预算 2500 元。`)}>周末往返</GlassButton>
+                <GlassButton onClick={() => changeQuery(`${dateFromToday(30)} 上海飞东京，${dateFromToday(35)} 返回，1 位成人，直飞，不坐红眼航班。`)}>国际直飞</GlassButton>
+                <GlassButton onClick={() => changeQuery(`${dateFromToday(21)} 广州飞新加坡，单程，1 位成人，允许中转 1 次。`)}>国际单程</GlassButton>
               </div>
               {parseResult?.ready && parseResult.intent && (
                 <div className="intent-review agent-review" role="status">
@@ -1172,7 +1050,7 @@ export default function Home() {
                   {parseResult.parser.kind !== "local_deterministic_zh" && (
                     <small>AI 结构化解析 · {parseResult.parser.model}</small>
                   )}
-                  <button type="button" onClick={() => setMode("form")}>打开完整表单修改</button>
+                  <GlassButton type="button" onClick={() => setMode("form")}>打开完整表单修改</GlassButton>
                 </div>
               )}
             </div>
@@ -1186,7 +1064,7 @@ export default function Home() {
                       ["one_way", "单程"],
                       ["round_trip", "往返"],
                     ] as const).map(([value, label]) => (
-                      <button
+                      <GlassButton
                         key={value}
                         className={intent.tripType === value ? "selected" : ""}
                         onClick={() =>
@@ -1200,7 +1078,7 @@ export default function Home() {
                         }
                       >
                         {label}
-                      </button>
+                      </GlassButton>
                     ))}
                   </div>
                 </div>
@@ -1212,13 +1090,13 @@ export default function Home() {
                     onValidityChange={(valid) => setLocationValidity((current) => ({ ...current, origin: valid }))}
                     onChange={(location) => updateIntent({ origin: { kind: location.kind, code: location.code, name: location.kind === "city" ? location.cityNameZh : location.airportNameZh } })}
                   />
-                  <button
+                  <GlassButton
                     className="swap"
                     aria-label="交换出发地和目的地"
                     onClick={() => updateIntent({ origin: intent.destination, destination: intent.origin })}
                   >
                     ⇄
-                  </button>
+                  </GlassButton>
                   <LocationCombobox
                     key={`destination-${intent.destination.kind}-${intent.destination.code}`}
                     label="目的地"
@@ -1338,10 +1216,10 @@ export default function Home() {
               className="search-action-root"
               panelClassName="search-action-panel"
               sceneClassName="action-scene"
-              config={actionGlassConfig}
+              control
               changeKey={`${busy}-${mode}-${Boolean(parseResult?.ready)}`}
             >
-              <button className="primary-button" onClick={runSearch} disabled={busy !== "idle"}>
+              <button className="primary-button" onClick={runSearch} disabled={busy !== "idle"} aria-busy={busy !== "idle"}>
                 {busy === "parsing" && <><span className="spinner" /> 正在解析条件</>}
                 {busy === "searching" && <><span className="spinner" /> 正在核验来源</>}
                 {busy === "idle" && mode === "agent" && parseResult?.ready
@@ -1379,7 +1257,7 @@ export default function Home() {
           <span><Check size={15} />统一全价口径</span>
           <span><Info size={15} />逐项披露失败</span>
         </div>
-      </section>}
+      </SearchWorkspace>
 
       {activeView === "results" && (result || (error && busy === "idle")) && (
         <section className="results-section revealed" id="results" aria-live="polite">
@@ -1402,7 +1280,7 @@ export default function Home() {
                     className="result-status-root"
                     panelClassName="result-status-glass"
                     sceneClassName="status-glass-scene"
-                    config={statusGlassConfig}
+                    control
                     changeKey={`${result.requestId}-${result.priceJudgment.level}`}
                   >
                     <PriceTools
@@ -1417,7 +1295,7 @@ export default function Home() {
                     className="result-status-root"
                     panelClassName="result-status-glass"
                     sceneClassName="status-glass-scene"
-                    config={statusGlassConfig}
+                    control
                     changeKey={`${result.requestId}-${result.disclosure.successfulSources}`}
                   >
                     <button
@@ -1495,7 +1373,7 @@ export default function Home() {
                       ...(result.mostFlexibleOfferId ? [["flexibility", "最宽松退改"]] as const : []),
                     ] as ReadonlyArray<readonly [SortKey, string]>).map(([key, label]) => key === "price" ? (
                       <div className="price-sort-control" ref={priceSortMenuRef} key={key}>
-                        <button
+                        <GlassButton
                           type="button"
                           className={`price-sort-trigger ${effectiveSort === key ? "selected" : ""}`}
                           onClick={() => setShowPriceSortMenu((open) => !open)}
@@ -1505,9 +1383,16 @@ export default function Home() {
                         >
                           {label}
                           <ChevronDown size={13} aria-hidden="true" />
-                        </button>
-                        {showPriceSortMenu && (
-                          <div className="price-sort-menu" role="menu" aria-label="价格排序">
+                        </GlassButton>
+                          <div className="price-sort-menu" role="menu" aria-label="价格排序" hidden={!showPriceSortMenu} inert={!showPriceSortMenu}
+                            onKeyDown={(event) => {
+                              if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+                              event.preventDefault();
+                              const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button"));
+                              const index = items.indexOf(document.activeElement as HTMLButtonElement);
+                              const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : (index + (event.key === "ArrowUp" ? -1 : 1) + items.length) % items.length;
+                              items[next]?.focus();
+                            }}>
                             {([[
                               "asc",
                               "低到高",
@@ -1525,6 +1410,7 @@ export default function Home() {
                                   setPriceDirection(direction);
                                   setSort("price");
                                   setShowPriceSortMenu(false);
+                                  priceSortMenuRef.current?.querySelector<HTMLButtonElement>(".price-sort-trigger")?.focus();
                                 }}
                               >
                                 {directionLabel}
@@ -1536,10 +1422,9 @@ export default function Home() {
                               </button>
                             ))}
                           </div>
-                        )}
                       </div>
                     ) : (
-                      <button
+                      <GlassButton
                         key={key}
                         className={effectiveSort === key ? "selected" : ""}
                         onClick={() => {
@@ -1548,7 +1433,7 @@ export default function Home() {
                         }}
                       >
                         {label}
-                      </button>
+                      </GlassButton>
                     ))}
                   </div>
                   <div className="result-filters">
@@ -1583,7 +1468,7 @@ export default function Home() {
                         <option value="one_or_less">最多一次</option>
                       </select>
                     </label>
-                    <button
+                    <GlassButton
                       type="button"
                       className="filter-reset"
                       onClick={() => {
@@ -1593,7 +1478,7 @@ export default function Home() {
                         setArrivalAirportFilter("all");
                         setStopsFilter("all");
                       }}
-                    >重置筛选</button>
+                    >重置筛选</GlassButton>
                   </div>
                 </div>
 
@@ -1733,18 +1618,18 @@ export default function Home() {
                                   {part.label} {new Intl.NumberFormat("zh-CN", { style: "currency", currency: part.price.currency, minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(part.price.amountMinor / 100)} ↗
                                 </a>
                               ))}
-                              <button onClick={() => openQuoteDetail(offer)}>
+                              <GlassButton onClick={() => openQuoteDetail(offer)}>
                                 查看报价详情 <ArrowRight size={13} />
-                              </button>
-                              <button
+                              </GlassButton>
+                              <GlassButton
                                 className={`shortlist-card-action ${isShortlisted ? "selected" : ""}`}
                                 onClick={() => toggleShortlist(offer)}
                                 aria-pressed={isShortlisted}
                               >
                                 <Heart size={13} fill={isShortlisted ? "currentColor" : "none"} />
                                 {isShortlisted ? "已加入心选" : "加入心选"}
-                              </button>
-                              <button onClick={() => saveOffer(offer)}><Star size={13} />收藏机票</button>
+                              </GlassButton>
+                              <GlassButton onClick={() => saveOffer(offer)}><Star size={13} />收藏机票</GlassButton>
                             </div>
                           </div>
                           {group.offers.length > 1 && (
@@ -1780,7 +1665,7 @@ export default function Home() {
       {activeView === "detail" && selectedOffer && result && (
         <section className="quote-detail" aria-labelledby="quote-detail-title">
           <div className="quote-detail-header">
-            <button className="back-button" onClick={() => setActiveView("results")}><ArrowLeft size={17} />返回结果</button>
+            <GlassButton className="back-button" onClick={() => setActiveView("results")}><ArrowLeft size={17} />返回结果</GlassButton>
             <div>
               <div className="eyebrow"><ShieldCheck size={14} /> 报价详情</div>
               <h1 id="quote-detail-title"><AirportRoute origin={selectedOffer.legs[0]?.origin} destination={selectedOffer.legs[0]?.destination} /></h1>
@@ -1846,8 +1731,8 @@ export default function Home() {
               </div>
               {selectedOffer.exchangeRate && <p>1 {selectedOffer.exchangeRate.baseCurrency} = {selectedOffer.exchangeRate.rate} {selectedOffer.exchangeRate.quoteCurrency}<small>{selectedOffer.exchangeRate.source} · {new Date(selectedOffer.exchangeRate.quotedAt).toLocaleString("zh-CN")}</small></p>}
               <div className="evidence-source"><ShieldCheck size={16} /><div><b>{selectedOffer.seller.name}</b><small>{offerPriceLabel(selectedOffer)}</small></div></div>
-              {selectedOffer.seller.deepLink && selectedOffer.purchaseMode !== "split_ticket" && <a className="primary-button" href={selectedOffer.seller.deepLink} target="_blank" rel="noopener noreferrer">去 {handoffSourceName(selectedOffer)} 核验 <ExternalLink size={15} /></a>}
-              <button className="secondary-button" onClick={() => saveOffer(selectedOffer)}><Star size={15} />收藏机票</button>
+              {selectedOffer.seller.deepLink && selectedOffer.purchaseMode !== "split_ticket" && <GlassLink className="primary-button" href={selectedOffer.seller.deepLink} target="_blank" rel="noopener noreferrer">去 {handoffSourceName(selectedOffer)} 核验 <ExternalLink size={15} /></GlassLink>}
+              <GlassButton className="secondary-button" onClick={() => saveOffer(selectedOffer)}><Star size={15} />收藏机票</GlassButton>
             </aside>
           </div>
         </section>
@@ -1856,7 +1741,7 @@ export default function Home() {
       <footer>
         <div className="brand"><span className="brand-mark"><Image src="/flight-lens-logo.svg" alt="" width={30} height={30} /></span><span>航探 <small>Flight Lens</small></span></div>
         <p>只负责搜索与解释，不售票、不代收款。最终价格与规则以来源平台支付页为准。</p>
-        <button onClick={(event) => openCoverage(event.currentTarget)}>来源与边界</button>
+        <GlassButton onClick={(event) => openCoverage(event.currentTarget)}>来源与边界</GlassButton>
       </footer>
 
       {result && activeView !== "search" && (
@@ -1865,7 +1750,7 @@ export default function Home() {
           className="shortlist-fab-root"
           panelClassName="shortlist-fab-panel"
           sceneClassName="status-glass-scene"
-          config={statusGlassConfig}
+          control
           changeKey={shortlist.length}
         >
           <button
@@ -1881,32 +1766,9 @@ export default function Home() {
         </LiquidGlassSurface>
       )}
 
-      {showShortlist && typeof document !== "undefined" && createPortal(
-        <div
-          ref={shortlistBackdropRef}
-          className="modal-backdrop liquid-overlay-backdrop"
-          role="presentation"
-          onMouseDown={() => setShowShortlist(false)}
-        >
-          <span ref={shortlistMorphRef} className="liquid-morph" aria-hidden="true" />
-          <section
-            ref={shortlistDialogRef}
-            className="modal shortlist-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="shortlist-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <LiquidGlassSurface
-              label="shortlist-workspace"
-              className="workspace-glass-fill"
-              panelClassName="workspace-glass-panel"
-              config={{ ...summaryGlassConfig, borderRadius: 20, backgroundOpacity: 0.1, blur: 9 }}
-              changeKey={shortlist.length}
-            >
-              <span aria-hidden="true" />
-            </LiquidGlassSurface>
-            <button className="modal-close" onClick={() => setShowShortlist(false)} aria-label="关闭心选"><X size={19} /></button>
+      <GlassDialog open={showShortlist} onClose={() => setShowShortlist(false)} triggerRef={shortlistTriggerRef}
+        className="modal shortlist-modal" labelledBy="shortlist-title">
+            <GlassButton className="modal-close" onClick={() => setShowShortlist(false)} aria-label="关闭心选"><X size={19} /></GlassButton>
             <div className="eyebrow"><ShoppingBasket size={14} /> 决策工作台</div>
             <h2 id="shortlist-title">心选方案</h2>
             <p>把价格、时间、机场与行李放在一起比较，最后再决定去哪个来源核验。</p>
@@ -1933,9 +1795,9 @@ export default function Home() {
                       <div className="shortlist-source"><b>{offer.seller.name}</b><span>{offerPriceLabel(offer)}</span></div>
                       <div className="shortlist-price"><strong>{money(offer)}</strong><span>{offer.purchaseMode === "split_ticket" ? "分开购买" : "单票"}</span></div>
                       <div className="shortlist-actions">
-                        {canInspect && <button onClick={() => { setShowShortlist(false); openQuoteDetail(offer); }}>详情</button>}
-                        {offer.seller.deepLink && <a href={offer.seller.deepLink} target="_blank" rel="noopener noreferrer">核验</a>}
-                        <button className="shortlist-remove" onClick={() => toggleShortlist(offer)} aria-label={`从心选移除 ${offer.segments[0]?.marketingCarrier ?? "航班"} ${offer.segments[0]?.flightNumber ?? "方案"}`}><Trash2 size={15} /></button>
+                        {canInspect && <GlassButton onClick={() => { setShowShortlist(false); openQuoteDetail(offer); }}>详情</GlassButton>}
+                        {offer.seller.deepLink && <GlassLink href={offer.seller.deepLink} target="_blank" rel="noopener noreferrer">核验</GlassLink>}
+                        <GlassButton className="shortlist-remove" onClick={() => toggleShortlist(offer)} aria-label={`从心选移除 ${offer.segments[0]?.marketingCarrier ?? "航班"} ${offer.segments[0]?.flightNumber ?? "方案"}`}><Trash2 size={15} /></GlassButton>
                       </div>
                     </article>
                   );
@@ -1944,38 +1806,11 @@ export default function Home() {
             ) : (
               <div className="shortlist-empty"><Heart size={24} /><b>还没有心选方案</b><span>在结果卡片中点“加入心选”，适合比较的航班会留在这里。</span></div>
             )}
-          </section>
-        </div>,
-        document.body,
-      )}
+      </GlassDialog>
 
-      {showCoverage && (
-        <div
-          ref={coverageBackdropRef}
-          className="modal-backdrop liquid-overlay-backdrop"
-          role="presentation"
-          onMouseDown={() => setShowCoverage(false)}
-        >
-          <span ref={coverageMorphRef} className="liquid-morph" aria-hidden="true" />
-          <section
-            ref={coverageDialogRef}
-            className="modal coverage-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="coverage-title"
-            aria-describedby="coverage-description"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <LiquidGlassSurface
-              label="coverage-workspace"
-              className="workspace-glass-fill"
-              panelClassName="workspace-glass-panel"
-              config={{ ...summaryGlassConfig, borderRadius: 20, backgroundOpacity: 0.1, blur: 9 }}
-              changeKey={result?.disclosure.successfulSources ?? 0}
-            >
-              <span aria-hidden="true" />
-            </LiquidGlassSurface>
-            <button className="modal-close" onClick={() => setShowCoverage(false)} aria-label="关闭"><ArrowLeft size={19} /></button>
+      <GlassDialog open={showCoverage} onClose={() => setShowCoverage(false)} triggerRef={coverageTriggerRef}
+        className="modal coverage-modal" labelledBy="coverage-title" describedBy="coverage-description">
+            <GlassButton className="modal-close" onClick={() => setShowCoverage(false)} aria-label="关闭来源"><X size={19} /></GlassButton>
             <div className="eyebrow"><Radar size={14} /> 来源覆盖中心</div>
             <h2 id="coverage-title">来源数量不等于可信度</h2>
             <p id="coverage-description">分别记录每个查询入口的返回、等待登录和失败状态。返回报价不代表已查全或已核验全价，同平台的接口与浏览器结果会合并比较。</p>
@@ -1987,9 +1822,9 @@ export default function Home() {
               <small> · 网页版本 {process.env.NEXT_PUBLIC_BUILD_REVISION}</small>
             </p>
             {result && companionConnection.state === "unavailable" && (
-              <button type="button" className="secondary-button" disabled={busy !== "idle"} onClick={() => void retryCompanion()}>
+              <GlassButton type="button" className="secondary-button" disabled={busy !== "idle"} onClick={() => void retryCompanion()}>
                 重新连接并查询浏览器来源
-              </button>
+              </GlassButton>
             )}
             {error && <p className="field-error" role="alert">{error}</p>}
             {result && (
@@ -2006,10 +1841,10 @@ export default function Home() {
                       <span><b>{report.connectorName}</b><small>{report.durationMs}ms · {report.offerCount} 个 Offer</small>{report.notes.map((note) => <small key={note}>{reportNote(note)}</small>)}{sourceServiceNotice(report) && <small>{sourceServiceNotice(report)}</small>}</span>
                       <strong className={`source-state state-${report.state}`}>{connectorStateLabel(report.state)}</strong>
                       {report.connectorId.endsWith("-edge-companion") && report.errorCode !== "QUNAR_COMPANION_WEB_SERVICE_ENDED" && !["pending", "searching", "unsupported_query"].includes(report.state) && (
-                        <button type="button" className="secondary-button" disabled={busy !== "idle"}
+                        <GlassButton type="button" className="secondary-button" disabled={busy !== "idle"}
                           onClick={() => void retryCompanion(report.connectorId.replace("-edge-companion", "") as CompanionPlatform)}>
                           {["login_required", "captcha_required"].includes(report.state) ? "已完成登录／验证，继续" : "重新查询此来源"}
-                        </button>
+                        </GlassButton>
                       )}
                     </li>
                   ))}
@@ -2028,13 +1863,11 @@ export default function Home() {
               label="coverage-primary-action"
               className="modal-primary-glass"
               panelClassName="modal-primary-glass-panel"
-              config={actionGlassConfig}
+              control
             >
               <button className="modal-primary-button" onClick={() => setShowCoverage(false)}>我知道了</button>
             </LiquidGlassSurface>
-          </section>
-        </div>
-      )}
+      </GlassDialog>
     </main>
   );
 }

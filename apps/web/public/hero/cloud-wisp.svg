@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400">
+  <defs>
+    <radialGradient id="soft">
+      <stop offset="0" stop-color="white" stop-opacity=".95"/>
+      <stop offset=".4" stop-color="white" stop-opacity=".7"/>
+      <stop offset="1" stop-color="white" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="vapour" x="-15%" y="-40%" width="130%" height="180%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency=".012 .025" numOctaves="4" seed="17" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="85" xChannelSelector="R" yChannelSelector="G" result="shape"/>
+      <feColorMatrix in="noise" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  2.6 0 0 0 -.75" result="density"/>
+      <feComposite in="shape" in2="density" operator="in"/>
+      <feGaussianBlur stdDeviation="2"/>
+    </filter>
+  </defs>
+  <g fill="url(#soft)" filter="url(#vapour)">
+    <ellipse cx="650" cy="210" rx="500" ry="80"/>
+    <ellipse cx="470" cy="185" rx="320" ry="125"/>
+    <ellipse cx="780" cy="165" rx="230" ry="100"/>
+    <ellipse cx="280" cy="230" rx="230" ry="60"/>
+  </g>
+</svg>

@@ -131,7 +131,6 @@ export type ApiConfig = {
     serpApiKey?: string;
     serpApiBaseUrl: string;
     serpApiMonthlyCreditCap: number;
-    amadeusBaseUrl?: string;
     duffelAccessToken?: string;
     duffelBaseUrl: string;
   };

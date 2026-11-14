@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import GlassSurface, { type GlassSurfaceConfig } from "./glass-surface";
+import { controlGlassConfig } from "./glass-control";
 
 type LiquidGlassSurfaceProps = {
   children: ReactNode;
@@ -11,6 +12,7 @@ type LiquidGlassSurfaceProps = {
   config?: Partial<GlassSurfaceConfig>;
   changeKey?: unknown;
   label: string;
+  control?: boolean;
 };
 
 const DEFAULT_CONFIG: GlassSurfaceConfig = {
@@ -41,6 +43,7 @@ export function LiquidGlassSurface({
   config,
   changeKey,
   label,
+  control = false,
 }: LiquidGlassSurfaceProps) {
   const [glassState, setGlassState] = useState<"pending" | "active" | "fallback">("pending");
 
@@ -57,7 +60,7 @@ export function LiquidGlassSurface({
 
   return (
     <div
-      className={`liquid-glass-root ${className}`.trim()}
+      className={`liquid-glass-root ${control ? "glass-control-surface" : ""} ${className}`.trim()}
       data-liquid-root={label}
       data-glass-engine="react-bits-svg"
       data-glass-state={glassState}
@@ -67,6 +70,7 @@ export function LiquidGlassSurface({
       <GlassSurface
         {...DEFAULT_CONFIG}
         {...config}
+        {...(control ? controlGlassConfig : {})}
         className="liquid-glass-panel"
       >
         <div className={`liquid-glass-slot ${panelClassName}`.trim()} data-change-key={String(changeKey ?? "")}>{children}</div>

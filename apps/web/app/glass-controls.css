@@ -1,0 +1,73 @@
+:root {
+  --control-glass-tint: linear-gradient(135deg, #ffffff6b, #ffffff08 44%, #88bfd84d 76%, #ffffff7a);
+  --control-glass-primary: linear-gradient(135deg, #f5fcffc4, #9cd2ec54 44%, #65abcf66 76%, #d4f1ffc9);
+  --control-glass-edge: #ffffffbd;
+  --control-glass-shadow: 0 2px 2px #ffffffc9 inset, 0 -2px 3px #6397b638 inset, 0 7px 20px #497b9424, 0 1px 3px #486b7c1f;
+}
+
+:where(.glass-button) { position: relative; border-radius: 24px; }
+.glass-button { isolation: isolate; touch-action: manipulation; }
+.glass-button.glass-button {
+  background: transparent; color: var(--ink); border-color: transparent;
+  backdrop-filter: none; box-shadow: none;
+}
+.glass-control-material { position: absolute; inset: 0; display: block; z-index: -1; border-radius: inherit; pointer-events: none; }
+.glass-control-tint, .glass-control-surface > .liquid-glass-scene {
+  position: absolute; inset: 0; border-radius: inherit;
+  background: var(--control-glass-tint);
+}
+.glass-control-material > .glass-control-lens,
+.glass-control-surface > .liquid-glass-panel {
+  border: 1px solid var(--control-glass-edge);
+  border-radius: inherit !important;
+  box-shadow: var(--control-glass-shadow) !important;
+}
+.glass-control-material > .glass-control-lens { position: absolute; inset: 0; }
+.glass-selection.glass-selection { background: transparent; border: 0; box-shadow: none; }
+.glass-selection > .glass-control-material { z-index: 0; }
+.glass-control-surface { border-radius: 30px; }
+.glass-control-surface.glass-control-surface .liquid-glass-slot > :is(button, a) {
+  border: 0; border-radius: inherit; color: var(--ink);
+  background: linear-gradient(165deg, #ffffff3d, transparent 48%, #ffffff21);
+  box-shadow: none; backdrop-filter: none;
+}
+.glass-control-surface:is(.hero-action-primary, .search-action-root, .account-primary-glass, .modal-primary-glass) > .liquid-glass-scene,
+.glass-selection .glass-control-tint,
+.glass-button:is(.selected, [aria-pressed="true"]) .glass-control-tint,
+.alert-form > .glass-button .glass-control-tint { background: var(--control-glass-primary); }
+.glass-button:is(.selected, [aria-pressed="true"]) { font-weight: 600; }
+.sort-tabs button.glass-button.selected, .trip-switch button.glass-button.selected,
+.history-range button.glass-button.selected { background: transparent; color: var(--ink); }
+.glass-button.danger-button { color: var(--danger); }
+.glass-button.danger-button .glass-control-tint { background: linear-gradient(135deg, #fff9f5e0, #ffe0d859); }
+.glass-button::after {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; border-radius: inherit;
+  background: #fff; opacity: 0; transition: opacity var(--motion-control) ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .glass-button:enabled:hover::after, a.glass-button:hover::after { opacity: .18; }
+  .glass-control-surface .liquid-glass-slot > :is(button:enabled, a):hover { background-color: #ffffff35; }
+}
+.glass-button:enabled:active::after, a.glass-button:active::after { opacity: .3; }
+.glass-button:focus-visible,
+.glass-control-surface .liquid-glass-slot > :is(button, a):focus-visible { outline: 2px solid var(--action-focus); outline-offset: -4px; }
+.glass-button:disabled::after { opacity: 0; }
+.glass-control-surface:has(button:disabled) { opacity: .5; }
+.glass-control-surface button:disabled { opacity: 1; }
+.glass-control-surface:has(button:disabled):is(:hover, :active) { transform: none; }
+.glass-control-surface .glass-surface--fallback,
+.glass-control-material .glass-surface--fallback { background: #e3f1f9e6; backdrop-filter: blur(12px) saturate(1.25); }
+.nav-switcher:has(button:focus-visible) .nav-selection,
+.mode-tabs:has(button:focus-visible) .mode-selection,
+.account-tabs:has(button:focus-visible) .account-tab-selection,
+.price-drawer-tabs:has(button:focus-visible) .price-tab-selection { transition: none; }
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .glass-control-material > .glass-control-lens, .glass-control-surface > .liquid-glass-panel {
+    background: var(--parchment); backdrop-filter: none; border-color: var(--action);
+  }
+}
+@media (forced-colors: active) {
+  .glass-control-material, .glass-control-surface > .liquid-glass-scene { display: none; }
+  .glass-button.glass-button, .glass-control-surface .liquid-glass-slot > :is(button, a) { border: 1px solid ButtonText; }
+  .glass-selection.glass-selection { border: 1px solid Highlight; }
+}
