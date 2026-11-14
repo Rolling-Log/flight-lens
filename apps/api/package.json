@@ -27,12 +27,12 @@
     "@flight-lens/contracts": "workspace:*",
     "@flight-lens/database": "workspace:*",
     "@flight-lens/domain": "workspace:*",
-    "better-auth": "1.6.27",
+    "better-auth": "1.7.7",
     "dotenv": "^17.2.3",
-    "fastify": "5.12.5",
+    "fastify": "5.12.6",
     "openai": "^6.7.0",
     "pg-boss": "^12.27.0",
-    "zod": "^4.1.12"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.3.14",
